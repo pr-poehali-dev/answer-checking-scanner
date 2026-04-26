@@ -4,6 +4,7 @@ import { BlankGenerator } from "./BlankGenerator";
 import { AnswerKeyPanel } from "./AnswerKeyPanel";
 import { ScanUploadZone } from "./ScanUploadZone";
 import { RecognitionResults } from "./RecognitionResults";
+import { BulkUpload } from "./BulkUpload";
 import { FlowStep, RecognitionResult } from "./upload-types";
 import { recognizeBlank } from "./ocrEngine";
 import { appStore, useAppStore } from "@/store/appStore";
@@ -208,6 +209,14 @@ export function UploadSection() {
       {step === "done" && result && (
         <RecognitionResults result={result} onReset={reset} />
       )}
+
+      <div className="flex items-center gap-3">
+        <div className="flex-1 h-px bg-border" />
+        <span className="text-xs text-muted-foreground uppercase tracking-wider">Массовая обработка</span>
+        <div className="flex-1 h-px bg-border" />
+      </div>
+
+      <BulkUpload />
 
       {step !== "done" && (
         <div className="grid grid-cols-3 gap-4">

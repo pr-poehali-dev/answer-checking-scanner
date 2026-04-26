@@ -1,6 +1,7 @@
 // API клиент для бэкенда АОУСПТ
 const AUTH_URL = "https://functions.poehali.dev/b08ae7cf-6c0b-4178-acc9-4b62b2c2a61b";
 const BLANK_URL = "https://functions.poehali.dev/5b4fc8cd-8022-458e-acb6-8606c6c8a4f3";
+const RECOGNIZE_URL = "https://functions.poehali.dev/de6ae337-82d7-4cc2-ae90-3cf97475be59";
 
 export interface AuthUser {
   role: "admin" | "teacher";
@@ -103,5 +104,55 @@ export const blankApi = {
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+  },
+};
+
+export interface RecognizeResponse {
+  studentCode: string;
+  codeConfidence: number[];
+  answers: string[];
+  answersConfidence: number[];
+  averageConfidence: number;
+  questionsCount: number;
+  analysis: {
+    total: number;
+    correct: number;
+    wrong: number;
+    percent: number;
+    details: { q: number; student: string; key: string; correct: boolean }[];
+  };
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const r = reader.result as string;
+      // убираем "data:image/...;base64,"
+      const idx = r.indexOf(",");
+      resolve(idx >= 0 ? r.slice(idx + 1) : r);
+    };
+    reader.onerror = () => reject(new Error("Не удалось прочитать файл"));
+    reader.readAsDataURL(file);
+  });
+}
+
+export const recognizeApi = {
+  recognize: async (file: File, params: { questionsCount?: number; answerKey?: string }) => {
+    const image = await fileToBase64(file);
+    const res = await fetch(RECOGNIZE_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        image,
+        questionsCount: params.questionsCount ?? 40,
+        answerKey: params.answerKey ?? "",
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || `Ошибка распознавания (${res.status})`);
+    }
+    return data as RecognizeResponse;
   },
 };

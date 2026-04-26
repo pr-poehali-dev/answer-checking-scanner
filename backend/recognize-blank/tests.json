@@ -14,16 +14,26 @@
       "expectedStatus": 400
     },
     {
-      "name": "Recognize blank with image and answer key",
+      "name": "Invalid base64 returns 400",
+      "method": "POST",
+      "path": "/",
+      "body": { "image": "not-a-base64-!!!" },
+      "expectedStatus": 400
+    },
+    {
+      "name": "Tiny image without anchors returns 422",
       "method": "POST",
       "path": "/",
       "body": {
-        "image": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
-        "answer_key": "ВАБГД12345АВВБГД678ГДААБ910111213",
-        "part1_count": 26,
-        "part2_count": 7
+        "image": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
       },
-      "expectedStatus": 200
+      "expectedStatus": 422
+    },
+    {
+      "name": "Wrong method returns 405",
+      "method": "GET",
+      "path": "/",
+      "expectedStatus": 405
     }
   ]
 }

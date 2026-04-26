@@ -97,7 +97,10 @@ export function ScanUploadZone({ file, previewUrl, step, error, result, dragOver
                         style={{ width: `${ocrProgress}%` }}
                       />
                     </div>
-                    <p className="text-xs text-muted-foreground">Это может занять 15–30 секунд</p>
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs text-muted-foreground">Распознавание каждой клетки по отдельности</p>
+                      <span className="text-xs font-bold mono text-primary">{ocrProgress}%</span>
+                    </div>
                   </div>
                 )}
 

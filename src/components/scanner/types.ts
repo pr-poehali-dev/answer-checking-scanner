@@ -5,15 +5,19 @@ export type Section =
   | "results"
   | "analytics"
   | "export"
+  | "students"
+  | "works"
   | "settings";
 
 export const NAV_ITEMS: { id: Section; label: string; icon: string }[] = [
+  { id: "works", label: "Работы", icon: "ClipboardList" },
   { id: "upload", label: "Загрузка бланков", icon: "Upload" },
   { id: "recognition", label: "Распознавание", icon: "ScanLine" },
   { id: "checking", label: "Проверка ответов", icon: "CheckSquare" },
-  { id: "results", label: "Результаты", icon: "Users" },
-  { id: "analytics", label: "Статистика", icon: "BarChart2" },
-  { id: "export", label: "Экспорт отчётов", icon: "FileDown" },
+  { id: "results", label: "Результаты", icon: "BarChart2" },
+  { id: "analytics", label: "Статистика", icon: "TrendingUp" },
+  { id: "export", label: "Экспорт", icon: "FileDown" },
+  { id: "students", label: "Ученики", icon: "Users" },
   { id: "settings", label: "Настройки", icon: "Settings" },
 ];
 
@@ -32,8 +36,18 @@ export const SECTION_TITLES: Record<Section, string> = {
   upload: "Загрузка и сканирование бланков",
   recognition: "Распознавание ответов",
   checking: "Проверка и сравнение ответов",
-  results: "Результаты и список учеников",
+  results: "Результаты",
   analytics: "Статистика и аналитика",
   export: "Экспорт отчётов",
-  settings: "Настройки тестов",
+  students: "Список учеников",
+  works: "Работы",
+  settings: "Настройки",
 };
+
+export const WORK_TYPES = ["Проверочная работа", "Контрольная работа"] as const;
+
+export const SUBJECTS = [
+  "Русский язык", "Математика", "Алгебра", "Геометрия", "История",
+  "Обществознание", "Биология", "Физика", "Химия", "Информатика",
+  "Литература", "География", "Иностранный язык", "Физкультура", "Музыка",
+] as const;

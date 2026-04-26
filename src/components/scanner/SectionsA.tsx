@@ -6,19 +6,34 @@ import { ScanUploadZone } from "./ScanUploadZone";
 import { RecognitionResults } from "./RecognitionResults";
 import { FlowStep, RecognitionResult } from "./upload-types";
 import { recognizeBlank } from "./ocrEngine";
+import { appStore, useAppStore } from "@/store/appStore";
 
 export function UploadSection() {
+  const { works, students } = useAppStore();
   const [step, setStep] = useState<FlowStep>("idle");
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [answerKey, setAnswerKey] = useState("ВАБГД12345АВВБГД678ГДААБ910111213");
-  const [part1Count, setPart1Count] = useState(26);
-  const [part2Count, setPart2Count] = useState(7);
+  const [selectedWorkId, setSelectedWorkId] = useState<string>("");
+  const [answerKey, setAnswerKey] = useState("");
+  const [part1Count, setPart1Count] = useState(20);
+  const [part2Count, setPart2Count] = useState(0);
   const [result, setResult] = useState<RecognitionResult | null>(null);
+  const [savedStudent, setSavedStudent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [ocrStatus, setOcrStatus] = useState("");
   const [ocrProgress, setOcrProgress] = useState(0);
+
+  // При выборе работы — автоматически подставляем ключ и параметры
+  const handleSelectWork = (workId: string) => {
+    setSelectedWorkId(workId);
+    const work = works.find(w => w.id === workId);
+    if (work) {
+      setAnswerKey(work.answerKey);
+      setPart1Count(work.part1Count);
+      setPart2Count(work.part2Count);
+    }
+  };
 
   const handleFile = useCallback((f: File) => {
     setFile(f);
@@ -33,6 +48,7 @@ export function UploadSection() {
     if (!file) return;
     setStep("recognizing");
     setError(null);
+    setSavedStudent(null);
     setOcrProgress(0);
     setOcrStatus("");
     try {
@@ -48,6 +64,37 @@ export function UploadSection() {
       );
       setResult(data);
       setStep("done");
+
+      // Сохраняем результат в store если выбрана работа
+      if (selectedWorkId) {
+        const work = works.find(w => w.id === selectedWorkId);
+        const student = students.find(s => s.code === data.student_code);
+
+        // Вычисляем оценку по шкале работы
+        let grade = "1";
+        if (work) {
+          const sc = data.analysis.correct;
+          const gs = work.gradeScale;
+          if (sc >= gs.grade5) grade = "5";
+          else if (sc >= gs.grade4) grade = "4";
+          else if (sc >= gs.grade3) grade = "3";
+          else if (sc >= gs.grade2) grade = "2";
+          else grade = "1";
+        }
+
+        appStore.addResult({
+          workId: selectedWorkId,
+          studentCode: data.student_code,
+          answers: data.all_answers,
+          correctCount: data.analysis.correct,
+          totalCount: data.analysis.total,
+          score: data.analysis.correct,
+          grade,
+          scannedAt: new Date().toISOString(),
+        });
+
+        setSavedStudent(student?.name ?? `Код: ${data.student_code}`);
+      }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Неизвестная ошибка");
       setStep("error");
@@ -60,6 +107,7 @@ export function UploadSection() {
     setPreviewUrl(null);
     setResult(null);
     setError(null);
+    setSavedStudent(null);
   };
 
   return (
@@ -71,6 +119,58 @@ export function UploadSection() {
         <div className="flex-1 h-px bg-border" />
         <span className="text-xs text-muted-foreground uppercase tracking-wider">Загрузка заполненного бланка</span>
         <div className="flex-1 h-px bg-border" />
+      </div>
+
+      {/* Выбор работы */}
+      <div className="border border-border rounded-sm bg-white">
+        <div className="px-5 py-3 border-b border-border bg-muted flex items-center gap-2">
+          <Icon name="ClipboardList" size={15} className="text-primary" />
+          <p className="text-sm font-semibold">Привязать к работе</p>
+        </div>
+        <div className="p-5">
+          {works.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Сначала создайте работу в разделе «Работы»</p>
+          ) : (
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Выберите работу</label>
+                <select value={selectedWorkId} onChange={e => handleSelectWork(e.target.value)}
+                  className="w-full border border-border rounded-sm px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring">
+                  <option value="">— без привязки —</option>
+                  {works.map(w => (
+                    <option key={w.id} value={w.id}>
+                      №{w.id} · {w.type}: {w.subject} · {w.classNum}{w.classLetter}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {selectedWorkId && (
+                <div className="flex items-end">
+                  <div className="text-xs text-muted-foreground space-y-0.5">
+                    {(() => {
+                      const w = works.find(wk => wk.id === selectedWorkId);
+                      return w ? (
+                        <>
+                          <p>Заданий: <span className="font-semibold text-foreground">{w.totalQuestions}</span></p>
+                          <p>Ключ: <span className="mono font-semibold text-foreground">{w.answerKey ? `${w.answerKey.slice(0,12)}...` : "не задан"}</span></p>
+                          <p className="text-green-600 font-medium">Результат сохранится в работу автоматически</p>
+                        </>
+                      ) : null;
+                    })()}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          {savedStudent && (
+            <div className="mt-3 flex items-center gap-2 p-2 rounded-sm" style={{ background: "hsl(142 71% 45% / 0.08)", border: "1px solid hsl(142 71% 45% / 0.3)" }}>
+              <Icon name="CheckCircle" size={14} style={{ color: "#22c55e" }} />
+              <p className="text-xs font-medium" style={{ color: "#16a34a" }}>
+                Результат сохранён: {savedStudent}
+              </p>
+            </div>
+          )}
+        </div>
       </div>
 
       <AnswerKeyPanel

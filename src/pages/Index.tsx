@@ -3,6 +3,10 @@ import Icon from "@/components/ui/icon";
 import { Section, NAV_ITEMS, SECTION_TITLES } from "@/components/scanner/types";
 import { UploadSection, RecognitionSection, CheckingSection } from "@/components/scanner/SectionsA";
 import { ResultsSection, AnalyticsSection, ExportSection, SettingsSection } from "@/components/scanner/SectionsB";
+import { StudentsSection } from "@/components/scanner/StudentsSection";
+import { WorksSection } from "@/components/scanner/WorksSection";
+import LoginPage from "@/pages/LoginPage";
+import { useAppStore, appStore } from "@/store/appStore";
 
 const SECTION_COMPONENTS: Record<Section, React.FC> = {
   upload: UploadSection,
@@ -11,30 +15,46 @@ const SECTION_COMPONENTS: Record<Section, React.FC> = {
   results: ResultsSection,
   analytics: AnalyticsSection,
   export: ExportSection,
+  students: StudentsSection,
+  works: WorksSection,
   settings: SettingsSection,
 };
 
 export default function Index() {
-  const [active, setActive] = useState<Section>("upload");
+  const [active, setActive] = useState<Section>("works");
+  const { teacher, yadiskConnected } = useAppStore();
   const ActiveSection = SECTION_COMPONENTS[active];
+
+  if (!teacher) {
+    return <LoginPage onLogin={() => setActive("works")} />;
+  }
+
+  const initials = teacher.name
+    .split(" ")
+    .slice(0, 2)
+    .map(w => w[0])
+    .join("")
+    .toUpperCase();
 
   return (
     <div className="flex h-screen bg-background overflow-hidden">
       <aside className="w-60 flex flex-col flex-shrink-0" style={{ background: "hsl(var(--sidebar-background))" }}>
+        {/* Logo */}
         <div className="px-5 py-5 border-b" style={{ borderColor: "hsl(var(--sidebar-border))" }}>
           <div className="flex items-center gap-2.5 mb-1">
             <div className="w-7 h-7 rounded-sm flex items-center justify-center" style={{ background: "hsl(var(--sidebar-primary))" }}>
               <Icon name="ScanLine" size={15} className="text-white" />
             </div>
             <span className="font-bold text-sm" style={{ color: "hsl(var(--sidebar-accent-foreground))" }}>
-              ЕГЭ Сканер
+              АОУСПТ
             </span>
           </div>
           <p className="text-xs" style={{ color: "hsl(var(--sidebar-foreground))", opacity: 0.55 }}>
-            Система проверки тестов
+            Система проверки работ
           </p>
         </div>
 
+        {/* Nav */}
         <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
           <p className="section-header px-3 mb-3" style={{ color: "hsl(var(--sidebar-foreground))", opacity: 0.45 }}>
             Разделы
@@ -51,18 +71,39 @@ export default function Index() {
           ))}
         </nav>
 
+        {/* Яндекс Диск статус */}
+        <div className="px-3 py-2 mx-3 mb-2 rounded-sm border"
+          style={{ borderColor: yadiskConnected ? "hsl(142 71% 45% / 0.3)" : "hsl(var(--sidebar-border))", background: yadiskConnected ? "hsl(142 71% 45% / 0.06)" : "transparent" }}>
+          <div className="flex items-center gap-2 px-1">
+            <Icon name={yadiskConnected ? "CloudCheck" : "CloudOff"} size={13}
+              style={{ color: yadiskConnected ? "#22c55e" : "hsl(var(--sidebar-foreground))" }}
+              fallback="Cloud" />
+            <span className="text-xs" style={{ color: yadiskConnected ? "#16a34a" : "hsl(var(--sidebar-foreground))", opacity: yadiskConnected ? 1 : 0.5 }}>
+              {yadiskConnected ? "Яндекс Диск подключён" : "Яндекс Диск"}
+            </span>
+          </div>
+        </div>
+
+        {/* User */}
         <div className="px-3 py-4 border-t" style={{ borderColor: "hsl(var(--sidebar-border))" }}>
-          <div className="flex items-center gap-2.5 px-3">
+          <div className="flex items-center gap-2.5 px-2">
             <div
-              className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold"
+              className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
               style={{ background: "hsl(var(--sidebar-primary) / 0.25)", color: "hsl(var(--sidebar-primary))" }}
             >
-              АИ
+              {initials}
             </div>
-            <div>
-              <p className="text-xs font-medium" style={{ color: "hsl(var(--sidebar-accent-foreground))" }}>Администратор</p>
-              <p className="text-[10px]" style={{ color: "hsl(var(--sidebar-foreground))", opacity: 0.5 }}>Школа №47</p>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-medium truncate" style={{ color: "hsl(var(--sidebar-accent-foreground))" }}>{teacher.name}</p>
+              <p className="text-[10px] truncate" style={{ color: "hsl(var(--sidebar-foreground))", opacity: 0.5 }}>{teacher.school}</p>
             </div>
+            <button
+              onClick={() => appStore.logout()}
+              className="p-1 text-muted-foreground hover:text-destructive transition-colors flex-shrink-0"
+              title="Выйти"
+            >
+              <Icon name="LogOut" size={13} />
+            </button>
           </div>
         </div>
       </aside>
@@ -71,16 +112,15 @@ export default function Index() {
         <header className="flex items-center justify-between px-6 py-4 bg-white border-b border-border flex-shrink-0">
           <div>
             <h1 className="text-base font-bold leading-none mb-0.5">{SECTION_TITLES[active]}</h1>
-            <p className="text-xs text-muted-foreground">Апрель 2026 · ЕГЭ Русский язык · 11А класс</p>
+            <p className="text-xs text-muted-foreground">АОУСПТ · {new Date().toLocaleDateString("ru-RU", { month: "long", year: "numeric" })}</p>
           </div>
           <div className="flex items-center gap-2">
-            <button className="inline-flex items-center gap-2 px-3 py-2 border border-border text-xs font-medium rounded-sm hover:bg-muted transition-colors">
-              <Icon name="RefreshCw" size={13} />
-              Обновить
-            </button>
-            <button className="inline-flex items-center gap-2 px-3 py-2 bg-primary text-primary-foreground text-xs font-semibold rounded-sm hover:opacity-90 transition-opacity">
+            <button
+              onClick={() => setActive("upload")}
+              className="inline-flex items-center gap-2 px-3 py-2 bg-primary text-primary-foreground text-xs font-semibold rounded-sm hover:opacity-90 transition-opacity"
+            >
               <Icon name="Plus" size={13} />
-              Новая сессия
+              Новая проверка
             </button>
           </div>
         </header>

@@ -1,172 +1,94 @@
-import { createWorker, PSM } from "tesseract.js";
+import { createWorker } from "tesseract.js";
 import { AnalysisDetail, RecognitionResult } from "./upload-types";
 
 export type OcrProgressCallback = (status: string, progress: number) => void;
 
-const VALID_CHARS = /[А-ЯЁа-яё0-9]/;
+// PSM константы напрямую (без импорта enum — надёжнее)
+const PSM_SINGLE_CHAR = "10";
+const PSM_SINGLE_LINE = "7";
+const PSM_SINGLE_BLOCK = "6";
 
-// ─── Предобработка изображения ───────────────────────────────────────────────
-
-/**
- * Загружает файл в ImageBitmap
- */
-async function loadImage(file: File): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
-    img.onerror = reject;
-    img.src = url;
-  });
-}
-
-/**
- * Рисует изображение на canvas с улучшением контраста для OCR.
- * Возвращает canvas и масштаб.
- */
-function prepareCanvas(img: HTMLImageElement, scale = 3): HTMLCanvasElement {
-  const canvas = document.createElement("canvas");
-  canvas.width = img.naturalWidth * scale;
-  canvas.height = img.naturalHeight * scale;
-  const ctx = canvas.getContext("2d")!;
-
-  // Масштабируем
-  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-  // Повышаем контраст: grayscale + threshold
-  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const data = imageData.data;
-  for (let i = 0; i < data.length; i += 4) {
-    // Grayscale
-    const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-    // Порог — всё тёмнее 140 → чёрное, светлее → белое
-    const val = gray < 140 ? 0 : 255;
-    data[i] = data[i + 1] = data[i + 2] = val;
-    data[i + 3] = 255;
-  }
-  ctx.putImageData(imageData, 0, 0);
-  return canvas;
-}
-
-/**
- * Вырезает регион из canvas в отдельный canvas (для распознавания одной клетки)
- */
-function cropCanvas(src: HTMLCanvasElement, x: number, y: number, w: number, h: number): HTMLCanvasElement {
-  const dst = document.createElement("canvas");
-  dst.width = w;
-  dst.height = h;
-  const ctx = dst.getContext("2d")!;
-  ctx.fillStyle = "#fff";
-  ctx.fillRect(0, 0, w, h);
-  ctx.drawImage(src, x, y, w, h, 0, 0, w, h);
-  return dst;
-}
-
-/**
- * Конвертирует canvas в Blob
- */
-function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    canvas.toBlob(b => b ? resolve(b) : reject(new Error("canvas toBlob failed")), "image/png");
-  });
-}
-
-// ─── Нормализация OCR символов ────────────────────────────────────────────────
-
-/**
- * Карта замен похожих символов (латинские → кириллические и т.д.)
- */
-const CHAR_MAP: Record<string, string> = {
-  // Латинские буквы → кириллица
+// ─── Замены похожих символов ──────────────────────────────────────────────────
+const LATIN_TO_CYR: Record<string, string> = {
   "A": "А", "B": "В", "C": "С", "E": "Е", "H": "Н",
   "I": "И", "K": "К", "M": "М", "O": "О", "P": "Р",
-  "T": "Т", "X": "Х", "Y": "У",
+  "T": "Т", "X": "Х", "Y": "У", "Z": "З",
   "a": "А", "b": "В", "c": "С", "e": "Е", "o": "О",
-  "p": "Р", "x": "Х", "y": "У",
-  // Цифры-буквы
-  "0": "О", // иногда O распознаётся как 0 — оставим как есть
-  // Частые ошибки
-  "З": "З", "з": "З",
+  "p": "Р", "x": "Х", "y": "У", "z": "З", "k": "К",
 };
 
 function normalizeChar(raw: string): string {
-  const c = raw.trim().toUpperCase();
-  if (!c) return "";
-  // Проверяем кириллицу и цифры напрямую
-  if (/[А-ЯЁ]/.test(c)) return c;
-  if (/[0-9]/.test(c)) return c;
-  // Пытаемся заменить
-  const mapped = CHAR_MAP[raw.trim()];
-  if (mapped) return mapped;
-  // Ещё одна попытка — взять первый валидный символ из строки
-  for (const ch of c) {
-    if (/[А-ЯЁ0-9]/.test(ch)) return ch;
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+  for (const ch of trimmed) {
+    const up = ch.toUpperCase();
+    if (/[А-ЯЁ]/.test(up)) return up;
+    if (/[0-9]/.test(ch)) return ch;
+    const mapped = LATIN_TO_CYR[ch];
+    if (mapped) return mapped;
   }
   return "";
 }
 
-function cleanOcrText(raw: string): string {
-  return raw.toUpperCase().split("").filter(c => VALID_CHARS.test(c)).join("");
-}
-
-function extractStudentCode(text: string): string {
-  // Ищем 5 цифр подряд
-  const match = text.match(/\d{5}/);
-  if (match) return match[0];
-  const digits = text.replace(/\D/g, "");
-  return digits.length >= 5 ? digits.slice(0, 5) : digits.padEnd(5, "0");
-}
-
-// ─── Детекция области клеток по структуре бланка ────────────────────────────
-
-/**
- * Ищет строки с тёмными пикселями — помогает найти зоны с клетками
- */
-function findDarkRows(canvas: HTMLCanvasElement, threshold = 80, minDark = 5): number[] {
-  const ctx = canvas.getContext("2d")!;
-  const { width, height } = canvas;
-  const data = ctx.getImageData(0, 0, width, height).data;
-  const rows: number[] = [];
-  for (let y = 0; y < height; y++) {
-    let darkCount = 0;
-    for (let x = 0; x < width; x++) {
-      const idx = (y * width + x) * 4;
-      if (data[idx] < threshold) darkCount++;
-    }
-    if (darkCount >= minDark) rows.push(y);
+function cleanText(raw: string): string {
+  let result = "";
+  for (const ch of raw) {
+    const up = ch.toUpperCase();
+    if (/[А-ЯЁ]/.test(up)) { result += up; continue; }
+    if (/[0-9]/.test(ch)) { result += ch; continue; }
+    const mapped = LATIN_TO_CYR[ch];
+    if (mapped) result += mapped;
   }
-  return rows;
+  return result;
 }
 
-/**
- * Группирует соседние числа в диапазоны [start, end]
- */
-function groupRanges(nums: number[], gap = 5): [number, number][] {
-  if (!nums.length) return [];
-  const ranges: [number, number][] = [];
-  let start = nums[0], prev = nums[0];
-  for (let i = 1; i < nums.length; i++) {
-    if (nums[i] - prev > gap) {
-      ranges.push([start, prev]);
-      start = nums[i];
-    }
-    prev = nums[i];
-  }
-  ranges.push([start, prev]);
-  return ranges;
+// ─── Подготовка изображения ───────────────────────────────────────────────────
+
+async function fileToCanvas(file: File, scale = 2): Promise<HTMLCanvasElement> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const canvas = document.createElement("canvas");
+      canvas.width = img.naturalWidth * scale;
+      canvas.height = img.naturalHeight * scale;
+      const ctx = canvas.getContext("2d")!;
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      // Бинаризация — повышаем контраст
+      const id = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const d = id.data;
+      for (let i = 0; i < d.length; i += 4) {
+        const gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+        const v = gray < 150 ? 0 : 255;
+        d[i] = d[i + 1] = d[i + 2] = v;
+        d[i + 3] = 255;
+      }
+      ctx.putImageData(id, 0, 0);
+      resolve(canvas);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Не удалось загрузить изображение"));
+    };
+    img.src = url;
+  });
 }
 
-// ─── OCR одного региона ───────────────────────────────────────────────────────
-
-async function recognizeChar(
-  worker: Awaited<ReturnType<typeof createWorker>>,
-  canvas: HTMLCanvasElement
-): Promise<string> {
-  const blob = await canvasToBlob(canvas);
-  const file = new File([blob], "cell.png", { type: "image/png" });
-  const { data } = await worker.recognize(file);
-  const text = (data.text ?? "").trim();
-  return normalizeChar(text);
+function cropToCanvas(
+  src: HTMLCanvasElement,
+  x: number, y: number,
+  w: number, h: number,
+  padding = 4
+): HTMLCanvasElement {
+  const dst = document.createElement("canvas");
+  dst.width = Math.max(w + padding * 2, 32);
+  dst.height = Math.max(h + padding * 2, 32);
+  const ctx = dst.getContext("2d")!;
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, dst.width, dst.height);
+  ctx.drawImage(src, x, y, w, h, padding, padding, w, h);
+  return dst;
 }
 
 // ─── Основная функция ─────────────────────────────────────────────────────────
@@ -180,125 +102,124 @@ export async function recognizeBlank(
 ): Promise<RecognitionResult> {
   const totalQuestions = part1Count + part2Count;
 
-  onProgress?.("Загружаю изображение...", 5);
-  const img = await loadImage(file);
+  onProgress?.("Загружаю и улучшаю изображение...", 5);
 
-  onProgress?.("Улучшаю качество изображения...", 10);
-  const canvas = prepareCanvas(img, 3);
+  let canvas: HTMLCanvasElement;
+  try {
+    canvas = await fileToCanvas(file, 2);
+  } catch (err) {
+    throw new Error("Не удалось загрузить изображение. Используйте JPG или PNG.");
+  }
+
   const W = canvas.width;
   const H = canvas.height;
 
-  onProgress?.("Запускаю движок распознавания...", 15);
+  onProgress?.("Запускаю OCR (русский язык)...", 12);
 
-  // Два воркера: один для одиночных символов (PSM.SINGLE_CHAR), один для строк
-  const workerChar = await createWorker("rus", 1, {
-    logger: (m: { status: string; progress: number }) => {
-      if (m.status === "recognizing text") {
-        onProgress?.(`Распознаю символы... ${Math.round(m.progress * 100)}%`, Math.round(20 + m.progress * 50));
-      }
-    },
+  const worker = await createWorker("rus", 1, {
+    logger: () => {},
   });
 
   try {
-    // PSM.SINGLE_CHAR — лучший режим для одиночных букв в клетках
-    await workerChar.setParameters({
-      tessedit_pageseg_mode: PSM.SINGLE_CHAR,
-      tessedit_char_whitelist: "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдеёжзийклмнопрстуфхцчшщъыьэюя0123456789",
+    await worker.setParameters({
+      tessedit_char_whitelist:
+        "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдеёжзийклмнопрстуфхцчшщъыьэюя" +
+        "0123456789" +
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
     });
 
-    onProgress?.("Ищу область с ответами...", 25);
+    // ─── Код ученика ──────────────────────────────────────────────────────────
+    onProgress?.("Распознаю код ученика...", 18);
 
-    // ─── Стратегия: делим бланк на зоны ──────────────────────────────────────
-    // Верхняя ~15% — код ученика (5 цифр)
-    // Средняя часть — часть 1 (клетки)
-    // Нижняя часть — часть 2 (строки)
+    let studentCode = "00000";
+    try {
+      const codeZone = cropToCanvas(canvas, 0, 0, W, Math.round(H * 0.20), 8);
+      await worker.setParameters({ tessedit_pageseg_mode: PSM_SINGLE_BLOCK });
+      const { data: codeData } = await worker.recognize(codeZone);
+      const codeClean = cleanText(codeData.text ?? "");
+      const codeMatch = codeClean.match(/\d{5}/);
+      if (codeMatch) {
+        studentCode = codeMatch[0];
+      } else {
+        const digits = codeClean.replace(/\D/g, "");
+        studentCode = digits.slice(0, 5).padEnd(5, "0");
+      }
+    } catch {
+      studentCode = "00000";
+    }
 
-    const codeZoneH = Math.round(H * 0.18);
-    const answersStartY = Math.round(H * 0.35);
-    const part1EndY = part2Count > 0 ? Math.round(H * 0.70) : Math.round(H * 0.85);
+    // ─── Часть 1 — клетки ────────────────────────────────────────────────────
+    onProgress?.("Распознаю ответы части 1...", 25);
 
-    // ─── Код ученика ─────────────────────────────────────────────────────────
-    onProgress?.("Распознаю код ученика...", 30);
+    const p1StartY = Math.round(H * 0.30);
+    const p1EndY = part2Count > 0 ? Math.round(H * 0.65) : Math.round(H * 0.82);
+    const p1H = p1EndY - p1StartY;
 
-    const codeCanvas = cropCanvas(canvas, Math.round(W * 0.2), Math.round(H * 0.08), Math.round(W * 0.6), codeZoneH);
-    const codeBlob = await canvasToBlob(codeCanvas);
-    const codeFile = new File([codeBlob], "code.png", { type: "image/png" });
+    const cols = part1Count <= 8 ? part1Count
+      : part1Count <= 16 ? 8
+      : part1Count <= 20 ? 10
+      : 13;
+    const rows = Math.ceil(part1Count / cols);
+    const cellW = Math.round(W / cols);
+    const cellH = Math.round(p1H / rows);
 
-    // Для кода используем PSM.SINGLE_LINE
-    await workerChar.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_LINE });
-    const { data: codeData } = await workerChar.recognize(codeFile);
-    const codeRaw = cleanOcrText(codeData.text ?? "");
-    const studentCode = extractStudentCode(codeRaw);
-
-    onProgress?.("Распознаю ответы части 1...", 40);
-
-    // ─── Часть 1: клетки с ответами ──────────────────────────────────────────
-    // Подбираем ширину клетки исходя из количества заданий в строке
-    const cols = part1Count <= 10 ? part1Count : part1Count <= 20 ? 10 : part1Count <= 26 ? 13 : 8;
-    const rows1 = Math.ceil(part1Count / cols);
-
-    const cellAreaW = W;
-    const cellAreaH = part1EndY - answersStartY;
-    const cellW = Math.round(cellAreaW / cols);
-    const cellH = Math.round(cellAreaH / rows1);
-    // Отступ внутри клетки — берём центральные 60% чтобы не захватывать рамку
-    const padX = Math.round(cellW * 0.3);
-    const padY = Math.round(cellH * 0.2);
-
-    await workerChar.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_CHAR });
+    await worker.setParameters({ tessedit_pageseg_mode: PSM_SINGLE_CHAR });
 
     const answers_part1: string[] = [];
     for (let i = 0; i < part1Count; i++) {
       const col = i % cols;
       const row = Math.floor(i / cols);
-      const cx = col * cellW + padX;
-      const cy = answersStartY + row * cellH + padY;
-      const cw = cellW - padX * 2;
-      const ch = cellH - padY * 2;
 
-      if (cw > 0 && ch > 0) {
-        const cell = cropCanvas(canvas, cx, cy, cw, ch);
-        const char = await recognizeChar(workerChar, cell);
-        answers_part1.push(char);
-      } else {
-        answers_part1.push("");
+      const cx = col * cellW + Math.round(cellW * 0.25);
+      const cy = p1StartY + row * cellH + Math.round(cellH * 0.20);
+      const cw = Math.max(Math.round(cellW * 0.50), 10);
+      const ch = Math.max(Math.round(cellH * 0.60), 10);
+
+      let charResult = "";
+      try {
+        const cell = cropToCanvas(canvas, cx, cy, cw, ch, 6);
+        const { data } = await worker.recognize(cell);
+        charResult = normalizeChar(data.text ?? "");
+      } catch {
+        charResult = "";
       }
+      answers_part1.push(charResult);
 
-      if (i % 5 === 0) {
-        onProgress?.(`Распознаю часть 1: задание ${i + 1}/${part1Count}`, Math.round(40 + (i / part1Count) * 35));
+      if (i % 4 === 0) {
+        onProgress?.(
+          `Часть 1: задание ${i + 1} из ${part1Count}`,
+          Math.round(25 + (i / part1Count) * 50)
+        );
       }
     }
 
+    // ─── Часть 2 — строки ────────────────────────────────────────────────────
     onProgress?.("Распознаю ответы части 2...", 78);
 
-    // ─── Часть 2: строки ─────────────────────────────────────────────────────
     const answers_part2: string[] = [];
     if (part2Count > 0) {
-      await workerChar.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_LINE });
-      const part2AreaY = part1EndY + Math.round(H * 0.03);
-      const part2AreaH = H - part2AreaY - Math.round(H * 0.05);
-      const lineH = Math.round(part2AreaH / part2Count);
+      await worker.setParameters({ tessedit_pageseg_mode: PSM_SINGLE_LINE });
+
+      const p2StartY = Math.round(H * 0.67);
+      const p2EndY = Math.round(H * 0.88);
+      const lineH = Math.round((p2EndY - p2StartY) / part2Count);
 
       for (let i = 0; i < part2Count; i++) {
-        const ly = part2AreaY + i * lineH + Math.round(lineH * 0.1);
-        const lh = Math.round(lineH * 0.8);
-        const lx = Math.round(W * 0.05);
-        const lw = Math.round(W * 0.9);
-
-        if (lh > 0) {
-          const lineCanvas = cropCanvas(canvas, lx, ly, lw, lh);
-          const blob = await canvasToBlob(lineCanvas);
-          const lineFile = new File([blob], `line${i}.png`, { type: "image/png" });
-          const { data: lineData } = await workerChar.recognize(lineFile);
-          const cleaned = cleanOcrText(lineData.text ?? "");
-          answers_part2.push(cleaned || "");
-        } else {
+        try {
+          const ly = p2StartY + i * lineH + Math.round(lineH * 0.15);
+          const lh = Math.max(Math.round(lineH * 0.70), 10);
+          const lx = Math.round(W * 0.04);
+          const lw = Math.round(W * 0.92);
+          const lineCanvas = cropToCanvas(canvas, lx, ly, lw, lh, 4);
+          const { data } = await worker.recognize(lineCanvas);
+          answers_part2.push(cleanText(data.text ?? ""));
+        } catch {
           answers_part2.push("");
         }
       }
     }
 
-    onProgress?.("Анализирую результаты...", 92);
+    onProgress?.("Анализирую результаты...", 93);
 
     const allAnswers = [...answers_part1, ...answers_part2];
     const analysis = analyzeAnswers(allAnswers, answerKey, part1Count);
@@ -315,18 +236,19 @@ export async function recognizeBlank(
     };
 
   } finally {
-    await workerChar.terminate();
+    try { await worker.terminate(); } catch { /* игнорируем */ }
   }
 }
 
-// ─── Анализ ответов ───────────────────────────────────────────────────────────
+// ─── Анализ ───────────────────────────────────────────────────────────────────
 
 function analyzeAnswers(
   studentAnswers: string[],
   answerKey: string,
   part1Count: number
 ): RecognitionResult["analysis"] {
-  const keyChars = answerKey.toUpperCase().replace(/[^А-ЯЁ0-9]/g, "").split("");
+  const keyChars = cleanText(answerKey).split("");
+
   const details: AnalysisDetail[] = studentAnswers.map((ans, i) => {
     const key = keyChars[i] ?? "";
     const correct = ans !== "" && key !== "" && ans === key;
@@ -335,14 +257,13 @@ function analyzeAnswers(
 
   const correct = details.filter(d => d.correct).length;
   const total = studentAnswers.length;
-  const score_raw = correct;
-  const score_scaled = rawToScaled(score_raw, total);
+  const score_scaled = rawToScaled(correct, total);
 
   return {
     total,
     correct,
     wrong: total - correct,
-    score_raw,
+    score_raw: correct,
     score_scaled,
     percent: total > 0 ? Math.round((correct / total) * 1000) / 10 : 0,
     details,

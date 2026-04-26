@@ -96,7 +96,14 @@ export function UploadSection() {
         setSavedStudent(student?.name ?? `Код: ${data.student_code}`);
       }
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Неизвестная ошибка");
+      let msg = "Ошибка распознавания";
+      if (e instanceof Error) {
+        msg = e.message;
+      } else if (typeof e === "string") {
+        msg = e;
+      }
+      console.error("OCR error:", e);
+      setError(msg);
       setStep("error");
     }
   };

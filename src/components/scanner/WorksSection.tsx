@@ -2,6 +2,91 @@ import { useState } from "react";
 import Icon from "@/components/ui/icon";
 import { appStore, useAppStore, Work, WorkType, GradeScale } from "@/store/appStore";
 import { WORK_TYPES, SUBJECTS } from "./types";
+import { blankApi } from "@/lib/api";
+
+interface BlankModalProps {
+  work: Work;
+  onClose: () => void;
+}
+
+function BlankDownloadModal({ work, onClose }: BlankModalProps) {
+  const [perPage, setPerPage] = useState<1 | 2 | 4>(1);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const handleDownload = async () => {
+    setBusy(true);
+    setErr("");
+    try {
+      await blankApi.download({
+        workId: work.id,
+        workTitle: `${work.type}: ${work.subject} · ${work.classNum}${work.classLetter}`,
+        perPage,
+        questionsCount: 40,
+      });
+      onClose();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-sm border border-border max-w-md w-full p-5" onClick={e => e.stopPropagation()}>
+        <div className="flex items-start justify-between mb-4">
+          <div>
+            <h3 className="text-sm font-bold">Скачать бланк ответов</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">Работа № {work.id} · {work.subject}</p>
+          </div>
+          <button onClick={onClose} className="p-1 hover:bg-muted rounded-sm"><Icon name="X" size={14} /></button>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-2">Бланков на одном листе A4</label>
+            <div className="grid grid-cols-3 gap-2">
+              {([1, 2, 4] as const).map(n => (
+                <button
+                  key={n}
+                  onClick={() => setPerPage(n)}
+                  className={`py-3 border rounded-sm text-sm font-semibold transition-colors ${perPage === n ? "border-primary bg-primary/5 text-primary" : "border-border hover:bg-muted"}`}
+                >
+                  {n} {n === 1 ? "бланк" : "бланка"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="bg-muted/40 border border-border rounded-sm p-3 text-xs space-y-1">
+            <p className="font-semibold">Что в бланке:</p>
+            <p className="text-muted-foreground">• 5 клеток для кода ученика</p>
+            <p className="text-muted-foreground">• 40 клеток для ответов (1 символ в клетке)</p>
+            <p className="text-muted-foreground">• Образец русских букв и цифр</p>
+            <p className="text-muted-foreground">• Реперные метки для распознавания · Ч/Б</p>
+          </div>
+
+          {err && (
+            <div className="flex items-center gap-2 p-3 rounded-sm bg-destructive/5 border border-destructive/20">
+              <Icon name="AlertCircle" size={14} className="text-destructive flex-shrink-0" />
+              <p className="text-xs text-destructive">{err}</p>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2 pt-1">
+            <button onClick={onClose} className="px-4 py-2 border border-border text-xs rounded-sm hover:bg-muted">Отмена</button>
+            <button onClick={handleDownload} disabled={busy}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground text-xs font-semibold rounded-sm hover:opacity-90 disabled:opacity-50">
+              {busy ? <Icon name="Loader2" size={13} className="animate-spin" /> : <Icon name="Download" size={13} />}
+              {busy ? "Готовим PDF..." : "Скачать PDF"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 const CLASS_NUMS = Array.from({ length: 11 }, (_, i) => i + 1);
 const CLASS_LETTERS = ["А", "Б", "В", "Г", "Д"];
@@ -175,6 +260,7 @@ export function WorksSection() {
   const { works, results, students } = useAppStore();
   const [creating, setCreating] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [blankFor, setBlankFor] = useState<Work | null>(null);
 
   const handleCreate = (w: Work) => {
     appStore.addWork(w);
@@ -285,6 +371,14 @@ export function WorksSection() {
                       <p className="text-sm font-bold mono">{avgScore}/{work.maxScore}</p>
                     </div>
                   )}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setBlankFor(work); }}
+                    title="Скачать бланк PDF"
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-border rounded-sm text-xs hover:bg-muted transition-colors"
+                  >
+                    <Icon name="Download" size={12} />
+                    Бланк
+                  </button>
                   <Icon name={expanded ? "ChevronUp" : "ChevronDown"} size={16} className="text-muted-foreground" />
                 </div>
               </div>
@@ -344,6 +438,8 @@ export function WorksSection() {
           );
         })}
       </div>
+
+      {blankFor && <BlankDownloadModal work={blankFor} onClose={() => setBlankFor(null)} />}
     </div>
   );
 }

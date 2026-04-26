@@ -1,5 +1,6 @@
 // API клиент для бэкенда АОУСПТ
 const AUTH_URL = "https://functions.poehali.dev/b08ae7cf-6c0b-4178-acc9-4b62b2c2a61b";
+const BLANK_URL = "https://functions.poehali.dev/5b4fc8cd-8022-458e-acb6-8606c6c8a4f3";
 
 export interface AuthUser {
   role: "admin" | "teacher";
@@ -73,4 +74,33 @@ export const authApi = {
       token,
       body: JSON.stringify({ login }),
     }),
+};
+
+export const blankApi = {
+  generate: async (params: { workId: string; workTitle: string; perPage: 1 | 2 | 4; questionsCount?: number }) => {
+    const res = await fetch(BLANK_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(params),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Ошибка генерации");
+    return data as { pdf: string; filename: string; size: number };
+  },
+
+  download: async (params: { workId: string; workTitle: string; perPage: 1 | 2 | 4; questionsCount?: number }) => {
+    const { pdf, filename } = await blankApi.generate(params);
+    const bin = atob(pdf);
+    const arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    const blob = new Blob([arr], { type: "application/pdf" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  },
 };

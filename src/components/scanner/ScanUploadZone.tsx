@@ -14,9 +14,11 @@ interface Props {
   onRecognize: () => void;
   onReset: () => void;
   onRetry: () => void;
+  ocrStatus?: string;
+  ocrProgress?: number;
 }
 
-export function ScanUploadZone({ file, previewUrl, step, error, result, dragOver, setDragOver, onFile, onRecognize, onReset, onRetry }: Props) {
+export function ScanUploadZone({ file, previewUrl, step, error, result, dragOver, setDragOver, onFile, onRecognize, onReset, onRetry, ocrStatus, ocrProgress = 0 }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
@@ -84,9 +86,18 @@ export function ScanUploadZone({ file, previewUrl, step, error, result, dragOver
                 )}
 
                 {step === "recognizing" && (
-                  <div className="flex items-center gap-3 p-3 border border-border rounded-sm">
-                    <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-                    <span className="text-sm text-muted-foreground">Распознавание... пожалуйста подождите</span>
+                  <div className="p-3 border border-border rounded-sm space-y-2">
+                    <div className="flex items-center gap-3">
+                      <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                      <span className="text-sm text-muted-foreground">{ocrStatus || "Распознавание..."}</span>
+                    </div>
+                    <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-primary rounded-full transition-all duration-300"
+                        style={{ width: `${ocrProgress}%` }}
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">Это может занять 15–30 секунд</p>
                   </div>
                 )}
 

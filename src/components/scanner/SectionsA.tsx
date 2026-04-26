@@ -4,7 +4,8 @@ import { BlankGenerator } from "./BlankGenerator";
 import { AnswerKeyPanel } from "./AnswerKeyPanel";
 import { ScanUploadZone } from "./ScanUploadZone";
 import { RecognitionResults } from "./RecognitionResults";
-import { RECOGNIZE_URL, FlowStep, RecognitionResult } from "./upload-types";
+import { FlowStep, RecognitionResult } from "./upload-types";
+import { recognizeBlank } from "./ocrEngine";
 
 export function UploadSection() {
   const [step, setStep] = useState<FlowStep>("idle");
@@ -16,6 +17,8 @@ export function UploadSection() {
   const [result, setResult] = useState<RecognitionResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [ocrStatus, setOcrStatus] = useState("");
+  const [ocrProgress, setOcrProgress] = useState(0);
 
   const handleFile = useCallback((f: File) => {
     setFile(f);
@@ -30,26 +33,20 @@ export function UploadSection() {
     if (!file) return;
     setStep("recognizing");
     setError(null);
+    setOcrProgress(0);
+    setOcrStatus("");
     try {
-      const arrayBuffer = await file.arrayBuffer();
-      const bytes = new Uint8Array(arrayBuffer);
-      let binary = "";
-      for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
-      const b64 = btoa(binary);
-
-      const resp = await fetch(RECOGNIZE_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          image: b64,
-          answer_key: answerKey,
-          part1_count: part1Count,
-          part2_count: part2Count,
-        }),
-      });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.error || "Ошибка сервера");
-      setResult(typeof data === "string" ? JSON.parse(data) : data);
+      const data = await recognizeBlank(
+        file,
+        answerKey,
+        part1Count,
+        part2Count,
+        (status, progress) => {
+          setOcrStatus(status);
+          setOcrProgress(progress);
+        }
+      );
+      setResult(data);
       setStep("done");
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Неизвестная ошибка");
@@ -97,6 +94,8 @@ export function UploadSection() {
         onRecognize={handleRecognize}
         onReset={reset}
         onRetry={() => setStep("idle")}
+        ocrStatus={ocrStatus}
+        ocrProgress={ocrProgress}
       />
 
       {step === "done" && result && (

@@ -1,5 +1,3 @@
-export const RECOGNIZE_URL = "https://functions.poehali.dev/de6ae337-82d7-4cc2-ae90-3cf97475be59";
-
 export interface AnalysisDetail {
   question: number;
   student: string;

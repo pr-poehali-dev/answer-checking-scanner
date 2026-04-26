@@ -6,6 +6,7 @@ import { ResultsSection, AnalyticsSection, ExportSection, SettingsSection } from
 import { StudentsSection } from "@/components/scanner/StudentsSection";
 import { WorksSection } from "@/components/scanner/WorksSection";
 import LoginPage from "@/pages/LoginPage";
+import AdminPanel from "@/pages/AdminPanel";
 import { useAppStore, appStore } from "@/store/appStore";
 
 const SECTION_COMPONENTS: Record<Section, React.FC> = {
@@ -27,6 +28,10 @@ export default function Index() {
 
   if (!teacher) {
     return <LoginPage onLogin={() => setActive("works")} />;
+  }
+
+  if (teacher.role === "admin") {
+    return <AdminPanel />;
   }
 
   const initials = teacher.name

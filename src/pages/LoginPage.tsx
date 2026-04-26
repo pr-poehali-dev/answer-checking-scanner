@@ -3,7 +3,7 @@ import Icon from "@/components/ui/icon";
 import { appStore } from "@/store/appStore";
 
 interface LoginPageProps {
-  onLogin: () => void;
+  onLogin: (role: "admin" | "teacher") => void;
 }
 
 export default function LoginPage({ onLogin }: LoginPageProps) {
@@ -17,13 +17,12 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
     e.preventDefault();
     setError("");
     setLoading(true);
-    await new Promise(r => setTimeout(r, 400));
-    const ok = appStore.login(login.trim(), password);
+    const res = await appStore.login(login.trim(), password);
     setLoading(false);
-    if (ok) {
-      onLogin();
+    if (res.ok) {
+      onLogin(res.role);
     } else {
-      setError("Неверный логин или пароль");
+      setError(res.error || "Неверный логин или пароль");
     }
   };
 
@@ -109,7 +108,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
         </p>
 
         <div className="mt-3 p-3 border border-border rounded-sm bg-muted/40 text-center">
-          <p className="text-xs text-muted-foreground">Демо: логин <span className="mono font-bold">teacher</span> · пароль <span className="mono font-bold">school2026</span></p>
+          <p className="text-xs text-muted-foreground">Администратор: логин <span className="mono font-bold">admin</span></p>
         </div>
       </div>
     </div>

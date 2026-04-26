@@ -1,10 +1,15 @@
 // Глобальное хранилище приложения АОУСПТ
 // Все данные хранятся ТОЛЬКО в памяти браузера и на Яндекс Диске учителя
+import { authApi } from "@/lib/api";
+
+export type UserRole = "admin" | "teacher";
 
 export interface Teacher {
   login: string;
   name: string;
   school: string;
+  role: UserRole;
+  authToken: string;
   yadiskToken: string | null;
 }
 
@@ -59,13 +64,6 @@ export type AppState = {
   yadiskConnected: boolean;
 };
 
-const DEMO_TEACHER: Teacher = {
-  login: "teacher",
-  name: "Иванова Наталья Петровна",
-  school: "АОУСПТ",
-  yadiskToken: null,
-};
-
 // Начальное состояние
 let state: AppState = {
   teacher: null,
@@ -93,14 +91,25 @@ export const appStore = {
     };
   },
 
-  login: (login: string, password: string): boolean => {
-    // Простая проверка логин/пароль (в будущем — бэкенд)
-    if (login === "teacher" && password === "school2026") {
-      state = { ...state, teacher: DEMO_TEACHER };
+  login: async (login: string, password: string): Promise<{ ok: true; role: UserRole } | { ok: false; error: string }> => {
+    try {
+      const user = await authApi.login(login.trim(), password);
+      state = {
+        ...state,
+        teacher: {
+          login: user.login,
+          name: user.full_name,
+          school: user.school,
+          role: user.role,
+          authToken: user.token,
+          yadiskToken: null,
+        },
+      };
       notify();
-      return true;
+      return { ok: true, role: user.role };
+    } catch (e) {
+      return { ok: false, error: (e as Error).message || "Ошибка входа" };
     }
-    return false;
   },
 
   logout: () => {

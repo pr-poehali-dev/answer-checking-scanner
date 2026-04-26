@@ -20,9 +20,10 @@ export interface UserRow {
   created_at: string;
 }
 
-async function request<T>(path: string, options: RequestInit & { token?: string } = {}): Promise<T> {
+async function request<T>(action: string, options: RequestInit & { token?: string } = {}): Promise<T> {
   const { token, headers, ...rest } = options;
-  const res = await fetch(`${AUTH_URL}${path}`, {
+  const url = action ? `${AUTH_URL}?action=${action}` : AUTH_URL;
+  const res = await fetch(url, {
     ...rest,
     headers: {
       "Content-Type": "application/json",
@@ -39,37 +40,37 @@ async function request<T>(path: string, options: RequestInit & { token?: string 
 
 export const authApi = {
   login: (login: string, password: string) =>
-    request<AuthUser>("/login", {
+    request<AuthUser>("login", {
       method: "POST",
       body: JSON.stringify({ login, password }),
     }),
 
   register: (token: string, payload: { login: string; password: string; full_name: string; school?: string; role?: string }) =>
-    request<{ success: boolean; id: number; login: string }>("/register", {
+    request<{ success: boolean; id: number; login: string }>("register", {
       method: "POST",
       token,
       body: JSON.stringify(payload),
     }),
 
   listUsers: (token: string) =>
-    request<{ users: UserRow[] }>("/users", { method: "GET", token }),
+    request<{ users: UserRow[] }>("users", { method: "GET", token }),
 
   toggleUser: (token: string, login: string) =>
-    request<{ login: string; is_active: boolean }>("/toggle", {
+    request<{ login: string; is_active: boolean }>("toggle", {
       method: "POST",
       token,
       body: JSON.stringify({ login }),
     }),
 
   resetPassword: (token: string, login: string, new_password: string) =>
-    request<{ success: boolean }>("/reset-password", {
+    request<{ success: boolean }>("reset-password", {
       method: "POST",
       token,
       body: JSON.stringify({ login, new_password }),
     }),
 
   deleteUser: (token: string, login: string) =>
-    request<{ success: boolean }>("/delete", {
+    request<{ success: boolean }>("delete", {
       method: "DELETE",
       token,
       body: JSON.stringify({ login }),

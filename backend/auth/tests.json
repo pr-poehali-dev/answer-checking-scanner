@@ -7,17 +7,17 @@
       "expectedStatus": 200
     },
     {
-      "name": "Admin login success",
-      "method": "POST",
-      "path": "/",
-      "body": { "login": "admin", "password": "admin2026" },
-      "expectedStatus": 200
-    },
-    {
       "name": "Wrong password returns 401",
       "method": "POST",
       "path": "/",
       "body": { "login": "admin", "password": "wrongpass" },
+      "expectedStatus": 401
+    },
+    {
+      "name": "Default password no longer works (security)",
+      "method": "POST",
+      "path": "/",
+      "body": { "login": "admin", "password": "admin2026" },
       "expectedStatus": 401
     },
     {

@@ -42,7 +42,8 @@ def handler(event: dict, context) -> dict:
     if event.get("httpMethod") == "OPTIONS":
         return {"statusCode": 200, "headers": CORS, "body": ""}
 
-    path = event.get("path", "/").rstrip("/")
+    raw_path = event.get("path", "/") or "/"
+    path = raw_path.rstrip("/")
     method = event.get("httpMethod", "GET")
     body = {}
     if event.get("body"):
@@ -54,9 +55,15 @@ def handler(event: dict, context) -> dict:
             body = {}
 
     headers = {k.lower(): v for k, v in (event.get("headers") or {}).items()}
+    qs = event.get("queryStringParameters") or {}
+    # action может прийти и через query (?action=users), и через тело JSON
+    action = (qs.get("action") or body.get("action") or "").strip().lower()
 
-    # ── POST /login ──────────────────────────────────────────────────────────
-    if method == "POST" and path in ("", "/", "/login"):
+    # Определяем "роут": сначала action, потом path
+    route = action or path.lstrip("/").lower() or "login"
+
+    # ── POST login ───────────────────────────────────────────────────────────
+    if method == "POST" and route in ("", "login"):
         login = body.get("login", "").strip()
         password = body.get("password", "")
 
@@ -98,8 +105,8 @@ def handler(event: dict, context) -> dict:
         finally:
             conn.close()
 
-    # ── POST /register (только admin) ────────────────────────────────────────
-    if method == "POST" and path == "/register":
+    # ── POST register (только admin) ────────────────────────────────────────
+    if method == "POST" and route == "register":
         if not check_admin_token(headers):
             return _resp(403, {"error": "Нет доступа"})
 
@@ -132,8 +139,8 @@ def handler(event: dict, context) -> dict:
         finally:
             conn.close()
 
-    # ── GET /users (только admin) ────────────────────────────────────────────
-    if method == "GET" and path == "/users":
+    # ── GET users (только admin) ─────────────────────────────────────────────
+    if method == "GET" and route == "users":
         if not check_admin_token(headers):
             return _resp(403, {"error": "Нет доступа"})
 
@@ -153,8 +160,8 @@ def handler(event: dict, context) -> dict:
         finally:
             conn.close()
 
-    # ── POST /toggle (только admin) ───────────────────────────────────────────
-    if method == "POST" and path == "/toggle":
+    # ── POST toggle (только admin) ───────────────────────────────────────────
+    if method == "POST" and route == "toggle":
         if not check_admin_token(headers):
             return _resp(403, {"error": "Нет доступа"})
 
@@ -177,8 +184,8 @@ def handler(event: dict, context) -> dict:
         finally:
             conn.close()
 
-    # ── POST /reset-password (только admin) ───────────────────────────────────
-    if method == "POST" and path == "/reset-password":
+    # ── POST reset-password (только admin) ───────────────────────────────────
+    if method == "POST" and route in ("reset-password", "reset_password"):
         if not check_admin_token(headers):
             return _resp(403, {"error": "Нет доступа"})
 
@@ -203,8 +210,8 @@ def handler(event: dict, context) -> dict:
         finally:
             conn.close()
 
-    # ── DELETE /delete (только admin) ─────────────────────────────────────────
-    if method == "DELETE" and path == "/delete":
+    # ── DELETE delete (только admin) ─────────────────────────────────────────
+    if method == "DELETE" and route == "delete":
         if not check_admin_token(headers):
             return _resp(403, {"error": "Нет доступа"})
 

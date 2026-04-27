@@ -6,6 +6,7 @@ import { ResultsSection, SettingsSection } from "@/components/scanner/SectionsB"
 import { StudentsSection } from "@/components/scanner/StudentsSection";
 import { WorksSection } from "@/components/scanner/WorksSection";
 import { PresentationsSection } from "@/components/scanner/PresentationsSection";
+import { TestsSection } from "@/components/scanner/TestsSection";
 import LoginPage from "@/pages/LoginPage";
 import AdminPanel from "@/pages/AdminPanel";
 import { useAppStore, appStore } from "@/store/appStore";
@@ -16,6 +17,7 @@ const SECTION_COMPONENTS: Record<Section, React.FC> = {
   students: StudentsSection,
   works: WorksSection,
   presentations: PresentationsSection,
+  tests: TestsSection,
   settings: SettingsSection,
 };
 

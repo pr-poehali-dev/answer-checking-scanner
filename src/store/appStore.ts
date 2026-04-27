@@ -29,7 +29,7 @@ export interface GradeScale {
   grade5: number;
 }
 
-export type WorkType = "Проверочная работа" | "Контрольная работа";
+export type WorkType = "Проверочная работа" | "Контрольная работа" | "Тест";
 
 export interface Work {
   id: string; // индивидуальный номер работы (6 цифр)
@@ -44,6 +44,8 @@ export interface Work {
   answerKey: string;
   gradeScale: GradeScale;
   maxScore: number;
+  topic?: string; // тема (опционально, заполняется ИИ-генератором)
+  generatedByAi?: boolean; // создана ли работа через ИИ
 }
 
 export interface StudentResult {
@@ -75,12 +77,34 @@ export interface PresentationItem {
   };
 }
 
+export interface GeneratedTestItem {
+  id: string;
+  workId: string;
+  workType: WorkType;
+  subject: string;
+  classNum: number;
+  topic: string;
+  description: string;
+  part1Count: number;
+  part2Count: number;
+  filename: string;
+  size: number;
+  yadiskPath: string | null;
+  uploadedToYadisk: boolean;
+  createdAt: string;
+  questions: {
+    part1: { question: string; options: string[]; answer: string }[];
+    part2: { question: string; answer: string }[];
+  };
+}
+
 export type AppState = {
   teacher: Teacher | null;
   students: Student[];
   works: Work[];
   results: StudentResult[];
   presentations: PresentationItem[];
+  generatedTests: GeneratedTestItem[];
   yadiskConnected: boolean;
   yadiskUser: YadiskUser | null;
   yadiskSyncing: boolean;
@@ -94,6 +118,7 @@ let state: AppState = {
   works: [],
   results: [],
   presentations: [],
+  generatedTests: [],
   yadiskConnected: false,
   yadiskUser: null,
   yadiskSyncing: false,
@@ -214,6 +239,16 @@ export const appStore = {
 
   removePresentation: (id: string) => {
     state = { ...state, presentations: state.presentations.filter(p => p.id !== id) };
+    notify();
+  },
+
+  addGeneratedTest: (item: GeneratedTestItem) => {
+    state = { ...state, generatedTests: [item, ...state.generatedTests] };
+    notify();
+  },
+
+  removeGeneratedTest: (id: string) => {
+    state = { ...state, generatedTests: state.generatedTests.filter(t => t.id !== id) };
     notify();
   },
 

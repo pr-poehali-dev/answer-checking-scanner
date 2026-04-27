@@ -1,0 +1,45 @@
+{
+  "tests": [
+    {
+      "name": "OPTIONS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    },
+    {
+      "name": "POST без предмета",
+      "method": "POST",
+      "path": "/",
+      "body": {"topic": "тест", "part1Count": 5},
+      "expectedStatus": 400,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "POST без темы",
+      "method": "POST",
+      "path": "/",
+      "body": {"subject": "Математика", "part1Count": 5},
+      "expectedStatus": 400,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "POST без вопросов",
+      "method": "POST",
+      "path": "/",
+      "body": {"subject": "Математика", "topic": "Тема", "part1Count": 0, "part2Count": 0},
+      "expectedStatus": 400,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "GET не поддерживается",
+      "method": "GET",
+      "path": "/",
+      "expectedStatus": 405,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
+    }
+  ]
+}

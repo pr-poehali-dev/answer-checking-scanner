@@ -1,0 +1,52 @@
+{
+  "tests": [
+    {
+      "name": "OPTIONS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    },
+    {
+      "name": "auth_url без redirect_uri",
+      "method": "GET",
+      "path": "/?action=auth_url",
+      "expectedStatus": 400,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "auth_url успех",
+      "method": "GET",
+      "path": "/?action=auth_url&redirect_uri=https%3A%2F%2Fexample.com%2Fcb&state=teacher1",
+      "expectedStatus": 200,
+      "expectedBody": {"url": "string"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "exchange без кода",
+      "method": "POST",
+      "path": "/?action=exchange",
+      "body": {},
+      "expectedStatus": 400,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "refresh без токена",
+      "method": "POST",
+      "path": "/?action=refresh",
+      "body": {},
+      "expectedStatus": 400,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Неизвестное действие",
+      "method": "GET",
+      "path": "/?action=unknown",
+      "expectedStatus": 404,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
+    }
+  ]
+}

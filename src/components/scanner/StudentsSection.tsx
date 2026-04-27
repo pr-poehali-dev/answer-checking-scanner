@@ -131,41 +131,35 @@ export function StudentsSection() {
   // Синхронизация — выгрузка на Яндекс Диск
   const handleSync = async () => {
     if (!yadiskConnected) {
-      alert("Сначала подключите Яндекс Диск в разделе Настройки");
+      alert("Сначала подключите Яндекс Диск в разделе «Настройки»");
       return;
     }
     setSyncStatus("syncing");
-    const json = appStore.exportStudentsJSON();
-    const blob = new Blob([json], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `aouspt_students_${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    await new Promise(r => setTimeout(r, 600));
-    setSyncStatus("done");
+    const r = await appStore.syncToYadisk();
+    if (r.ok) {
+      setSyncStatus("done");
+    } else {
+      setSyncStatus("error");
+      alert(`Ошибка сохранения: ${r.error}`);
+    }
     setTimeout(() => setSyncStatus("idle"), 3000);
   };
 
-  // Импорт с Яндекс Диска
-  const handleImport = () => {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = ".json";
-    input.onchange = (e) => {
-      const file = (e.target as HTMLInputElement).files?.[0];
-      if (!file) return;
-      setImportStatus("loading");
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        const ok = appStore.importStudentsJSON(ev.target?.result as string);
-        setImportStatus(ok ? "done" : "error");
-        setTimeout(() => setImportStatus("idle"), 3000);
-      };
-      reader.readAsText(file);
-    };
-    input.click();
+  // Загрузка с Яндекс Диска
+  const handleImport = async () => {
+    if (!yadiskConnected) {
+      alert("Сначала подключите Яндекс Диск в разделе «Настройки»");
+      return;
+    }
+    setImportStatus("loading");
+    const r = await appStore.loadFromYadisk();
+    if (r.ok) {
+      setImportStatus("done");
+    } else {
+      setImportStatus("error");
+      alert(`Ошибка загрузки: ${r.error}`);
+    }
+    setTimeout(() => setImportStatus("idle"), 3000);
   };
 
   return (
@@ -197,15 +191,15 @@ export function StudentsSection() {
             onClick={handleImport}
             className="inline-flex items-center gap-1.5 px-3 py-2 border border-border text-xs font-medium rounded-sm hover:bg-muted transition-colors"
           >
-            <Icon name="HardDriveDownload" size={13} />
-            {importStatus === "loading" ? "Загрузка..." : importStatus === "done" ? "Загружено!" : "Из файла"}
+            <Icon name="CloudDownload" size={13} fallback="Download" />
+            {importStatus === "loading" ? "Загрузка..." : importStatus === "done" ? "Загружено!" : importStatus === "error" ? "Ошибка" : "С Я.Диска"}
           </button>
           <button
             onClick={handleSync}
             className="inline-flex items-center gap-1.5 px-3 py-2 border border-border text-xs font-medium rounded-sm hover:bg-muted transition-colors"
           >
-            <Icon name="RefreshCw" size={13} className={syncStatus === "syncing" ? "animate-spin" : ""} />
-            {syncStatus === "syncing" ? "Синхронизация..." : syncStatus === "done" ? "Сохранено!" : "Синхронизировать"}
+            <Icon name="CloudUpload" size={13} fallback="Upload" className={syncStatus === "syncing" ? "animate-pulse" : ""} />
+            {syncStatus === "syncing" ? "Сохраняем..." : syncStatus === "done" ? "Сохранено!" : syncStatus === "error" ? "Ошибка" : "На Я.Диск"}
           </button>
           <button
             onClick={() => { setAdding(true); setEditCode(null); }}

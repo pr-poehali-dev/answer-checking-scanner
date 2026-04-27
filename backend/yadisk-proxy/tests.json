@@ -1,0 +1,47 @@
+{
+  "tests": [
+    {
+      "name": "OPTIONS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    },
+    {
+      "name": "Без токена",
+      "method": "GET",
+      "path": "/?action=list&path=/",
+      "expectedStatus": 401,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "ensure_folder без path с токеном-заглушкой",
+      "method": "POST",
+      "path": "/?action=ensure_folder",
+      "headers": {"X-Yadisk-Token": "fake_token_123"},
+      "body": {},
+      "expectedStatus": 400,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "delete без path",
+      "method": "POST",
+      "path": "/?action=delete",
+      "headers": {"X-Yadisk-Token": "fake_token_123"},
+      "body": {},
+      "expectedStatus": 400,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Неизвестное действие",
+      "method": "GET",
+      "path": "/?action=unknown",
+      "headers": {"X-Yadisk-Token": "fake_token_123"},
+      "expectedStatus": 404,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
+    }
+  ]
+}

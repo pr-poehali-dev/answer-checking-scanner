@@ -1,6 +1,7 @@
 // Глобальное хранилище приложения АОУСПТ
 // Все данные хранятся ТОЛЬКО в памяти браузера и на Яндекс Диске учителя
 import { authApi } from "@/lib/api";
+import { yadisk, yadiskStorage, ROOT_FOLDER, STUDENTS_FILE, WORKS_FILE, type YadiskUser } from "@/lib/yadisk";
 
 export type UserRole = "admin" | "teacher";
 
@@ -62,6 +63,9 @@ export type AppState = {
   works: Work[];
   results: StudentResult[];
   yadiskConnected: boolean;
+  yadiskUser: YadiskUser | null;
+  yadiskSyncing: boolean;
+  yadiskLastSync: string | null;
 };
 
 // Начальное состояние
@@ -71,6 +75,9 @@ let state: AppState = {
   works: [],
   results: [],
   yadiskConnected: false,
+  yadiskUser: null,
+  yadiskSyncing: false,
+  yadiskLastSync: null,
 };
 
 type Listener = () => void;
@@ -106,6 +113,14 @@ export const appStore = {
         },
       };
       notify();
+      // Восстанавливаем подключение Я.Диска и тянем данные с него
+      if (user.role === "teacher") {
+        appStore.restoreYadisk().then((restored) => {
+          if (restored) {
+            appStore.loadFromYadisk();
+          }
+        });
+      }
       return { ok: true, role: user.role };
     } catch (e) {
       return { ok: false, error: (e as Error).message || "Ошибка входа" };
@@ -172,22 +187,115 @@ export const appStore = {
     notify();
   },
 
-  connectYadisk: (token: string) => {
+  connectYadisk: (token: string, user: YadiskUser | null = null) => {
     state = {
       ...state,
       yadiskConnected: true,
+      yadiskUser: user,
       teacher: state.teacher ? { ...state.teacher, yadiskToken: token } : null,
     };
     notify();
   },
 
   disconnectYadisk: () => {
+    yadiskStorage.clear();
     state = {
       ...state,
       yadiskConnected: false,
+      yadiskUser: null,
       teacher: state.teacher ? { ...state.teacher, yadiskToken: null } : null,
     };
     notify();
+  },
+
+  /** Восстанавливает подключение Я.Диска из localStorage (вызывать после login). */
+  restoreYadisk: async (): Promise<boolean> => {
+    const { access, user } = yadiskStorage.load();
+    if (!access) return false;
+    const ok = await yadisk.ping(access);
+    if (!ok) {
+      yadiskStorage.clear();
+      return false;
+    }
+    state = {
+      ...state,
+      yadiskConnected: true,
+      yadiskUser: user,
+      teacher: state.teacher ? { ...state.teacher, yadiskToken: access } : null,
+    };
+    notify();
+    return true;
+  },
+
+  /** Сохранить учеников и работы на Я.Диск учителя. */
+  syncToYadisk: async (): Promise<{ ok: true } | { ok: false; error: string }> => {
+    const token = state.teacher?.yadiskToken;
+    if (!token) return { ok: false, error: "Я.Диск не подключён" };
+
+    state = { ...state, yadiskSyncing: true };
+    notify();
+    try {
+      await yadisk.ensureFolder(token, ROOT_FOLDER);
+      const studentsJson = JSON.stringify({
+        students: state.students,
+        exportedAt: new Date().toISOString(),
+      }, null, 2);
+      await yadisk.uploadText(token, STUDENTS_FILE, studentsJson, true);
+      const worksJson = JSON.stringify({
+        works: state.works,
+        exportedAt: new Date().toISOString(),
+      }, null, 2);
+      await yadisk.uploadText(token, WORKS_FILE, worksJson, true);
+      state = { ...state, yadiskSyncing: false, yadiskLastSync: new Date().toISOString() };
+      notify();
+      return { ok: true };
+    } catch (e) {
+      state = { ...state, yadiskSyncing: false };
+      notify();
+      return { ok: false, error: (e as Error).message || "Ошибка синхронизации" };
+    }
+  },
+
+  /** Загрузить учеников и работы с Я.Диска учителя. */
+  loadFromYadisk: async (): Promise<{ ok: true; studentsCount: number; worksCount: number } | { ok: false; error: string }> => {
+    const token = state.teacher?.yadiskToken;
+    if (!token) return { ok: false, error: "Я.Диск не подключён" };
+
+    state = { ...state, yadiskSyncing: true };
+    notify();
+    try {
+      let students: Student[] = state.students;
+      let works: Work[] = state.works;
+
+      try {
+        const r = await yadisk.downloadText(token, STUDENTS_FILE);
+        const parsed = JSON.parse(r.text);
+        if (Array.isArray(parsed.students)) students = parsed.students;
+      } catch {
+        // файла может не быть — игнорируем
+      }
+      try {
+        const r = await yadisk.downloadText(token, WORKS_FILE);
+        const parsed = JSON.parse(r.text);
+        if (Array.isArray(parsed.works)) works = parsed.works;
+      } catch {
+        // файла может не быть — игнорируем
+      }
+
+      state = {
+        ...state,
+        students,
+        works,
+        yadiskSyncing: false,
+        yadiskLastSync: new Date().toISOString(),
+      };
+      notify();
+      return { ok: true, studentsCount: students.length, worksCount: works.length };
+    } catch (e) {
+      state = { ...state, yadiskSyncing: false };
+      notify();
+      return { ok: false, error: (e as Error).message || "Ошибка загрузки" };
+    }
   },
 
   // Получить результаты по работе

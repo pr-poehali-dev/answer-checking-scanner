@@ -57,11 +57,30 @@ export interface StudentResult {
   scannedAt: string;
 }
 
+export interface PresentationItem {
+  id: string;
+  topic: string;
+  description: string;
+  audience: string;
+  slidesCount: number;
+  filename: string;
+  size: number;
+  yadiskPath: string | null;
+  uploadedToYadisk: boolean;
+  createdAt: string;
+  outline: {
+    subtitle: string;
+    slides: { title: string; bullets: string[] }[];
+    conclusion: string[];
+  };
+}
+
 export type AppState = {
   teacher: Teacher | null;
   students: Student[];
   works: Work[];
   results: StudentResult[];
+  presentations: PresentationItem[];
   yadiskConnected: boolean;
   yadiskUser: YadiskUser | null;
   yadiskSyncing: boolean;
@@ -74,6 +93,7 @@ let state: AppState = {
   students: [],
   works: [],
   results: [],
+  presentations: [],
   yadiskConnected: false,
   yadiskUser: null,
   yadiskSyncing: false,
@@ -184,6 +204,16 @@ export const appStore = {
       r => !(r.workId === result.workId && r.studentCode === result.studentCode)
     );
     state = { ...state, results: [...filtered, result] };
+    notify();
+  },
+
+  addPresentation: (item: PresentationItem) => {
+    state = { ...state, presentations: [item, ...state.presentations] };
+    notify();
+  },
+
+  removePresentation: (id: string) => {
+    state = { ...state, presentations: state.presentations.filter(p => p.id !== id) };
     notify();
   },
 

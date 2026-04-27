@@ -7,6 +7,7 @@ export type Section =
   | "export"
   | "students"
   | "works"
+  | "presentations"
   | "settings";
 
 export const NAV_ITEMS: { id: Section; label: string; icon: string }[] = [
@@ -18,6 +19,7 @@ export const NAV_ITEMS: { id: Section; label: string; icon: string }[] = [
   { id: "analytics", label: "Статистика", icon: "TrendingUp" },
   { id: "export", label: "Экспорт", icon: "FileDown" },
   { id: "students", label: "Ученики", icon: "Users" },
+  { id: "presentations", label: "Презентации", icon: "Presentation" },
   { id: "settings", label: "Настройки", icon: "Settings" },
 ];
 
@@ -41,6 +43,7 @@ export const SECTION_TITLES: Record<Section, string> = {
   export: "Экспорт отчётов",
   students: "Список учеников",
   works: "Работы",
+  presentations: "Презентации",
   settings: "Настройки",
 };
 

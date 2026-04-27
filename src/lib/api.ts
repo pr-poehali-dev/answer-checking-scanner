@@ -2,6 +2,7 @@
 const AUTH_URL = "https://functions.poehali.dev/b08ae7cf-6c0b-4178-acc9-4b62b2c2a61b";
 const BLANK_URL = "https://functions.poehali.dev/5b4fc8cd-8022-458e-acb6-8606c6c8a4f3";
 const RECOGNIZE_URL = "https://functions.poehali.dev/de6ae337-82d7-4cc2-ae90-3cf97475be59";
+const PRESENTATION_URL = "https://functions.poehali.dev/9aa03e93-715c-41fd-91f4-6d4e79487ed9";
 
 export interface AuthUser {
   role: "admin" | "teacher";
@@ -154,5 +155,45 @@ export const recognizeApi = {
       throw new Error(data.error || `Ошибка распознавания (${res.status})`);
     }
     return data as RecognizeResponse;
+  },
+};
+
+export interface PresentationOutline {
+  subtitle: string;
+  slides: { title: string; bullets: string[] }[];
+  conclusion: string[];
+}
+
+export interface PresentationResponse {
+  pptx_b64: string;
+  filename: string;
+  size: number;
+  outline: PresentationOutline;
+}
+
+export const presentationApi = {
+  generate: async (params: {
+    topic: string;
+    description?: string;
+    slidesCount?: number;
+    audience?: string;
+    teacherName: string;
+    teacherSchool: string;
+  }): Promise<PresentationResponse> => {
+    const res = await fetch(PRESENTATION_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        topic: params.topic,
+        description: params.description ?? "",
+        audience: params.audience ?? "",
+        slidesCount: params.slidesCount ?? 8,
+        teacherName: params.teacherName,
+        teacherSchool: params.teacherSchool,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `Ошибка генерации (${res.status})`);
+    return data as PresentationResponse;
   },
 };

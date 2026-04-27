@@ -7,18 +7,13 @@ interface CompanyFooterProps {
 
 export const COMPANY_INFO = {
   fullName: "ООО «РАССВЕТ»",
-  shortName: "АОУСПТ",
-  inn: "0000000000",
-  kpp: "000000000",
-  ogrn: "0000000000000",
-  address: "г. Москва, ул. Примерная, д. 1, офис 1",
-  phone: "+7 (000) 000-00-00",
-  email: "info@aousp.ru",
-  site: "aousp.ru",
-  bankName: "—",
-  bankAccount: "—",
-  bankBik: "—",
-  bankCorrAccount: "—",
+  shortName: "РАССВЕТ",
+  inn: "2907011706",
+  kpp: "290701001",
+  ogrn: "1062907013707",
+  phone: "+7 (995) 222-81-29",
+  email: "ooorassvet29@yandex.ru",
+  site: "ooo29.ru",
 };
 
 export default function CompanyFooter({
@@ -131,7 +126,7 @@ export default function CompanyFooter({
 
           {/* Банковские реквизиты */}
           <div>
-            <p className="text-xs font-bold mb-2">Банковские реквизиты</p>
+            <p className="text-xs font-bold mb-2"></p>
             <div className="space-y-0.5 text-[11px] text-muted-foreground leading-relaxed">
               <p>
                 Банк:{" "}

@@ -11,6 +11,7 @@ import os
 import io
 import re
 import ssl
+import time
 import uuid
 import base64
 import urllib.parse
@@ -102,8 +103,7 @@ def get_gigachat_token() -> str:
     return token
 
 
-def gigachat_chat(messages: list, max_tokens: int = 1500, temperature: float = 0.3, model: str = "GigaChat", req_timeout: int = 75) -> str:
-    """Отправляет запрос в GigaChat и возвращает текст ответа."""
+def _gigachat_call_once(messages: list, max_tokens: int, temperature: float, model: str, req_timeout: int) -> str:
     token = get_gigachat_token()
     payload = {
         "model": model,
@@ -120,24 +120,47 @@ def gigachat_chat(messages: list, max_tokens: int = 1500, temperature: float = 0
             "Content-Type": "application/json",
             "Accept": "application/json",
             "Authorization": f"Bearer {token}",
+            "Connection": "close",
         },
     )
-    try:
-        with urllib.request.urlopen(req, timeout=req_timeout, context=_ssl_ctx()) as r:
-            body = json.loads(r.read().decode())
-    except urllib.error.HTTPError as e:
-        err_text = e.read().decode(errors='ignore')[:300]
-        # Если модель не найдена — попробуем фоллбэк
-        if e.code == 404 and "model" in err_text.lower():
-            raise RuntimeError(f"MODEL_NOT_FOUND: {err_text}")
-        raise RuntimeError(f"GigaChat chat HTTP {e.code}: {err_text}")
-    except Exception as e:
-        raise RuntimeError(f"GigaChat недоступен: {e}")
-
+    with urllib.request.urlopen(req, timeout=req_timeout, context=_ssl_ctx()) as r:
+        body = json.loads(r.read().decode())
     choices = body.get("choices") or []
     if not choices:
         raise RuntimeError(f"GigaChat вернул пустой ответ: {body}")
     return choices[0].get("message", {}).get("content", "").strip()
+
+
+def gigachat_chat(messages: list, max_tokens: int = 1500, temperature: float = 0.3, model: str = "GigaChat", req_timeout: int = 60, max_retries: int = 3) -> str:
+    """Отправляет запрос в GigaChat с автоматическими ретраями при сетевых сбоях."""
+    last_err = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            return _gigachat_call_once(messages, max_tokens, temperature, model, req_timeout)
+        except urllib.error.HTTPError as e:
+            err_text = e.read().decode(errors='ignore')[:300] if hasattr(e, 'read') else str(e)
+            # Модель не найдена / нет доступа — нет смысла повторять, нужен фоллбэк
+            if e.code in (401, 403, 404):
+                if e.code == 404 and "model" in err_text.lower():
+                    raise RuntimeError(f"MODEL_NOT_FOUND: {err_text}")
+                raise RuntimeError(f"GigaChat chat HTTP {e.code}: {err_text}")
+            # 429/5xx — ретраим
+            last_err = RuntimeError(f"GigaChat HTTP {e.code}: {err_text}")
+            if attempt < max_retries:
+                time.sleep(1.5 * attempt)
+                continue
+            raise last_err
+        except Exception as e:
+            # Обрыв соединения, таймаут — ретраим
+            last_err = RuntimeError(f"GigaChat недоступен: {e}")
+            if attempt < max_retries:
+                time.sleep(1.5 * attempt)
+                # На случай протухшего токена — сбрасываем кэш перед повтором
+                _TOKEN_CACHE["token"] = None
+                _TOKEN_CACHE["expires_at"] = None
+                continue
+            raise last_err
+    raise last_err if last_err else RuntimeError("GigaChat: не удалось получить ответ")
 
 
 def gigachat_with_fallback(messages: list, max_tokens: int = 1500) -> str:

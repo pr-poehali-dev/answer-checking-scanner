@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import Icon from "@/components/ui/icon";
 import { appStore } from "@/store/appStore";
+import CompanyFooter from "@/components/CompanyFooter";
 
 interface LoginPageProps {
   onLogin: (role: "admin" | "teacher") => void;
@@ -89,7 +90,8 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
   };
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
+    <div className="min-h-screen bg-background flex flex-col">
+      <div className="flex-1 flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
         {/* Logo */}
         <div className="text-center mb-8">
@@ -292,6 +294,8 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
           <p className="text-xs text-muted-foreground">Администратор: логин <span className="mono font-bold">admin</span></p>
         </div>
       </div>
+      </div>
+      <CompanyFooter variant="full" />
     </div>
   );
 }

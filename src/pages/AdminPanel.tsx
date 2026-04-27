@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import Icon from "@/components/ui/icon";
 import { appStore, useAppStore } from "@/store/appStore";
 import { authApi, UserRow } from "@/lib/api";
+import CompanyFooter from "@/components/CompanyFooter";
 
 export default function AdminPanel() {
   const { teacher } = useAppStore();
@@ -470,6 +471,7 @@ export default function AdminPanel() {
           </div>
         )}
       </main>
+      <CompanyFooter variant="full" />
     </div>
   );
 }

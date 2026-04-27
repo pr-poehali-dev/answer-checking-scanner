@@ -7,13 +7,13 @@ interface CompanyFooterProps {
 
 export const COMPANY_INFO = {
   fullName: "ООО «РАССВЕТ»",
-  shortName: "РАССВЕТ",
+  legalName: 'ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ "РАССВЕТ"',
   inn: "2907011706",
   kpp: "290701001",
   ogrn: "1062907013707",
   phone: "+7 (995) 222-81-29",
+  phoneLink: "+79952228129",
   email: "ooorassvet29@yandex.ru",
-  site: "ooo29.ru",
 };
 
 export default function CompanyFooter({
@@ -29,18 +29,26 @@ export default function CompanyFooter({
       >
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-[10px] text-muted-foreground">
           <span>
-            © {year} {COMPANY_INFO.fullName} · ИНН {COMPANY_INFO.inn} · ОГРН{" "}
-            {COMPANY_INFO.ogrn}
+            © {year} {COMPANY_INFO.fullName} · ИНН{" "}
+            <span className="mono">{COMPANY_INFO.inn}</span> · КПП{" "}
+            <span className="mono">{COMPANY_INFO.kpp}</span> · ОГРН{" "}
+            <span className="mono">{COMPANY_INFO.ogrn}</span>
           </span>
           <span className="inline-flex items-center gap-3">
-            <span className="inline-flex items-center gap-1">
+            <a
+              href={`tel:${COMPANY_INFO.phoneLink}`}
+              className="inline-flex items-center gap-1 hover:text-foreground"
+            >
               <Icon name="Phone" size={10} />
               {COMPANY_INFO.phone}
-            </span>
-            <span className="inline-flex items-center gap-1">
+            </a>
+            <a
+              href={`mailto:${COMPANY_INFO.email}`}
+              className="inline-flex items-center gap-1 hover:text-foreground"
+            >
               <Icon name="Mail" size={10} />
               {COMPANY_INFO.email}
-            </span>
+            </a>
           </span>
         </div>
       </footer>
@@ -51,8 +59,8 @@ export default function CompanyFooter({
     <footer className={`border-t border-border bg-white ${className}`}>
       <div className="max-w-6xl mx-auto px-6 py-6">
         <div className="grid md:grid-cols-3 gap-6 mb-5">
-          {/* Реквизиты */}
-          <div>
+          {/* Юр. лицо + регистрация */}
+          <div className="md:col-span-2">
             <div className="flex items-center gap-2 mb-2">
               <div
                 className="w-6 h-6 rounded-sm flex items-center justify-center"
@@ -62,94 +70,50 @@ export default function CompanyFooter({
               </div>
               <p className="text-xs font-bold">{COMPANY_INFO.fullName}</p>
             </div>
-            <div className="space-y-0.5 text-[11px] text-muted-foreground leading-relaxed">
-              <p>
-                ИНН:{" "}
-                <span className="mono text-foreground">{COMPANY_INFO.inn}</span>
-              </p>
-              <p>
-                КПП:{" "}
-                <span className="mono text-foreground">{COMPANY_INFO.kpp}</span>
-              </p>
-              <p>
-                ОГРН:{" "}
-                <span className="mono text-foreground">
-                  {COMPANY_INFO.ogrn}
-                </span>
-              </p>
-              <p className="pt-1 flex items-start gap-1">
-                <Icon
-                  name="MapPin"
-                  size={11}
-                  className="mt-0.5 flex-shrink-0"
-                />
-                <span>{COMPANY_INFO.address}</span>
-              </p>
+            <p className="text-[11px] text-muted-foreground leading-snug mb-3">
+              {COMPANY_INFO.legalName}
+            </p>
+            <div className="grid grid-cols-3 gap-3 text-[11px]">
+              <div>
+                <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-0.5">
+                  ИНН
+                </p>
+                <p className="mono font-semibold">{COMPANY_INFO.inn}</p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-0.5">
+                  КПП
+                </p>
+                <p className="mono font-semibold">{COMPANY_INFO.kpp}</p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-0.5">
+                  ОГРН
+                </p>
+                <p className="mono font-semibold">{COMPANY_INFO.ogrn}</p>
+              </div>
             </div>
           </div>
 
           {/* Контакты */}
           <div>
             <p className="text-xs font-bold mb-2">Контакты</p>
-            <div className="space-y-1 text-[11px] text-muted-foreground">
-              <p className="inline-flex items-center gap-1.5">
-                <Icon name="Phone" size={11} />
-                <a
-                  href={`tel:${COMPANY_INFO.phone.replace(/\s/g, "")}`}
-                  className="hover:text-foreground"
-                >
-                  {COMPANY_INFO.phone}
-                </a>
-              </p>
-              <p className="inline-flex items-center gap-1.5">
-                <Icon name="Mail" size={11} />
-                <a
-                  href={`mailto:${COMPANY_INFO.email}`}
-                  className="hover:text-foreground"
-                >
-                  {COMPANY_INFO.email}
-                </a>
-              </p>
-              <p className="inline-flex items-center gap-1.5">
-                <Icon name="Globe" size={11} />
-                <a
-                  href={`https://${COMPANY_INFO.site}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="hover:text-foreground"
-                >
-                  {COMPANY_INFO.site}
-                </a>
-              </p>
-            </div>
-          </div>
-
-          {/* Банковские реквизиты */}
-          <div>
-            <p className="text-xs font-bold mb-2"></p>
-            <div className="space-y-0.5 text-[11px] text-muted-foreground leading-relaxed">
-              <p>
-                Банк:{" "}
-                <span className="text-foreground">{COMPANY_INFO.bankName}</span>
-              </p>
-              <p>
-                Р/с:{" "}
-                <span className="mono text-foreground">
-                  {COMPANY_INFO.bankAccount}
-                </span>
-              </p>
-              <p>
-                К/с:{" "}
-                <span className="mono text-foreground">
-                  {COMPANY_INFO.bankCorrAccount}
-                </span>
-              </p>
-              <p>
-                БИК:{" "}
-                <span className="mono text-foreground">
-                  {COMPANY_INFO.bankBik}
-                </span>
-              </p>
+            <div className="space-y-1.5 text-[11px]">
+              <a
+                href={`tel:${COMPANY_INFO.phoneLink}`}
+                className="inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <Icon name="Phone" size={12} />
+                <span className="mono">{COMPANY_INFO.phone}</span>
+              </a>
+              <br />
+              <a
+                href={`mailto:${COMPANY_INFO.email}`}
+                className="inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <Icon name="Mail" size={12} />
+                {COMPANY_INFO.email}
+              </a>
             </div>
           </div>
         </div>
@@ -158,16 +122,9 @@ export default function CompanyFooter({
           <p>
             © {year} {COMPANY_INFO.fullName}. Все права защищены.
           </p>
-          <p className="inline-flex items-center gap-3">
-            <span>Платежи через ЮKassa</span>
-            <span>·</span>
-            <a href="#" className="hover:text-foreground">
-              Договор-оферта
-            </a>
-            <span>·</span>
-            <a href="#" className="hover:text-foreground">
-              Политика конфиденциальности
-            </a>
+          <p>
+            АОУСПТ — Автоматизированная Обучающая Универсальная Система Проверки
+            Тестов
           </p>
         </div>
       </div>

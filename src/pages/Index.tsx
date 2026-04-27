@@ -10,6 +10,7 @@ import { TestsSection } from "@/components/scanner/TestsSection";
 import LoginPage from "@/pages/LoginPage";
 import AdminPanel from "@/pages/AdminPanel";
 import SubscriptionGate from "@/components/SubscriptionGate";
+import CompanyFooter from "@/components/CompanyFooter";
 import { useAppStore, appStore } from "@/store/appStore";
 
 const SECTION_COMPONENTS: Record<Section, React.FC> = {
@@ -144,8 +145,11 @@ export default function Index() {
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto px-6 py-6">
-          <ActiveSection key={active} />
+        <main className="flex-1 overflow-y-auto">
+          <div className="px-6 py-6">
+            <ActiveSection key={active} />
+          </div>
+          <CompanyFooter variant="full" />
         </main>
       </div>
     </div>

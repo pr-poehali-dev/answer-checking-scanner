@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import Icon from "@/components/ui/icon";
 import { yadiskOAuth, yadiskStorage } from "@/lib/yadisk";
 import { appStore } from "@/store/appStore";
+import CompanyFooter from "@/components/CompanyFooter";
 
 export default function YadiskCallback() {
   const navigate = useNavigate();
@@ -42,7 +43,8 @@ export default function YadiskCallback() {
   }, [navigate]);
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-6">
+    <div className="min-h-screen flex flex-col bg-background">
+      <div className="flex-1 flex items-center justify-center p-6">
       <div className="max-w-md w-full border border-border rounded-sm bg-white p-8 text-center">
         <div className="mb-4">
           {status === "loading" && (
@@ -68,6 +70,8 @@ export default function YadiskCallback() {
           </button>
         )}
       </div>
+      </div>
+      <CompanyFooter variant="full" />
     </div>
   );
 }

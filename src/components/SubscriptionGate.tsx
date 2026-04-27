@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import Icon from "@/components/ui/icon";
 import { appStore, useAppStore } from "@/store/appStore";
 import { subscriptionApi, type SubscriptionPlan } from "@/lib/api";
+import CompanyFooter from "@/components/CompanyFooter";
 
 function formatRub(n: number) {
   return new Intl.NumberFormat("ru-RU").format(n) + " ₽";
@@ -95,7 +96,8 @@ export default function SubscriptionGate() {
   const status = teacher?.subscriptionStatus || "none";
 
   return (
-    <div className="min-h-screen bg-background py-10 px-4">
+    <div className="min-h-screen bg-background flex flex-col">
+      <div className="flex-1 py-10 px-4">
       <div className="max-w-3xl mx-auto">
         {/* Шапка */}
         <div className="flex items-center justify-between mb-6">
@@ -242,6 +244,8 @@ export default function SubscriptionGate() {
           </p>
         </div>
       </div>
+      </div>
+      <CompanyFooter variant="full" />
     </div>
   );
 }

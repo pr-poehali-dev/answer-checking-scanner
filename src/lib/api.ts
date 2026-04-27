@@ -180,20 +180,36 @@ export const presentationApi = {
     teacherName: string;
     teacherSchool: string;
   }): Promise<PresentationResponse> => {
-    const res = await fetch(PRESENTATION_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        topic: params.topic,
-        description: params.description ?? "",
-        audience: params.audience ?? "",
-        slidesCount: params.slidesCount ?? 8,
-        teacherName: params.teacherName,
-        teacherSchool: params.teacherSchool,
-      }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || `Ошибка генерации (${res.status})`);
-    return data as PresentationResponse;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 85000);
+    try {
+      const res = await fetch(PRESENTATION_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          topic: params.topic,
+          description: params.description ?? "",
+          audience: params.audience ?? "",
+          slidesCount: params.slidesCount ?? 8,
+          teacherName: params.teacherName,
+          teacherSchool: params.teacherSchool,
+        }),
+        signal: controller.signal,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Ошибка генерации (${res.status})`);
+      return data as PresentationResponse;
+    } catch (e) {
+      const err = e as Error;
+      if (err.name === "AbortError") {
+        throw new Error("Сервис GigaChat сейчас перегружен. Подождите минуту и попробуйте снова.");
+      }
+      if (err.message.includes("Failed to fetch")) {
+        throw new Error("Не удалось связаться с сервером. Проверьте интернет и попробуйте снова через минуту.");
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
   },
 };

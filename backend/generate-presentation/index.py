@@ -131,31 +131,29 @@ def _gigachat_call_once(messages: list, max_tokens: int, temperature: float, mod
     return choices[0].get("message", {}).get("content", "").strip()
 
 
-def gigachat_chat(messages: list, max_tokens: int = 1500, temperature: float = 0.3, model: str = "GigaChat", req_timeout: int = 60, max_retries: int = 3) -> str:
-    """Отправляет запрос в GigaChat с автоматическими ретраями при сетевых сбоях."""
+def gigachat_chat(messages: list, max_tokens: int = 1500, temperature: float = 0.3, model: str = "GigaChat", req_timeout: int = 25, max_retries: int = 2) -> str:
+    """Отправляет запрос в GigaChat с быстрыми ретраями при сетевых сбоях.
+    Общий бюджет: 2 попытки × 25 сек + пауза 1 сек = максимум ~52 сек.
+    """
     last_err = None
     for attempt in range(1, max_retries + 1):
         try:
             return _gigachat_call_once(messages, max_tokens, temperature, model, req_timeout)
         except urllib.error.HTTPError as e:
             err_text = e.read().decode(errors='ignore')[:300] if hasattr(e, 'read') else str(e)
-            # Модель не найдена / нет доступа — нет смысла повторять, нужен фоллбэк
             if e.code in (401, 403, 404):
                 if e.code == 404 and "model" in err_text.lower():
                     raise RuntimeError(f"MODEL_NOT_FOUND: {err_text}")
                 raise RuntimeError(f"GigaChat chat HTTP {e.code}: {err_text}")
-            # 429/5xx — ретраим
             last_err = RuntimeError(f"GigaChat HTTP {e.code}: {err_text}")
             if attempt < max_retries:
-                time.sleep(1.5 * attempt)
+                time.sleep(1.0)
                 continue
             raise last_err
         except Exception as e:
-            # Обрыв соединения, таймаут — ретраим
             last_err = RuntimeError(f"GigaChat недоступен: {e}")
             if attempt < max_retries:
-                time.sleep(1.5 * attempt)
-                # На случай протухшего токена — сбрасываем кэш перед повтором
+                time.sleep(1.0)
                 _TOKEN_CACHE["token"] = None
                 _TOKEN_CACHE["expires_at"] = None
                 continue

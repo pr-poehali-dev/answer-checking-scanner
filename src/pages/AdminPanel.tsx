@@ -22,6 +22,11 @@ export default function AdminPanel() {
   const [resetFor, setResetFor] = useState<string | null>(null);
   const [resetPass, setResetPass] = useState("");
 
+  // Выдача подписки
+  const [subFor, setSubFor] = useState<UserRow | null>(null);
+  const [subMonths, setSubMonths] = useState<number>(1);
+  const [subBusy, setSubBusy] = useState(false);
+
   const loadUsers = async () => {
     setLoading(true);
     setError("");
@@ -99,6 +104,26 @@ export default function AdminPanel() {
     } catch (e) {
       setError((e as Error).message);
     }
+  };
+
+  const handleGrantSubscription = async (login: string, months: number, revoke = false) => {
+    setSubBusy(true);
+    setError("");
+    try {
+      await authApi.grantSubscription(token, { login, months, revoke });
+      setSubFor(null);
+      await loadUsers();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSubBusy(false);
+    }
+  };
+
+  const formatSubUntil = (iso: string | null) => {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    return d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
   };
 
   const generatePassword = () => {
@@ -243,25 +268,46 @@ export default function AdminPanel() {
               <tr>
                 <th className="px-3 py-2 text-left font-semibold">Логин</th>
                 <th className="px-3 py-2 text-left font-semibold">ФИО</th>
-                <th className="px-3 py-2 text-left font-semibold">Школа</th>
+                <th className="px-3 py-2 text-left font-semibold">Email</th>
                 <th className="px-3 py-2 text-left font-semibold">Роль</th>
+                <th className="px-3 py-2 text-left font-semibold">Подписка</th>
                 <th className="px-3 py-2 text-left font-semibold">Статус</th>
                 <th className="px-3 py-2 text-right font-semibold">Действия</th>
               </tr>
             </thead>
             <tbody>
               {users.length === 0 && !loading && (
-                <tr><td colSpan={6} className="px-3 py-8 text-center text-muted-foreground">Учителей пока нет. Добавьте первого.</td></tr>
+                <tr><td colSpan={7} className="px-3 py-8 text-center text-muted-foreground">Учителей пока нет. Добавьте первого.</td></tr>
               )}
               {users.map(u => (
                 <tr key={u.id} className="border-t border-border">
                   <td className="px-3 py-2 mono">{u.login}</td>
                   <td className="px-3 py-2">{u.full_name}</td>
-                  <td className="px-3 py-2 text-muted-foreground">{u.school}</td>
+                  <td className="px-3 py-2 text-muted-foreground">{u.email || "—"}</td>
                   <td className="px-3 py-2">
                     <span className={`px-2 py-0.5 rounded-sm text-[10px] font-semibold ${u.role === "admin" ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}>
                       {u.role === "admin" ? "АДМИН" : "УЧИТЕЛЬ"}
                     </span>
+                  </td>
+                  <td className="px-3 py-2">
+                    {u.role === "admin" ? (
+                      <span className="text-muted-foreground">—</span>
+                    ) : u.subscription_active ? (
+                      <span className="inline-flex items-center gap-1 text-green-600">
+                        <Icon name="CircleCheck" size={12} fallback="CheckCircle" />
+                        до {formatSubUntil(u.subscription_until)}
+                      </span>
+                    ) : u.subscription_status === "expired" ? (
+                      <span className="inline-flex items-center gap-1 text-amber-600">
+                        <Icon name="Clock" size={12} />
+                        истекла {formatSubUntil(u.subscription_until)}
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-muted-foreground">
+                        <Icon name="CircleX" size={12} fallback="X" />
+                        нет
+                      </span>
+                    )}
                   </td>
                   <td className="px-3 py-2">
                     {u.is_active ? (
@@ -272,6 +318,13 @@ export default function AdminPanel() {
                   </td>
                   <td className="px-3 py-2 text-right">
                     <div className="inline-flex gap-1">
+                      {u.role !== "admin" && (
+                        <button
+                          onClick={() => { setSubFor(u); setSubMonths(1); }}
+                          title="Управление подпиской АОУСПТ"
+                          className="p-1.5 hover:bg-primary/10 rounded-sm text-muted-foreground hover:text-primary"
+                        ><Icon name="Crown" size={13} fallback="Star" /></button>
+                      )}
                       <button
                         onClick={() => { setResetFor(u.login); setResetPass(""); }}
                         title="Сбросить пароль"
@@ -296,6 +349,92 @@ export default function AdminPanel() {
             </tbody>
           </table>
         </div>
+
+        {/* Модалка выдачи подписки */}
+        {subFor && (
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={() => !subBusy && setSubFor(null)}>
+            <div className="bg-white rounded-sm border border-border max-w-md w-full p-5" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center gap-2 mb-1">
+                <Icon name="Crown" size={16} className="text-primary" fallback="Star" />
+                <h3 className="text-sm font-bold">Подписка АОУСПТ</h3>
+              </div>
+              <p className="text-xs text-muted-foreground mb-4">
+                Пользователь: <span className="font-semibold text-foreground">{subFor.full_name}</span>{" "}
+                · <span className="mono">{subFor.login}</span>
+              </p>
+
+              <div className="border border-border rounded-sm p-3 mb-4 bg-muted/30 text-xs">
+                <p className="text-muted-foreground mb-1">Текущий статус:</p>
+                {subFor.subscription_active ? (
+                  <p className="text-green-600 font-semibold">
+                    Активна до {formatSubUntil(subFor.subscription_until)}
+                  </p>
+                ) : subFor.subscription_status === "expired" ? (
+                  <p className="text-amber-600 font-semibold">
+                    Истекла {formatSubUntil(subFor.subscription_until)}
+                  </p>
+                ) : (
+                  <p className="text-muted-foreground font-semibold">Нет подписки</p>
+                )}
+              </div>
+
+              <p className="text-xs font-semibold mb-2">Выдать или продлить подписку</p>
+              <div className="grid grid-cols-4 gap-2 mb-4">
+                {[1, 3, 6, 12].map(m => (
+                  <button
+                    key={m}
+                    onClick={() => setSubMonths(m)}
+                    disabled={subBusy}
+                    className={`py-2 text-xs font-semibold rounded-sm border transition-colors disabled:opacity-50 ${
+                      subMonths === m
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-border hover:bg-muted"
+                    }`}
+                  >
+                    {m} мес.
+                  </button>
+                ))}
+              </div>
+
+              <p className="text-[11px] text-muted-foreground mb-4">
+                Подписка добавится к текущей дате окончания (если активна) или начнётся с сегодняшнего дня.
+              </p>
+
+              <div className="flex gap-2 justify-between">
+                {subFor.subscription_active ? (
+                  <button
+                    onClick={() => {
+                      if (confirm(`Отозвать подписку у ${subFor.full_name}? Доступ к разделам будет закрыт.`)) {
+                        handleGrantSubscription(subFor.login, 0, true);
+                      }
+                    }}
+                    disabled={subBusy}
+                    className="px-3 py-2 border border-destructive/40 text-destructive text-xs rounded-sm hover:bg-destructive/5 disabled:opacity-50"
+                  >
+                    Отозвать
+                  </button>
+                ) : <div />}
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setSubFor(null)}
+                    disabled={subBusy}
+                    className="px-3 py-2 border border-border text-xs rounded-sm hover:bg-muted disabled:opacity-50"
+                  >
+                    Отмена
+                  </button>
+                  <button
+                    onClick={() => handleGrantSubscription(subFor.login, subMonths, false)}
+                    disabled={subBusy}
+                    className="px-4 py-2 bg-primary text-primary-foreground text-xs font-semibold rounded-sm hover:opacity-90 disabled:opacity-50 inline-flex items-center gap-2"
+                  >
+                    {subBusy && <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+                    {subFor.subscription_active ? "Продлить" : "Активировать"} на {subMonths} мес.
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Модалка сброса пароля */}
         {resetFor && (

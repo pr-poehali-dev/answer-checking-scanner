@@ -1,17 +1,20 @@
 """
-API авторизации и управления пользователями АОУСПТ (АОУСПТ).
-POST /login — вход учителя или администратора
-POST /register — регистрация нового учителя (только для admin)
-GET /users — список пользователей (только для admin)
-POST /toggle — активировать/деактивировать пользователя (только для admin)
-POST /reset-password — сбросить пароль (только для admin)
-DELETE /delete — удалить пользователя (только для admin)
+API авторизации и управления пользователями АОУСПТ.
+POST /login — вход (учитель/админ)
+POST /signup — самостоятельная регистрация (имя, фамилия, email, пароль) — логин генерируется автоматически
+POST /register — добавление пользователя админом
+POST /me — получить актуальный статус подписки (по токену)
+GET /users — список пользователей (admin)
+POST /toggle, /reset-password — admin
+DELETE /delete — admin
+POST /grant-subscription — admin (выдать/продлить/отозвать подписку)
 """
 import json
 import os
+import re
 import hashlib
-import secrets
 import psycopg2
+from datetime import datetime, timedelta
 
 CORS = {
     "Access-Control-Allow-Origin": "*",
@@ -20,7 +23,6 @@ CORS = {
 }
 
 SCHEMA = os.environ.get("MAIN_DB_SCHEMA", "t_p31556921_answer_checking_scan")
-# Пароль администратора (хранится в секрете, fallback для демо)
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin2026")
 
 
@@ -33,12 +35,81 @@ def hash_password(password: str) -> str:
 
 
 def check_admin_token(headers: dict) -> bool:
-    """Проверяем токен администратора из заголовка X-Authorization."""
     token = headers.get("x-authorization", "")
     return token.startswith("admin:")
 
 
+# ── Транслитерация для генерации логина ────────────────────────────────────
+TRANSLIT = {
+    'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'e',
+    'ж': 'zh', 'з': 'z', 'и': 'i', 'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm',
+    'н': 'n', 'о': 'o', 'п': 'p', 'р': 'r', 'с': 's', 'т': 't', 'у': 'u',
+    'ф': 'f', 'х': 'h', 'ц': 'c', 'ч': 'ch', 'ш': 'sh', 'щ': 'sch',
+    'ъ': '', 'ы': 'y', 'ь': '', 'э': 'e', 'ю': 'yu', 'я': 'ya',
+}
+
+
+def translit(s: str) -> str:
+    s = (s or '').strip().lower()
+    out = []
+    for ch in s:
+        if ch in TRANSLIT:
+            out.append(TRANSLIT[ch])
+        elif ch.isalnum():
+            out.append(ch)
+    res = ''.join(out)
+    return re.sub(r'[^a-z0-9]', '', res)
+
+
+def generate_login(first_name: str, last_name: str, cur) -> str:
+    """Генерируем логин по схеме: фамилия + первая буква имени; при коллизии — числовой суффикс."""
+    f = translit(last_name)
+    i = translit(first_name)
+    base = (f + (i[:1] if i else ''))[:32] or 'user'
+    candidate = base
+    n = 1
+    while True:
+        cur.execute(
+            f"SELECT 1 FROM {SCHEMA}.users WHERE login = %s",
+            (candidate,)
+        )
+        if not cur.fetchone():
+            return candidate
+        n += 1
+        candidate = f"{base}{n}"
+
+
+# ── Подписка ───────────────────────────────────────────────────────────────
+
+def get_subscription_payload(row_status, row_until) -> dict:
+    """Нормализуем статус подписки к фронту."""
+    now = datetime.utcnow()
+    until = row_until
+    is_active = False
+    status = row_status or 'none'
+    if until and isinstance(until, datetime):
+        if until > now:
+            is_active = True
+            status = 'active'
+        elif status == 'active':
+            status = 'expired'
+    return {
+        "subscription_status": status,
+        "subscription_active": is_active,
+        "subscription_until": until.isoformat() if isinstance(until, datetime) else None,
+    }
+
+
+# ── Email validation ───────────────────────────────────────────────────────
+EMAIL_RE = re.compile(r'^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$')
+
+
+def is_valid_email(email: str) -> bool:
+    return bool(email and EMAIL_RE.match(email))
+
+
 def handler(event: dict, context) -> dict:
+    """Авторизация, регистрация, управление пользователями и подписками АОУСПТ."""
     if event.get("httpMethod") == "OPTIONS":
         return {"statusCode": 200, "headers": CORS, "body": ""}
 
@@ -56,56 +127,160 @@ def handler(event: dict, context) -> dict:
 
     headers = {k.lower(): v for k, v in (event.get("headers") or {}).items()}
     qs = event.get("queryStringParameters") or {}
-    # action может прийти и через query (?action=users), и через тело JSON
     action = (qs.get("action") or body.get("action") or "").strip().lower()
-
-    # Определяем "роут": сначала action, потом path
     route = action or path.lstrip("/").lower() or "login"
+
+    # ── POST signup (открытая регистрация учителя) ──────────────────────────
+    if method == "POST" and route == "signup":
+        first_name = (body.get("first_name") or "").strip()
+        last_name = (body.get("last_name") or "").strip()
+        email = (body.get("email") or "").strip().lower()
+        password = (body.get("password") or "").strip()
+        school = (body.get("school") or "АОУСПТ").strip()
+
+        if not first_name or not last_name:
+            return _resp(400, {"error": "Укажите имя и фамилию"})
+        if not is_valid_email(email):
+            return _resp(400, {"error": "Некорректный email"})
+        if len(password) < 6:
+            return _resp(400, {"error": "Пароль должен быть не менее 6 символов"})
+
+        full_name = f"{last_name} {first_name}"
+
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            # Проверка уникальности email
+            cur.execute(
+                f"SELECT 1 FROM {SCHEMA}.users WHERE LOWER(email) = %s",
+                (email,)
+            )
+            if cur.fetchone():
+                return _resp(409, {"error": "Этот email уже зарегистрирован"})
+
+            login = generate_login(first_name, last_name, cur)
+            cur.execute(
+                f"""INSERT INTO {SCHEMA}.users
+                    (login, password_hash, full_name, first_name, last_name, email, school, role, created_by, subscription_status)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, 'teacher', 'self', 'none') RETURNING id""",
+                (login, hash_password(password), full_name, first_name, last_name, email, school)
+            )
+            conn.commit()
+            user_id = cur.fetchone()[0]
+
+            token = f"teacher:{hash_password(login + password + 'salt')}"
+            return _resp(200, {
+                "success": True,
+                "id": user_id,
+                "login": login,
+                "role": "teacher",
+                "full_name": full_name,
+                "first_name": first_name,
+                "last_name": last_name,
+                "email": email,
+                "school": school,
+                "token": token,
+                "subscription_status": "none",
+                "subscription_active": False,
+                "subscription_until": None,
+            })
+        except psycopg2.errors.UniqueViolation:
+            conn.rollback()
+            return _resp(409, {"error": "Логин или email уже заняты"})
+        finally:
+            conn.close()
 
     # ── POST login ───────────────────────────────────────────────────────────
     if method == "POST" and route in ("", "login"):
-        login = body.get("login", "").strip()
+        login_or_email = body.get("login", "").strip()
         password = body.get("password", "")
 
-        if not login or not password:
-            return _resp(400, {"error": "Введите логин и пароль"})
+        if not login_or_email or not password:
+            return _resp(400, {"error": "Введите логин/email и пароль"})
 
-        # Проверка администратора (специальный логин)
-        if login == "admin" and password == ADMIN_PASSWORD:
+        # Админ
+        if login_or_email == "admin" and password == ADMIN_PASSWORD:
             return _resp(200, {
                 "role": "admin",
                 "login": "admin",
                 "full_name": "Администратор АОУСПТ",
                 "school": "АОУСПТ",
                 "token": f"admin:{hash_password(ADMIN_PASSWORD + 'salt_admin')}",
+                "subscription_status": "active",
+                "subscription_active": True,
+                "subscription_until": None,
             })
 
-        # Проверка учителя из БД
         conn = get_conn()
         try:
             cur = conn.cursor()
+            # Поиск по логину или email
             cur.execute(
-                f"SELECT login, full_name, school, role, is_active FROM {SCHEMA}.users WHERE login = %s AND password_hash = %s",
-                (login, hash_password(password))
+                f"""SELECT login, password_hash, full_name, first_name, last_name, email, school, role, is_active,
+                          subscription_status, subscription_until
+                    FROM {SCHEMA}.users
+                    WHERE login = %s OR LOWER(email) = LOWER(%s)
+                    LIMIT 1""",
+                (login_or_email, login_or_email)
             )
             row = cur.fetchone()
-            if not row:
+            if not row or row[1] != hash_password(password):
                 return _resp(401, {"error": "Неверный логин или пароль"})
-            _, full_name, school, role, is_active = row
+
+            (login, _ph, full_name, first_name, last_name, email, school, role, is_active,
+             sub_status, sub_until) = row
             if not is_active:
                 return _resp(403, {"error": "Аккаунт заблокирован. Обратитесь к администратору."})
+
+            sub = get_subscription_payload(sub_status, sub_until)
+
+            # Если подписка истекла — фиксируем в БД
+            if sub_status == 'active' and sub['subscription_status'] == 'expired':
+                cur.execute(
+                    f"UPDATE {SCHEMA}.users SET subscription_status = 'expired' WHERE login = %s",
+                    (login,)
+                )
+                conn.commit()
+
             token = f"teacher:{hash_password(login + password + 'salt')}"
             return _resp(200, {
                 "role": role,
                 "login": login,
                 "full_name": full_name,
+                "first_name": first_name,
+                "last_name": last_name,
+                "email": email,
                 "school": school,
                 "token": token,
+                **sub,
             })
         finally:
             conn.close()
 
-    # ── POST register (только admin) ────────────────────────────────────────
+    # ── POST me (актуализация подписки по логину/токену) ─────────────────────
+    if method == "POST" and route == "me":
+        login = (body.get("login") or "").strip()
+        if not login:
+            return _resp(400, {"error": "Укажите login"})
+        if login == "admin":
+            return _resp(200, {"login": "admin", "subscription_status": "active",
+                               "subscription_active": True, "subscription_until": None})
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"SELECT subscription_status, subscription_until FROM {SCHEMA}.users WHERE login = %s",
+                (login,)
+            )
+            row = cur.fetchone()
+            if not row:
+                return _resp(404, {"error": "Пользователь не найден"})
+            sub = get_subscription_payload(row[0], row[1])
+            return _resp(200, {"login": login, **sub})
+        finally:
+            conn.close()
+
+    # ── POST register (admin) ───────────────────────────────────────────────
     if method == "POST" and route == "register":
         if not check_admin_token(headers):
             return _resp(403, {"error": "Нет доступа"})
@@ -139,7 +314,7 @@ def handler(event: dict, context) -> dict:
         finally:
             conn.close()
 
-    # ── GET users (только admin) ─────────────────────────────────────────────
+    # ── GET users (admin) ───────────────────────────────────────────────────
     if method == "GET" and route == "users":
         if not check_admin_token(headers):
             return _resp(403, {"error": "Нет доступа"})
@@ -148,19 +323,27 @@ def handler(event: dict, context) -> dict:
         try:
             cur = conn.cursor()
             cur.execute(
-                f"SELECT id, login, full_name, school, role, is_active, created_at FROM {SCHEMA}.users ORDER BY created_at DESC"
+                f"""SELECT id, login, full_name, first_name, last_name, email, school, role, is_active, created_at,
+                           subscription_status, subscription_plan, subscription_until
+                    FROM {SCHEMA}.users ORDER BY created_at DESC"""
             )
             rows = cur.fetchall()
-            users = [
-                {"id": r[0], "login": r[1], "full_name": r[2], "school": r[3],
-                 "role": r[4], "is_active": r[5], "created_at": str(r[6])}
-                for r in rows
-            ]
+            users = []
+            for r in rows:
+                sub = get_subscription_payload(r[10], r[12])
+                users.append({
+                    "id": r[0], "login": r[1], "full_name": r[2],
+                    "first_name": r[3], "last_name": r[4], "email": r[5],
+                    "school": r[6], "role": r[7], "is_active": r[8],
+                    "created_at": str(r[9]),
+                    "subscription_plan": r[11],
+                    **sub,
+                })
             return _resp(200, {"users": users})
         finally:
             conn.close()
 
-    # ── POST toggle (только admin) ───────────────────────────────────────────
+    # ── POST toggle (admin) ─────────────────────────────────────────────────
     if method == "POST" and route == "toggle":
         if not check_admin_token(headers):
             return _resp(403, {"error": "Нет доступа"})
@@ -184,7 +367,7 @@ def handler(event: dict, context) -> dict:
         finally:
             conn.close()
 
-    # ── POST reset-password (только admin) ───────────────────────────────────
+    # ── POST reset-password (admin) ─────────────────────────────────────────
     if method == "POST" and route in ("reset-password", "reset_password"):
         if not check_admin_token(headers):
             return _resp(403, {"error": "Нет доступа"})
@@ -210,7 +393,86 @@ def handler(event: dict, context) -> dict:
         finally:
             conn.close()
 
-    # ── DELETE delete (только admin) ─────────────────────────────────────────
+    # ── POST grant-subscription (admin) ─────────────────────────────────────
+    if method == "POST" and route in ("grant-subscription", "grant_subscription"):
+        if not check_admin_token(headers):
+            return _resp(403, {"error": "Нет доступа"})
+
+        login = (body.get("login") or "").strip()
+        plan = (body.get("plan") or "АОУСПТ").strip()
+        try:
+            months = int(body.get("months") or 1)
+        except (TypeError, ValueError):
+            months = 1
+        months = max(1, min(months, 36))
+        revoke = bool(body.get("revoke"))
+
+        if not login:
+            return _resp(400, {"error": "Укажите login"})
+
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"SELECT subscription_status, subscription_until FROM {SCHEMA}.users WHERE login = %s",
+                (login,)
+            )
+            row = cur.fetchone()
+            if not row:
+                return _resp(404, {"error": "Пользователь не найден"})
+
+            if revoke:
+                cur.execute(
+                    f"""UPDATE {SCHEMA}.users
+                        SET subscription_status='none', subscription_until=NULL, subscription_plan=NULL
+                        WHERE login = %s""",
+                    (login,)
+                )
+                conn.commit()
+                return _resp(200, {"login": login, "subscription_status": "none",
+                                   "subscription_active": False, "subscription_until": None})
+
+            now = datetime.utcnow()
+            current_until = row[1] if isinstance(row[1], datetime) else None
+            base = current_until if (current_until and current_until > now) else now
+            new_until = base + timedelta(days=30 * months)
+
+            started_at = now if not (current_until and current_until > now) else None
+            if started_at:
+                cur.execute(
+                    f"""UPDATE {SCHEMA}.users
+                        SET subscription_status='active', subscription_plan=%s,
+                            subscription_until=%s, subscription_started_at=%s
+                        WHERE login = %s""",
+                    (plan, new_until, started_at, login)
+                )
+            else:
+                cur.execute(
+                    f"""UPDATE {SCHEMA}.users
+                        SET subscription_status='active', subscription_plan=%s, subscription_until=%s
+                        WHERE login = %s""",
+                    (plan, new_until, login)
+                )
+
+            cur.execute(
+                f"""INSERT INTO {SCHEMA}.payments
+                    (user_login, plan, amount, months, provider, status, source, granted_by,
+                     paid_at, subscription_until)
+                    VALUES (%s, %s, 0, %s, 'admin-grant', 'succeeded', 'admin', 'admin', NOW(), %s)""",
+                (login, plan, months, new_until)
+            )
+            conn.commit()
+            return _resp(200, {
+                "login": login,
+                "subscription_status": "active",
+                "subscription_active": True,
+                "subscription_until": new_until.isoformat(),
+                "subscription_plan": plan,
+            })
+        finally:
+            conn.close()
+
+    # ── DELETE delete (admin) ───────────────────────────────────────────────
     if method == "DELETE" and route == "delete":
         if not check_admin_token(headers):
             return _resp(403, {"error": "Нет доступа"})

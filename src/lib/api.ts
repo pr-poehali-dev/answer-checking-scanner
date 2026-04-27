@@ -4,23 +4,39 @@ const BLANK_URL = "https://functions.poehali.dev/5b4fc8cd-8022-458e-acb6-8606c6c
 const RECOGNIZE_URL = "https://functions.poehali.dev/de6ae337-82d7-4cc2-ae90-3cf97475be59";
 const PRESENTATION_URL = "https://functions.poehali.dev/9aa03e93-715c-41fd-91f4-6d4e79487ed9";
 const TEST_URL = "https://functions.poehali.dev/80f9c6ec-e492-47b6-881a-633a41d7e4f4";
+const SUBSCRIPTION_URL = "https://functions.poehali.dev/0dc83bdb-3da2-4cb9-b9d9-f0b48cfb25da";
 
-export interface AuthUser {
+export type SubscriptionStatus = "none" | "active" | "expired";
+
+export interface SubscriptionInfo {
+  subscription_status: SubscriptionStatus;
+  subscription_active: boolean;
+  subscription_until: string | null;
+}
+
+export interface AuthUser extends SubscriptionInfo {
   role: "admin" | "teacher";
   login: string;
   full_name: string;
+  first_name?: string;
+  last_name?: string;
+  email?: string;
   school: string;
   token: string;
 }
 
-export interface UserRow {
+export interface UserRow extends SubscriptionInfo {
   id: number;
   login: string;
   full_name: string;
+  first_name?: string;
+  last_name?: string;
+  email?: string;
   school: string;
   role: string;
   is_active: boolean;
   created_at: string;
+  subscription_plan?: string | null;
 }
 
 async function request<T>(action: string, options: RequestInit & { token?: string } = {}): Promise<T> {
@@ -48,8 +64,27 @@ export const authApi = {
       body: JSON.stringify({ login, password }),
     }),
 
+  signup: (payload: { first_name: string; last_name: string; email: string; password: string; school?: string }) =>
+    request<AuthUser & { id: number; success: boolean }>("signup", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  me: (login: string) =>
+    request<{ login: string } & SubscriptionInfo>("me", {
+      method: "POST",
+      body: JSON.stringify({ login }),
+    }),
+
   register: (token: string, payload: { login: string; password: string; full_name: string; school?: string; role?: string }) =>
     request<{ success: boolean; id: number; login: string }>("register", {
+      method: "POST",
+      token,
+      body: JSON.stringify(payload),
+    }),
+
+  grantSubscription: (token: string, payload: { login: string; plan?: string; months?: number; revoke?: boolean }) =>
+    request<{ login: string } & SubscriptionInfo & { subscription_plan?: string }>("grant-subscription", {
       method: "POST",
       token,
       body: JSON.stringify(payload),
@@ -259,7 +294,7 @@ export const testApi = {
     teacherSchool: string;
   }): Promise<TestResponse> => {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 85000);
+    const timer = setTimeout(() => controller.abort(), 90000);
     try {
       const res = await fetch(TEST_URL, {
         method: "POST",
@@ -283,4 +318,75 @@ export const testApi = {
       clearTimeout(timer);
     }
   },
+};
+
+// ── Подписки АОУСПТ ────────────────────────────────────────────────────────
+
+export interface SubscriptionPlan {
+  code: string;
+  name: string;
+  amount: number;
+  months: number;
+  description: string;
+  popular: boolean;
+}
+
+export interface PaymentRow {
+  id: number;
+  plan: string;
+  amount: number;
+  months: number;
+  provider: string;
+  status: string;
+  source: string;
+  granted_by: string | null;
+  created_at: string;
+  paid_at: string | null;
+  subscription_until: string | null;
+}
+
+async function subRequest<T>(action: string, options: RequestInit & { login?: string } = {}): Promise<T> {
+  const { login, headers, ...rest } = options;
+  const url = `${SUBSCRIPTION_URL}?action=${action}`;
+  const res = await fetch(url, {
+    ...rest,
+    headers: {
+      "Content-Type": "application/json",
+      ...(login ? { "X-User-Login": login } : {}),
+      ...(headers || {}),
+    },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Ошибка ${res.status}`);
+  return data as T;
+}
+
+export const subscriptionApi = {
+  plans: () =>
+    subRequest<{ plans: SubscriptionPlan[]; available: boolean }>("plans", { method: "GET" }),
+
+  create: (login: string, plan: string, return_url: string) =>
+    subRequest<{ payment_id: string; confirmation_url: string; status: string; amount: number; plan: string }>(
+      "create",
+      {
+        method: "POST",
+        login,
+        body: JSON.stringify({ plan, login, return_url }),
+      }
+    ),
+
+  check: (payment_id: string) =>
+    subRequest<{ status: string; subscription_until?: string; subscription_active: boolean }>(
+      "check",
+      {
+        method: "POST",
+        body: JSON.stringify({ payment_id }),
+      }
+    ),
+
+  history: (login: string) =>
+    subRequest<{ history: PaymentRow[] }>("history", {
+      method: "GET",
+      login,
+    }),
 };

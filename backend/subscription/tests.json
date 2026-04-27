@@ -1,0 +1,42 @@
+{
+  "tests": [
+    {
+      "name": "OPTIONS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    },
+    {
+      "name": "GET plans returns 200",
+      "method": "GET",
+      "path": "/?action=plans",
+      "expectedStatus": 200
+    },
+    {
+      "name": "POST check без payment_id",
+      "method": "POST",
+      "path": "/?action=check",
+      "body": {},
+      "expectedStatus": 400,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "GET history без логина",
+      "method": "GET",
+      "path": "/?action=history",
+      "expectedStatus": 400,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "POST create без логина",
+      "method": "POST",
+      "path": "/?action=create",
+      "body": {"plan": "monthly"},
+      "expectedStatus": 400,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
+    }
+  ]
+}

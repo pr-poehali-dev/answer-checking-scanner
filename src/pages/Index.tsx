@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Icon from "@/components/ui/icon";
 import { Section, NAV_ITEMS, SECTION_TITLES } from "@/components/scanner/types";
 import { UploadSection } from "@/components/scanner/SectionsA";
@@ -9,6 +9,7 @@ import { PresentationsSection } from "@/components/scanner/PresentationsSection"
 import { TestsSection } from "@/components/scanner/TestsSection";
 import LoginPage from "@/pages/LoginPage";
 import AdminPanel from "@/pages/AdminPanel";
+import SubscriptionGate from "@/components/SubscriptionGate";
 import { useAppStore, appStore } from "@/store/appStore";
 
 const SECTION_COMPONENTS: Record<Section, React.FC> = {
@@ -26,12 +27,25 @@ export default function Index() {
   const { teacher, yadiskConnected } = useAppStore();
   const ActiveSection = SECTION_COMPONENTS[active];
 
+  // Периодическая проверка подписки (раз при заходе и каждые 5 мин)
+  useEffect(() => {
+    if (!teacher || teacher.role !== "teacher") return;
+    appStore.refreshSubscription();
+    const t = setInterval(() => appStore.refreshSubscription(), 5 * 60 * 1000);
+    return () => clearInterval(t);
+  }, [teacher?.login, teacher?.role]);
+
   if (!teacher) {
     return <LoginPage onLogin={() => setActive("works")} />;
   }
 
   if (teacher.role === "admin") {
     return <AdminPanel />;
+  }
+
+  // Гейт подписки — показываем если она не активна
+  if (!teacher.subscriptionActive) {
+    return <SubscriptionGate />;
   }
 
   const initials = teacher.name

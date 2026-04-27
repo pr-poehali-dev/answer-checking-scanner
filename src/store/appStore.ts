@@ -5,13 +5,21 @@ import { yadisk, yadiskStorage, ROOT_FOLDER, STUDENTS_FILE, WORKS_FILE, type Yad
 
 export type UserRole = "admin" | "teacher";
 
+export type SubscriptionStatus = "none" | "active" | "expired";
+
 export interface Teacher {
   login: string;
   name: string;
+  firstName?: string;
+  lastName?: string;
+  email?: string;
   school: string;
   role: UserRole;
   authToken: string;
   yadiskToken: string | null;
+  subscriptionStatus: SubscriptionStatus;
+  subscriptionActive: boolean;
+  subscriptionUntil: string | null;
 }
 
 export interface Student {
@@ -151,14 +159,19 @@ export const appStore = {
         teacher: {
           login: user.login,
           name: user.full_name,
+          firstName: user.first_name,
+          lastName: user.last_name,
+          email: user.email,
           school: user.school,
           role: user.role,
           authToken: user.token,
           yadiskToken: null,
+          subscriptionStatus: user.subscription_status || "none",
+          subscriptionActive: !!user.subscription_active,
+          subscriptionUntil: user.subscription_until,
         },
       };
       notify();
-      // Восстанавливаем подключение Я.Диска и тянем данные с него
       if (user.role === "teacher") {
         appStore.restoreYadisk().then((restored) => {
           if (restored) {
@@ -169,6 +182,54 @@ export const appStore = {
       return { ok: true, role: user.role };
     } catch (e) {
       return { ok: false, error: (e as Error).message || "Ошибка входа" };
+    }
+  },
+
+  signup: async (payload: { first_name: string; last_name: string; email: string; password: string }): Promise<
+    { ok: true; role: UserRole; login: string } | { ok: false; error: string }
+  > => {
+    try {
+      const user = await authApi.signup(payload);
+      state = {
+        ...state,
+        teacher: {
+          login: user.login,
+          name: user.full_name,
+          firstName: user.first_name,
+          lastName: user.last_name,
+          email: user.email,
+          school: user.school,
+          role: user.role,
+          authToken: user.token,
+          yadiskToken: null,
+          subscriptionStatus: user.subscription_status || "none",
+          subscriptionActive: !!user.subscription_active,
+          subscriptionUntil: user.subscription_until,
+        },
+      };
+      notify();
+      return { ok: true, role: user.role, login: user.login };
+    } catch (e) {
+      return { ok: false, error: (e as Error).message || "Ошибка регистрации" };
+    }
+  },
+
+  refreshSubscription: async (): Promise<void> => {
+    if (!state.teacher || state.teacher.role === "admin") return;
+    try {
+      const data = await authApi.me(state.teacher.login);
+      state = {
+        ...state,
+        teacher: {
+          ...state.teacher,
+          subscriptionStatus: data.subscription_status,
+          subscriptionActive: !!data.subscription_active,
+          subscriptionUntil: data.subscription_until,
+        },
+      };
+      notify();
+    } catch (e) {
+      console.warn("refreshSubscription failed:", e);
     }
   },
 

@@ -102,11 +102,11 @@ def get_gigachat_token() -> str:
     return token
 
 
-def gigachat_chat(messages: list, max_tokens: int = 2500, temperature: float = 0.4) -> str:
+def gigachat_chat(messages: list, max_tokens: int = 1500, temperature: float = 0.3, model: str = "GigaChat") -> str:
     """Отправляет запрос в GigaChat и возвращает текст ответа."""
     token = get_gigachat_token()
     payload = {
-        "model": "GigaChat",
+        "model": model,
         "messages": messages,
         "temperature": temperature,
         "max_tokens": max_tokens,
@@ -123,10 +123,12 @@ def gigachat_chat(messages: list, max_tokens: int = 2500, temperature: float = 0
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=60, context=_ssl_ctx()) as r:
+        with urllib.request.urlopen(req, timeout=25, context=_ssl_ctx()) as r:
             body = json.loads(r.read().decode())
     except urllib.error.HTTPError as e:
         raise RuntimeError(f"GigaChat chat HTTP {e.code}: {e.read().decode(errors='ignore')[:300]}")
+    except Exception as e:
+        raise RuntimeError(f"GigaChat недоступен: {e}")
 
     choices = body.get("choices") or []
     if not choices:
@@ -154,33 +156,27 @@ def generate_outline(topic: str, description: str, slides_count: int, audience: 
     """Просит GigaChat сгенерировать структуру презентации в JSON."""
     audience_str = audience or "школьники"
     system = (
-        "Ты — опытный учитель-методист. Ты создаёшь структуру учебной презентации в формате JSON. "
-        "Пиши на русском языке, кратко и информативно. Используй академический стиль. "
-        "Каждый слайд должен иметь чёткий заголовок и 3–5 коротких пунктов (8–14 слов каждый). "
-        "Не повторяй одно и то же. Не используй слова 'слайд 1', 'слайд 2' в заголовках."
+        "Ты учитель-методист. Создавай структуру учебной презентации в JSON. "
+        "Кратко, информативно, без воды. Заголовки слайдов — 3–6 слов. "
+        "Тезисы — 6–12 слов каждый, по 3 тезиса на слайд."
     )
     user = (
-        f"Создай план презентации для урока.\n"
-        f"Тема: {topic}\n"
-        f"Описание/контекст: {description or '—'}\n"
+        f"Тема урока: {topic}\n"
+        f"Контекст: {description or '—'}\n"
         f"Аудитория: {audience_str}\n"
-        f"Количество содержательных слайдов: {slides_count} "
-        f"(не считая титульного и финального).\n\n"
-        "Верни СТРОГО JSON следующего вида (без комментариев и без markdown):\n"
-        "{\n"
-        '  "subtitle": "короткий подзаголовок темы (до 80 символов)",\n'
-        '  "slides": [\n'
-        '    {"title": "Заголовок слайда", "bullets": ["Тезис 1", "Тезис 2", "Тезис 3"], "note": "Краткий комментарий учителя 1-2 предложения"}\n'
-        "  ],\n"
-        '  "conclusion": ["Ключевой вывод 1", "Ключевой вывод 2", "Ключевой вывод 3"]\n'
-        "}\n"
-        f"В массиве slides должно быть РОВНО {slides_count} элементов."
+        f"Слайдов: {slides_count}\n\n"
+        "Верни ТОЛЬКО JSON (без markdown):\n"
+        '{"subtitle":"подзаголовок темы","slides":[{"title":"...","bullets":["...","...","..."]}],"conclusion":["вывод1","вывод2","вывод3"]}\n'
+        f"slides — массив из ровно {slides_count} элементов."
     )
+
+    # Динамический max_tokens: ~120 токенов на слайд + резерв
+    max_tok = min(180 * slides_count + 400, 2200)
 
     raw = gigachat_chat(
         [{"role": "system", "content": system}, {"role": "user", "content": user}],
-        max_tokens=2200,
-        temperature=0.5,
+        max_tokens=max_tok,
+        temperature=0.3,
     )
     try:
         data = extract_json(raw)
@@ -434,10 +430,19 @@ def handler(event: dict, context) -> dict:
     if not topic:
         return _resp(400, {"error": "Укажите тему урока"})
 
+    # Если попросили слишком много слайдов, бьём на части не будем — просто ограничиваем
+    # для гарантии укладывания в 30 сек таймаут.
+    if slides_count > 10:
+        slides_count = 10
+
     try:
         outline = generate_outline(topic, description, slides_count, audience)
     except Exception as e:
-        return _resp(500, {"error": f"Ошибка генерации структуры: {e}"})
+        msg = str(e)
+        # Дружелюбное сообщение для типичных проблем
+        if "timed out" in msg.lower() or "timeout" in msg.lower():
+            return _resp(504, {"error": "ИИ слишком долго отвечает. Попробуйте ещё раз — обычно со второго раза получается за 5-10 секунд."})
+        return _resp(500, {"error": f"Ошибка генерации структуры: {msg}"})
 
     try:
         pptx_bytes = build_pptx(

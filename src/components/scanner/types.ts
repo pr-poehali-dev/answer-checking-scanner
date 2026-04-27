@@ -1,10 +1,6 @@
 export type Section =
   | "upload"
-  | "recognition"
-  | "checking"
   | "results"
-  | "analytics"
-  | "export"
   | "students"
   | "works"
   | "presentations"
@@ -13,11 +9,7 @@ export type Section =
 export const NAV_ITEMS: { id: Section; label: string; icon: string }[] = [
   { id: "works", label: "Работы", icon: "ClipboardList" },
   { id: "upload", label: "Загрузка бланков", icon: "Upload" },
-  { id: "recognition", label: "Распознавание", icon: "ScanLine" },
-  { id: "checking", label: "Проверка ответов", icon: "CheckSquare" },
   { id: "results", label: "Результаты", icon: "BarChart2" },
-  { id: "analytics", label: "Статистика", icon: "TrendingUp" },
-  { id: "export", label: "Экспорт", icon: "FileDown" },
   { id: "students", label: "Ученики", icon: "Users" },
   { id: "presentations", label: "Презентации", icon: "Presentation" },
   { id: "settings", label: "Настройки", icon: "Settings" },
@@ -36,11 +28,7 @@ export const MOCK_STUDENTS = [
 
 export const SECTION_TITLES: Record<Section, string> = {
   upload: "Загрузка и сканирование бланков",
-  recognition: "Распознавание ответов",
-  checking: "Проверка и сравнение ответов",
   results: "Результаты",
-  analytics: "Статистика и аналитика",
-  export: "Экспорт отчётов",
   students: "Список учеников",
   works: "Работы",
   presentations: "Презентации",

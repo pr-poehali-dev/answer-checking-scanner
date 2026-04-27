@@ -1,8 +1,8 @@
 import { useState } from "react";
 import Icon from "@/components/ui/icon";
 import { Section, NAV_ITEMS, SECTION_TITLES } from "@/components/scanner/types";
-import { UploadSection, RecognitionSection, CheckingSection } from "@/components/scanner/SectionsA";
-import { ResultsSection, AnalyticsSection, ExportSection, SettingsSection } from "@/components/scanner/SectionsB";
+import { UploadSection } from "@/components/scanner/SectionsA";
+import { ResultsSection, SettingsSection } from "@/components/scanner/SectionsB";
 import { StudentsSection } from "@/components/scanner/StudentsSection";
 import { WorksSection } from "@/components/scanner/WorksSection";
 import { PresentationsSection } from "@/components/scanner/PresentationsSection";
@@ -12,11 +12,7 @@ import { useAppStore, appStore } from "@/store/appStore";
 
 const SECTION_COMPONENTS: Record<Section, React.FC> = {
   upload: UploadSection,
-  recognition: RecognitionSection,
-  checking: CheckingSection,
   results: ResultsSection,
-  analytics: AnalyticsSection,
-  export: ExportSection,
   students: StudentsSection,
   works: WorksSection,
   presentations: PresentationsSection,

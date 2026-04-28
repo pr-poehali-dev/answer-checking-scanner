@@ -62,14 +62,17 @@ export function PresentationsSection() {
 
     try {
       setStage("ИИ готовит структуру презентации…");
-      const result = await presentationApi.generate({
-        topic: topic.trim(),
-        description: description.trim(),
-        audience,
-        slidesCount,
-        teacherName: teacher.name,
-        teacherSchool: teacher.school,
-      });
+      const result = await presentationApi.generate(
+        {
+          topic: topic.trim(),
+          description: description.trim(),
+          audience,
+          slidesCount,
+          teacherName: teacher.name,
+          teacherSchool: teacher.school,
+        },
+        (attempt) => setStage(`Повторная попытка ${attempt} из 3 — ИИ-сервис занят, ждём…`),
+      );
 
       let yadiskPath: string | null = null;
       let uploadedToYadisk = false;

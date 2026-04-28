@@ -30,10 +30,8 @@ CORS = {
     "Access-Control-Allow-Headers": "Content-Type, X-Authorization",
 }
 
-# Максимальная сторона изображения для отправки в GigaChat
-# Увеличено — чтобы текст оставался читаемым
-MAX_SIDE_PX = 1600
-JPEG_QUALITY = 92
+# Лимит размера base64 для GigaChat (примерно 10MB файл → ~13MB base64)
+MAX_B64_BYTES = 13 * 1024 * 1024
 
 # ── GigaChat токен (кэш в памяти) ──
 _TOKEN_CACHE: dict = {}
@@ -87,37 +85,27 @@ def _get_gigachat_token() -> str:
 
 def _prepare_image(image_b64: str) -> str:
     """
-    Принимает base64 JPEG/PNG.
-    Возвращает base64 JPEG: сжатый до MAX_SIDE_PX, с улучшенным контрастом.
-    НЕ меняет геометрию/перспективу — только масштаб и яркость.
+    Возвращает изображение как есть (оригинал без потерь).
+    Только если base64 слишком большой (>13MB) — масштабируем с качеством 97%.
     """
+    if len(image_b64) <= MAX_B64_BYTES:
+        return image_b64  # оригинал — без пережатия
+
+    # Только если файл действительно огромный
     img_bytes = base64.b64decode(image_b64)
     arr = np.frombuffer(img_bytes, dtype=np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     if img is None:
-        raise ValueError("Не удалось декодировать изображение")
+        return image_b64
 
-    # Масштабирование — сохраняем пропорции
     h, w = img.shape[:2]
-    if max(h, w) > MAX_SIDE_PX:
-        scale = MAX_SIDE_PX / max(h, w)
-        new_w = max(1, int(w * scale))
-        new_h = max(1, int(h * scale))
-        img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+    scale = 4000 / max(h, w)
+    if scale < 1.0:
+        img = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_LANCZOS4)
 
-    # Улучшение контраста для читаемости рукописного текста
-    # Используем grayscale → автоуровни → обратно в BGR
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    # Авто-уровни: растягиваем гистограмму до [0..255]
-    p2, p98 = np.percentile(gray, (2, 98))
-    if p98 > p2:
-        scale_factor = 255.0 / (p98 - p2)
-        gray_norm = np.clip((gray.astype(np.float32) - p2) * scale_factor, 0, 255).astype(np.uint8)
-        img = cv2.cvtColor(gray_norm, cv2.COLOR_GRAY2BGR)
-
-    success, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
+    success, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 97])
     if not success:
-        raise RuntimeError("Ошибка кодирования JPEG")
+        return image_b64
     return base64.b64encode(buf.tobytes()).decode()
 
 

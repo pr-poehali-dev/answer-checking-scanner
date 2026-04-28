@@ -306,9 +306,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
           )}
         </div>
 
-        <div className="mt-3 p-3 border border-border rounded-sm bg-muted/40 text-center">
-          <p className="text-xs text-muted-foreground">Администратор: логин <span className="mono font-bold">admin</span></p>
-        </div>
+
       </div>
       </div>
       <CompanyFooter variant="full" />

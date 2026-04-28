@@ -23,6 +23,7 @@ export default function SubscriptionGate() {
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [returnedPaymentId, setReturnedPaymentId] = useState<string | null>(null);
+  const [agreedSub, setAgreedSub] = useState(false);
 
   useEffect(() => {
     subscriptionApi.plans()
@@ -164,6 +165,22 @@ export default function SubscriptionGate() {
           </div>
         )}
 
+        {/* Согласие с офертой */}
+        <label className="flex items-start gap-2.5 mb-5 cursor-pointer group">
+          <input
+            type="checkbox"
+            checked={agreedSub}
+            onChange={e => setAgreedSub(e.target.checked)}
+            className="mt-0.5 w-4 h-4 flex-shrink-0 accent-primary cursor-pointer"
+          />
+          <span className="text-xs text-muted-foreground leading-relaxed group-hover:text-foreground transition-colors">
+            Нажимая «Оформить», я принимаю условия{" "}
+            <a href="/oferta" target="_blank" className="underline underline-offset-2 hover:text-primary">Договора-оферты</a>
+            {" "}и даю согласие на обработку персональных данных согласно{" "}
+            <a href="/privacy" target="_blank" className="underline underline-offset-2 hover:text-primary">Политике конфиденциальности</a>
+          </span>
+        </label>
+
         {/* Тарифы */}
         <div className="grid md:grid-cols-3 gap-4 mb-6">
           {loadingPlans && (
@@ -190,7 +207,7 @@ export default function SubscriptionGate() {
               </div>
               <button
                 onClick={() => handleBuy(plan)}
-                disabled={busyPlan !== null || !available}
+                disabled={busyPlan !== null || !available || !agreedSub}
                 className={`mt-auto w-full inline-flex items-center justify-center gap-2 py-2.5 text-sm font-semibold rounded-sm transition-opacity disabled:opacity-50 ${
                   plan.popular
                     ? "bg-primary text-primary-foreground hover:opacity-90"

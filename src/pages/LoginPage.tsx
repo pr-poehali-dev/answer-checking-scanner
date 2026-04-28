@@ -49,6 +49,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
 
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [agreedReg, setAgreedReg] = useState(false);
 
   const generatedLogin = useMemo(
     () => previewLogin(firstName, lastName),
@@ -274,9 +275,24 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                 После регистрации потребуется оформить подписку <span className="font-semibold">АОУСПТ</span> для доступа к разделам системы.
               </p>
 
+              <label className="flex items-start gap-2.5 cursor-pointer group">
+                <input
+                  type="checkbox"
+                  checked={agreedReg}
+                  onChange={e => setAgreedReg(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 flex-shrink-0 accent-primary cursor-pointer"
+                />
+                <span className="text-[11px] text-muted-foreground leading-relaxed group-hover:text-foreground transition-colors">
+                  Я принимаю условия{" "}
+                  <a href="/oferta" target="_blank" className="underline underline-offset-2 hover:text-primary">Договора-оферты</a>
+                  {" "}и даю согласие на обработку персональных данных согласно{" "}
+                  <a href="/privacy" target="_blank" className="underline underline-offset-2 hover:text-primary">Политике конфиденциальности</a>
+                </span>
+              </label>
+
               <button
                 type="submit"
-                disabled={loading || !firstName || !lastName || !email || !signupPass}
+                disabled={loading || !firstName || !lastName || !email || !signupPass || !agreedReg}
                 className="w-full flex items-center justify-center gap-2 py-2.5 bg-primary text-primary-foreground text-sm font-semibold rounded-sm hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loading ? (

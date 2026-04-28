@@ -111,47 +111,35 @@ def _prepare_image(image_b64: str) -> str:
 
 def _gigachat_vision(image_b64: str, questions_count: int) -> dict:
     """
-    Один запрос к GigaChat-Pro Vision с inline base64.
+    Запрос к GigaChat Vision с inline base64.
     Возвращает {'code': '12345', 'answers': ['А','Б',...]}
     """
     token = _get_gigachat_token()
 
+    # Короткий промпт — меньше токенов на вход, быстрее ответ
     prompt = (
-        f"На изображении — заполненный учебный бланк ответов.\n"
-        f"Прочитай внимательно и точно:\n\n"
-        f"1. КОД УЧЕНИКА — 5 цифр, вписанных в клетки в верхней части бланка.\n"
-        f"2. ОТВЕТЫ НА ЗАДАНИЯ — {questions_count} ячеек. "
-        f"Часть 1 — буква или цифра в клетке. "
-        f"Часть 2 — слово или фраза на строке.\n\n"
-        f"Верни ТОЛЬКО валидный JSON (без markdown, без пояснений):\n"
-        f'{{"code":"12345","answers":["А","Б","В",...]}}\n\n'
-        f"Требования:\n"
-        f"- code: строка из 5 символов (цифра или ? если не разобрать)\n"
-        f"- answers: ровно {questions_count} элементов\n"
-        f"- Пустая клетка или нет ответа → пустая строка \"\"\n"
-        f"- Буквы заглавные русские, цифры — как написано\n"
-        f"- Только JSON, ничего лишнего"
+        f"Бланк ответов. Верни JSON:\n"
+        f'{{"code":"XXXXX","answers":["..."]}}\n'
+        f"code=5 цифр из верхних клеток (? если неразборчиво).\n"
+        f"answers={questions_count} элементов: буква/цифра из каждой клетки, "
+        f"\"\" если пусто. Только JSON."
     )
 
-    # Отправляем base64 напрямую как data URI — без Files API
     data_uri = f"data:image/jpeg;base64,{image_b64}"
 
     payload = {
-        "model": "GigaChat-Pro",
+        "model": "GigaChat",   # быстрее Pro, поддерживает Vision
         "messages": [
             {
                 "role": "user",
                 "content": [
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": data_uri},
-                    },
+                    {"type": "image_url", "image_url": {"url": data_uri}},
                     {"type": "text", "text": prompt},
                 ],
             }
         ],
-        "temperature": 0.05,
-        "max_tokens": 600,
+        "temperature": 0.01,
+        "max_tokens": 400,
         "stream": False,
     }
 
@@ -166,7 +154,8 @@ def _gigachat_vision(image_b64: str, questions_count: int) -> dict:
             "Connection": "close",
         },
     )
-    with urllib.request.urlopen(req, timeout=50, context=_ssl_ctx()) as r:
+    # Таймаут 24 сек — функция живёт 30 сек, успеем вернуть ошибку
+    with urllib.request.urlopen(req, timeout=24, context=_ssl_ctx()) as r:
         body = json.loads(r.read().decode())
 
     choices = body.get("choices") or []

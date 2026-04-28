@@ -3,6 +3,7 @@ import Icon from "@/components/ui/icon";
 import { appStore, useAppStore, Work, WorkType, GradeScale } from "@/store/appStore";
 import { WORK_TYPES, SUBJECTS } from "./types";
 import { blankApi } from "@/lib/api";
+import { BlankGenerator } from "./BlankGenerator";
 
 interface BlankModalProps {
   work: Work;
@@ -22,7 +23,8 @@ function BlankDownloadModal({ work, onClose }: BlankModalProps) {
         workId: work.id,
         workTitle: `${work.type}: ${work.subject} · ${work.classNum}${work.classLetter}`,
         perPage,
-        questionsCount: 40,
+        part1Count: work.part1Count,
+        part2Count: work.part2Count,
       });
       onClose();
     } catch (e) {
@@ -61,10 +63,12 @@ function BlankDownloadModal({ work, onClose }: BlankModalProps) {
 
           <div className="bg-muted/40 border border-border rounded-sm p-3 text-xs space-y-1">
             <p className="font-semibold">Что в бланке:</p>
-            <p className="text-muted-foreground">• 5 клеток для кода ученика</p>
-            <p className="text-muted-foreground">• 40 клеток для ответов (1 символ в клетке)</p>
-            <p className="text-muted-foreground">• Образец русских букв и цифр</p>
-            <p className="text-muted-foreground">• Реперные метки для распознавания · Ч/Б</p>
+            <p className="text-muted-foreground">• Код ученика (5 клеток), Фамилия, Класс, Дата</p>
+            <p className="text-muted-foreground">• Часть 1: {work.part1Count} клеток с номерами заданий</p>
+            {work.part2Count > 0 && (
+              <p className="text-muted-foreground">• Часть 2: {work.part2Count} строк с номерами заданий</p>
+            )}
+            <p className="text-muted-foreground">• Допустимые буквы и цифры</p>
           </div>
 
           {err && (
@@ -277,6 +281,14 @@ export function WorksSection() {
 
   return (
     <div className="animate-slide-up space-y-5">
+
+      <BlankGenerator />
+
+      <div className="flex items-center gap-3">
+        <div className="flex-1 h-px bg-border" />
+        <span className="text-xs text-muted-foreground uppercase tracking-wider">Список работ</span>
+        <div className="flex-1 h-px bg-border" />
+      </div>
 
       {/* Header */}
       <div className="flex items-center justify-between">

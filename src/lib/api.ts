@@ -116,7 +116,7 @@ export const authApi = {
 };
 
 export const blankApi = {
-  generate: async (params: { workId: string; workTitle: string; perPage: 1 | 2 | 4; questionsCount?: number }) => {
+  generate: async (params: { workId: string; workTitle: string; perPage: 1 | 2 | 4; part1Count?: number; part2Count?: number }) => {
     const res = await fetch(BLANK_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -127,7 +127,7 @@ export const blankApi = {
     return data as { pdf: string; filename: string; size: number };
   },
 
-  download: async (params: { workId: string; workTitle: string; perPage: 1 | 2 | 4; questionsCount?: number }) => {
+  download: async (params: { workId: string; workTitle: string; perPage: 1 | 2 | 4; part1Count?: number; part2Count?: number }) => {
     const { pdf, filename } = await blankApi.generate(params);
     const bin = atob(pdf);
     const arr = new Uint8Array(bin.length);

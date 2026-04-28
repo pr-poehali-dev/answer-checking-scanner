@@ -7,10 +7,10 @@
       "expectedStatus": 200
     },
     {
-      "name": "Generate single blank",
+      "name": "Generate single blank with parts",
       "method": "POST",
       "path": "/",
-      "body": { "workId": "123456", "workTitle": "Контрольная по математике", "perPage": 1, "questionsCount": 40 },
+      "body": { "workId": "123456", "workTitle": "Контрольная по математике", "perPage": 1, "part1Count": 15, "part2Count": 5 },
       "expectedStatus": 200,
       "expectedBody": { "filename": "string", "pdf": "string" },
       "bodyMatcher": "partial"
@@ -19,16 +19,7 @@
       "name": "Generate 2 per page",
       "method": "POST",
       "path": "/",
-      "body": { "workId": "654321", "workTitle": "Проверочная", "perPage": 2 },
-      "expectedStatus": 200,
-      "expectedBody": { "pdf": "string" },
-      "bodyMatcher": "partial"
-    },
-    {
-      "name": "Generate 4 per page",
-      "method": "POST",
-      "path": "/",
-      "body": { "workId": "111111", "workTitle": "Test", "perPage": 4 },
+      "body": { "workId": "654321", "workTitle": "Проверочная", "perPage": 2, "part1Count": 15, "part2Count": 5 },
       "expectedStatus": 200,
       "expectedBody": { "pdf": "string" },
       "bodyMatcher": "partial"

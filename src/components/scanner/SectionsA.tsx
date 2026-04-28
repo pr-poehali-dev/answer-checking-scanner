@@ -1,6 +1,5 @@
 import { useState, useCallback } from "react";
 import Icon from "@/components/ui/icon";
-import { BlankGenerator } from "./BlankGenerator";
 import { AnswerKeyPanel } from "./AnswerKeyPanel";
 import { ScanUploadZone } from "./ScanUploadZone";
 import { RecognitionResults } from "./RecognitionResults";
@@ -120,8 +119,6 @@ export function UploadSection() {
 
   return (
     <div className="animate-slide-up space-y-6">
-
-      <BlankGenerator />
 
       <div className="flex items-center gap-3">
         <div className="flex-1 h-px bg-border" />

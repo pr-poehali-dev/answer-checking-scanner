@@ -31,8 +31,9 @@ CORS = {
 }
 
 # Максимальная сторона изображения для отправки в GigaChat
-MAX_SIDE_PX = 1000
-JPEG_QUALITY = 82
+# Увеличено — чтобы текст оставался читаемым
+MAX_SIDE_PX = 1600
+JPEG_QUALITY = 92
 
 # ── GigaChat токен (кэш в памяти) ──
 _TOKEN_CACHE: dict = {}
@@ -104,13 +105,15 @@ def _prepare_image(image_b64: str) -> str:
         new_h = max(1, int(h * scale))
         img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
 
-    # Лёгкая нормализация контраста (не искажает содержимое)
-    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
-    l_ch, a_ch, b_ch = cv2.split(lab)
-    clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8))
-    l_ch = clahe.apply(l_ch)
-    lab = cv2.merge([l_ch, a_ch, b_ch])
-    img = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+    # Улучшение контраста для читаемости рукописного текста
+    # Используем grayscale → автоуровни → обратно в BGR
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    # Авто-уровни: растягиваем гистограмму до [0..255]
+    p2, p98 = np.percentile(gray, (2, 98))
+    if p98 > p2:
+        scale_factor = 255.0 / (p98 - p2)
+        gray_norm = np.clip((gray.astype(np.float32) - p2) * scale_factor, 0, 255).astype(np.uint8)
+        img = cv2.cvtColor(gray_norm, cv2.COLOR_GRAY2BGR)
 
     success, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
     if not success:

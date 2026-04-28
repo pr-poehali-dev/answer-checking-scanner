@@ -162,12 +162,26 @@ export interface RecognizeResponse {
 
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
+    // Если файл небольшой (до 7MB) — отправляем оригинал без потери качества
+    const MAX_RAW_SIZE = 7 * 1024 * 1024;
+    if (file.size <= MAX_RAW_SIZE) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const r = reader.result as string;
+        const idx = r.indexOf(",");
+        resolve(idx >= 0 ? r.slice(idx + 1) : r);
+      };
+      reader.onerror = () => reject(new Error("Не удалось прочитать файл"));
+      reader.readAsDataURL(file);
+      return;
+    }
+    // Большой файл — масштабируем, но с высоким качеством
     const reader = new FileReader();
     reader.onload = () => {
       const r = reader.result as string;
       const img = new Image();
       img.onload = () => {
-        const MAX_SIDE = 1800;
+        const MAX_SIDE = 2400;
         let { width, height } = img;
         if (width > MAX_SIDE || height > MAX_SIDE) {
           const scale = MAX_SIDE / Math.max(width, height);
@@ -179,7 +193,7 @@ function fileToBase64(file: File): Promise<string> {
         canvas.height = height;
         const ctx = canvas.getContext("2d")!;
         ctx.drawImage(img, 0, 0, width, height);
-        const dataUrl = canvas.toDataURL("image/jpeg", 0.88);
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.96);
         const idx = dataUrl.indexOf(",");
         resolve(idx >= 0 ? dataUrl.slice(idx + 1) : dataUrl);
       };

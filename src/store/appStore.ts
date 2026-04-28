@@ -3,6 +3,21 @@
 import { authApi } from "@/lib/api";
 import { yadisk, yadiskStorage, ROOT_FOLDER, STUDENTS_FILE, WORKS_FILE, type YadiskUser } from "@/lib/yadisk";
 
+// ── Автосохранение на Я.Диск (дебаунс 2.5 сек) ──────────────────────────────
+let _autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
+const _autoSaveEnabled = false; // включается только после первой загрузки данных
+
+function _scheduleAutoSave() {
+  if (!_autoSaveEnabled) return;
+  if (_autoSaveTimer) clearTimeout(_autoSaveTimer);
+  _autoSaveTimer = setTimeout(() => {
+    const { yadiskConnected, yadiskSyncing, teacher } = state;
+    if (yadiskConnected && !yadiskSyncing && teacher?.yadiskToken) {
+      appStore.syncToYadisk();
+    }
+  }, 2500);
+}
+
 export type UserRole = "admin" | "teacher";
 
 export type SubscriptionStatus = "none" | "active" | "expired";
@@ -241,6 +256,7 @@ export const appStore = {
   addStudent: (student: Student) => {
     state = { ...state, students: [...state.students, student] };
     notify();
+    _scheduleAutoSave();
   },
 
   updateStudent: (code: string, updated: Partial<Student>) => {
@@ -249,16 +265,19 @@ export const appStore = {
       students: state.students.map(s => s.code === code ? { ...s, ...updated } : s),
     };
     notify();
+    _scheduleAutoSave();
   },
 
   removeStudent: (code: string) => {
     state = { ...state, students: state.students.filter(s => s.code !== code) };
     notify();
+    _scheduleAutoSave();
   },
 
   setStudents: (students: Student[]) => {
     state = { ...state, students };
     notify();
+    _scheduleAutoSave();
   },
 
   generateStudentCode: (): string => {
@@ -273,6 +292,7 @@ export const appStore = {
   addWork: (work: Work) => {
     state = { ...state, works: [...state.works, work] };
     notify();
+    _scheduleAutoSave();
   },
 
   generateWorkId: (): string => {
@@ -291,6 +311,7 @@ export const appStore = {
     );
     state = { ...state, results: [...filtered, result] };
     notify();
+    _scheduleAutoSave();
   },
 
   addPresentation: (item: PresentationItem) => {
@@ -321,6 +342,8 @@ export const appStore = {
       teacher: state.teacher ? { ...state.teacher, yadiskToken: token } : null,
     };
     notify();
+    // После подключения — загружаем данные (автосохранение включится там)
+    appStore.loadFromYadisk();
   },
 
   disconnectYadisk: () => {
@@ -353,7 +376,7 @@ export const appStore = {
     return true;
   },
 
-  /** Сохранить учеников и работы на Я.Диск учителя. */
+  /** Сохранить учеников, работы и результаты на Я.Диск учителя. */
   syncToYadisk: async (): Promise<{ ok: true } | { ok: false; error: string }> => {
     const token = state.teacher?.yadiskToken;
     if (!token) return { ok: false, error: "Я.Диск не подключён" };
@@ -362,17 +385,21 @@ export const appStore = {
     notify();
     try {
       await yadisk.ensureFolder(token, ROOT_FOLDER);
-      const studentsJson = JSON.stringify({
-        students: state.students,
-        exportedAt: new Date().toISOString(),
-      }, null, 2);
-      await yadisk.uploadText(token, STUDENTS_FILE, studentsJson, true);
-      const worksJson = JSON.stringify({
-        works: state.works,
-        exportedAt: new Date().toISOString(),
-      }, null, 2);
-      await yadisk.uploadText(token, WORKS_FILE, worksJson, true);
-      state = { ...state, yadiskSyncing: false, yadiskLastSync: new Date().toISOString() };
+      const now = new Date().toISOString();
+
+      await yadisk.uploadText(token, STUDENTS_FILE, JSON.stringify({
+        students: state.students, exportedAt: now,
+      }, null, 2), true);
+
+      await yadisk.uploadText(token, WORKS_FILE, JSON.stringify({
+        works: state.works, exportedAt: now,
+      }, null, 2), true);
+
+      await yadisk.uploadText(token, `${ROOT_FOLDER}/results.json`, JSON.stringify({
+        results: state.results, exportedAt: now,
+      }, null, 2), true);
+
+      state = { ...state, yadiskSyncing: false, yadiskLastSync: now };
       notify();
       return { ok: true };
     } catch (e) {
@@ -382,7 +409,7 @@ export const appStore = {
     }
   },
 
-  /** Загрузить учеников и работы с Я.Диска учителя. */
+  /** Загрузить учеников, работы и результаты с Я.Диска учителя. */
   loadFromYadisk: async (): Promise<{ ok: true; studentsCount: number; worksCount: number } | { ok: false; error: string }> => {
     const token = state.teacher?.yadiskToken;
     if (!token) return { ok: false, error: "Я.Диск не подключён" };
@@ -392,33 +419,42 @@ export const appStore = {
     try {
       let students: Student[] = state.students;
       let works: Work[] = state.works;
+      let results: StudentResult[] = state.results;
 
       try {
         const r = await yadisk.downloadText(token, STUDENTS_FILE);
         const parsed = JSON.parse(r.text);
         if (Array.isArray(parsed.students)) students = parsed.students;
-      } catch {
-        // файла может не быть — игнорируем
-      }
+      } catch { /* файла нет — ок */ }
+
       try {
         const r = await yadisk.downloadText(token, WORKS_FILE);
         const parsed = JSON.parse(r.text);
         if (Array.isArray(parsed.works)) works = parsed.works;
-      } catch {
-        // файла может не быть — игнорируем
-      }
+      } catch { /* файла нет — ок */ }
+
+      try {
+        const r = await yadisk.downloadText(token, `${ROOT_FOLDER}/results.json`);
+        const parsed = JSON.parse(r.text);
+        if (Array.isArray(parsed.results)) results = parsed.results;
+      } catch { /* файла нет — ок */ }
 
       state = {
         ...state,
         students,
         works,
+        results,
         yadiskSyncing: false,
         yadiskLastSync: new Date().toISOString(),
       };
       notify();
+      // Включаем автосохранение только после первой загрузки
+      _autoSaveEnabled = true;
       return { ok: true, studentsCount: students.length, worksCount: works.length };
     } catch (e) {
       state = { ...state, yadiskSyncing: false };
+      // Включаем автосохранение даже если загрузка не удалась
+      _autoSaveEnabled = true;
       notify();
       return { ok: false, error: (e as Error).message || "Ошибка загрузки" };
     }

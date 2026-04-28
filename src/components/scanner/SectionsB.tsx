@@ -205,6 +205,7 @@ function YadiskCard() {
           </div>
         ) : (
           <div className="space-y-4">
+            {/* Аккаунт */}
             <div className="flex items-center gap-3 p-3 border border-border rounded-sm bg-muted/30">
               <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
                 <Icon name="User" size={15} className="text-primary" />
@@ -224,32 +225,52 @@ function YadiskCard() {
               </button>
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
+            {/* Статус автосохранения */}
+            <div className="flex items-center gap-3 p-3 rounded-sm border"
+              style={yadiskSyncing
+                ? { background: "hsl(210 80% 56% / 0.06)", borderColor: "hsl(210 80% 56% / 0.3)" }
+                : { background: "hsl(142 71% 45% / 0.06)", borderColor: "hsl(142 71% 45% / 0.3)" }
+              }
+            >
+              {yadiskSyncing ? (
+                <Icon name="Loader2" size={16} className="animate-spin flex-shrink-0" style={{ color: "#3b82f6" }} />
+              ) : (
+                <Icon name="CloudCheck" size={16} className="flex-shrink-0" style={{ color: "#22c55e" }} fallback="CheckCircle" />
+              )}
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold" style={{ color: yadiskSyncing ? "#3b82f6" : "#16a34a" }}>
+                  {yadiskSyncing ? "Сохранение…" : "Автосохранение включено"}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {yadiskLastSync
+                    ? `Сохранено: ${new Date(yadiskLastSync).toLocaleString("ru-RU")}`
+                    : "Сохранение происходит автоматически при любых изменениях"}
+                </p>
+              </div>
+            </div>
+
+            {/* Ручные кнопки */}
+            <div className="flex gap-2">
               <button
                 onClick={syncNow}
                 disabled={yadiskSyncing}
-                className="inline-flex items-center justify-center gap-2 px-3 py-2 bg-primary text-primary-foreground text-sm font-semibold rounded-sm hover:opacity-90 transition-opacity disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-border text-xs font-medium rounded-sm hover:bg-muted transition-colors disabled:opacity-50"
               >
-                <Icon name="CloudUpload" size={13} fallback="Upload" className={yadiskSyncing ? "animate-pulse" : ""} />
-                Сохранить на Диск
+                <Icon name="CloudUpload" size={13} fallback="Upload" />
+                Сохранить сейчас
               </button>
               <button
                 onClick={loadNow}
                 disabled={yadiskSyncing}
-                className="inline-flex items-center justify-center gap-2 px-3 py-2 border border-border text-sm font-semibold rounded-sm hover:bg-muted transition-colors disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-border text-xs font-medium rounded-sm hover:bg-muted transition-colors disabled:opacity-50"
               >
                 <Icon name="CloudDownload" size={13} fallback="Download" />
                 Загрузить с Диска
               </button>
             </div>
 
-            {yadiskLastSync && (
-              <p className="text-xs text-muted-foreground">
-                Последняя синхронизация: {new Date(yadiskLastSync).toLocaleString("ru-RU")}
-              </p>
-            )}
             <p className="text-xs text-muted-foreground">
-              Папка на Диске: <span className="mono font-semibold">АОУСПТ/</span> — ученики, работы и результаты.
+              Папка: <span className="mono font-semibold">АОУСПТ/</span> — ученики, работы, результаты.
             </p>
           </div>
         )}

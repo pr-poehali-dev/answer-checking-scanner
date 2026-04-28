@@ -161,20 +161,38 @@ export interface RecognizeResponse {
 }
 
 function fileToBase64(file: File): Promise<string> {
-  // Читаем оригинальный файл напрямую — без canvas, без пережатия
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
-      const buf = reader.result as ArrayBuffer;
-      const bytes = new Uint8Array(buf);
-      let binary = "";
-      for (let i = 0; i < bytes.byteLength; i++) {
-        binary += String.fromCharCode(bytes[i]);
-      }
-      resolve(btoa(binary));
+      const r = reader.result as string;
+      const img = new Image();
+      img.onload = () => {
+        // Масштаб: не более 2500px по длинной стороне — достаточно для GigaChat
+        const MAX_SIDE = 2500;
+        let { width, height } = img;
+        if (width > MAX_SIDE || height > MAX_SIDE) {
+          const scale = MAX_SIDE / Math.max(width, height);
+          width = Math.round(width * scale);
+          height = Math.round(height * scale);
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d")!;
+        // Белый фон (для PNG с прозрачностью)
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+        // JPEG 92% — высокое качество, текст читается, размер ~1-2MB
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
+        const idx = dataUrl.indexOf(",");
+        resolve(idx >= 0 ? dataUrl.slice(idx + 1) : dataUrl);
+      };
+      img.onerror = () => reject(new Error("Не удалось обработать изображение"));
+      img.src = r;
     };
     reader.onerror = () => reject(new Error("Не удалось прочитать файл"));
-    reader.readAsArrayBuffer(file);
+    reader.readAsDataURL(file);
   });
 }
 

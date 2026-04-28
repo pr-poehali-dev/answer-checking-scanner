@@ -34,7 +34,7 @@ export default function CompanyFooter({
             <span className="mono">{COMPANY_INFO.kpp}</span> · ОГРН{" "}
             <span className="mono">{COMPANY_INFO.ogrn}</span>
           </span>
-          <span className="inline-flex items-center gap-3">
+          <span className="inline-flex flex-wrap items-center gap-x-3 gap-y-1">
             <a
               href={`tel:${COMPANY_INFO.phoneLink}`}
               className="inline-flex items-center gap-1 hover:text-foreground"
@@ -49,6 +49,10 @@ export default function CompanyFooter({
               <Icon name="Mail" size={10} />
               {COMPANY_INFO.email}
             </a>
+            <span>·</span>
+            <a href="/oferta" className="hover:text-foreground underline underline-offset-2">Оферта</a>
+            <span>·</span>
+            <a href="/privacy" className="hover:text-foreground underline underline-offset-2">Конфиденциальность</a>
           </span>
         </div>
       </footer>
@@ -122,9 +126,12 @@ export default function CompanyFooter({
           <p>
             © {year} {COMPANY_INFO.fullName}. Все права защищены.
           </p>
-          <p>
-            АОУСПТ — Автоматизированная Обучающая Универсальная Система Проверки
-            Тестов
+          <p className="inline-flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span>Платежи через ЮKassa</span>
+            <span>·</span>
+            <a href="/oferta" className="hover:text-foreground underline underline-offset-2">Договор-оферта</a>
+            <span>·</span>
+            <a href="/privacy" className="hover:text-foreground underline underline-offset-2">Политика конфиденциальности</a>
           </p>
         </div>
       </div>

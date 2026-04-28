@@ -213,27 +213,33 @@ def _gigachat_call_once(messages: list, max_tokens: int, temperature: float, mod
 
 
 def gigachat_chat(messages: list, max_tokens: int = 1500, temperature: float = 0.4,
-                  model: str = "GigaChat", req_timeout: int = 25, max_retries: int = 2) -> str:
-    """Отправляет запрос в GigaChat с быстрыми ретраями при сетевых сбоях."""
+                  model: str = "GigaChat", req_timeout: int = 40, max_retries: int = 3) -> str:
+    """Отправляет запрос в GigaChat с ретраями при сетевых сбоях и rate-limit."""
     last_err = None
     for attempt in range(1, max_retries + 1):
         try:
             return _gigachat_call_once(messages, max_tokens, temperature, model, req_timeout)
         except urllib.error.HTTPError as e:
-            err_text = e.read().decode(errors='ignore')[:300] if hasattr(e, 'read') else str(e)
-            if e.code in (401, 403, 404):
-                if e.code == 404 and "model" in err_text.lower():
-                    raise RuntimeError(f"MODEL_NOT_FOUND: {err_text}")
-                raise RuntimeError(f"GigaChat chat HTTP {e.code}: {err_text}")
+            try:
+                err_text = e.read().decode(errors='ignore')[:300]
+            except Exception:
+                err_text = str(e)
+            # Ошибки аутентификации и «модель не найдена» — не ретраить
+            if e.code in (401, 403):
+                raise RuntimeError(f"GigaChat auth HTTP {e.code}: {err_text}")
+            if e.code == 404:
+                raise RuntimeError(f"MODEL_NOT_FOUND: {err_text}")
+            # 429 rate-limit и 5xx — ретраим с паузой
+            wait = 3.0 if e.code == 429 else 2.0
             last_err = RuntimeError(f"GigaChat HTTP {e.code}: {err_text}")
             if attempt < max_retries:
-                time.sleep(1.0)
+                time.sleep(wait)
                 continue
             raise last_err
         except Exception as e:
             last_err = RuntimeError(f"GigaChat недоступен: {e}")
             if attempt < max_retries:
-                time.sleep(1.0)
+                time.sleep(2.0)
                 _TOKEN_CACHE["token"] = None
                 _TOKEN_CACHE["expires_at"] = None
                 continue
@@ -242,7 +248,7 @@ def gigachat_chat(messages: list, max_tokens: int = 1500, temperature: float = 0
 
 
 def gigachat_with_fallback(messages: list, max_tokens: int = 1500) -> str:
-    """Сначала пробует быструю Lite-модель, при недоступности — обычную."""
+    """Пробует модели по очереди: быстрая → обычная."""
     last_err = None
     for model in ("GigaChat-2-Lite", "GigaChat-Lite", "GigaChat"):
         try:
@@ -250,7 +256,11 @@ def gigachat_with_fallback(messages: list, max_tokens: int = 1500) -> str:
         except RuntimeError as e:
             last_err = e
             msg = str(e)
-            if "MODEL_NOT_FOUND" in msg or "404" in msg or "401" in msg:
+            # Модель недоступна → следующая
+            if "MODEL_NOT_FOUND" in msg or "404" in msg or "401" in msg or "403" in msg:
+                continue
+            # Таймаут → пробуем следующую модель (она может быть быстрее)
+            if "timed out" in msg.lower() or "timeout" in msg.lower():
                 continue
             raise
     raise last_err if last_err else RuntimeError("Все модели GigaChat недоступны")
@@ -298,7 +308,8 @@ def generate_outline(topic: str, description: str, slides_count: int, audience: 
         "Каждый тезис — отдельная строка с конкретной информацией. Не повторяй одни и те же факты."
     )
 
-    max_tok = min(280 * slides_count + 600, 4000)
+    # ~200 токенов на слайд достаточно для подробного контента; не превышаем 2500
+    max_tok = min(200 * slides_count + 500, 2500)
 
     raw = gigachat_with_fallback(
         [{"role": "system", "content": system}, {"role": "user", "content": user}],
@@ -648,7 +659,9 @@ def handler(event: dict, context) -> dict:
     except Exception as e:
         msg = str(e)
         if "timed out" in msg.lower() or "timeout" in msg.lower():
-            return _resp(504, {"error": "Сервис GigaChat сейчас перегружен. Подождите 1-2 минуты и попробуйте снова."})
+            return _resp(504, {"error": "ИИ-сервис не успел ответить — попробуйте ещё раз через несколько секунд."})
+        if "429" in msg or "rate" in msg.lower():
+            return _resp(429, {"error": "Слишком много запросов к ИИ-сервису — подождите 30 секунд и попробуйте снова."})
         return _resp(500, {"error": f"Ошибка генерации структуры: {msg}"})
 
     try:

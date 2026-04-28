@@ -165,9 +165,26 @@ function fileToBase64(file: File): Promise<string> {
     const reader = new FileReader();
     reader.onload = () => {
       const r = reader.result as string;
-      // убираем "data:image/...;base64,"
-      const idx = r.indexOf(",");
-      resolve(idx >= 0 ? r.slice(idx + 1) : r);
+      const img = new Image();
+      img.onload = () => {
+        const MAX_SIDE = 1800;
+        let { width, height } = img;
+        if (width > MAX_SIDE || height > MAX_SIDE) {
+          const scale = MAX_SIDE / Math.max(width, height);
+          width = Math.round(width * scale);
+          height = Math.round(height * scale);
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d")!;
+        ctx.drawImage(img, 0, 0, width, height);
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.88);
+        const idx = dataUrl.indexOf(",");
+        resolve(idx >= 0 ? dataUrl.slice(idx + 1) : dataUrl);
+      };
+      img.onerror = () => reject(new Error("Не удалось обработать изображение"));
+      img.src = r;
     };
     reader.onerror = () => reject(new Error("Не удалось прочитать файл"));
     reader.readAsDataURL(file);

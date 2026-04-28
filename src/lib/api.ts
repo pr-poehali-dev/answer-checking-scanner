@@ -167,8 +167,9 @@ function fileToBase64(file: File): Promise<string> {
       const r = reader.result as string;
       const img = new Image();
       img.onload = () => {
-        // Масштаб: не более 2500px по длинной стороне — достаточно для GigaChat
-        const MAX_SIDE = 2500;
+        // 1400px — оптимум для GigaChat: буква в клетке ~35px, читается отлично
+        // Итоговый размер base64 ~300-600KB — надёжно проходит за таймаут
+        const MAX_SIDE = 1400;
         let { width, height } = img;
         if (width > MAX_SIDE || height > MAX_SIDE) {
           const scale = MAX_SIDE / Math.max(width, height);
@@ -179,12 +180,10 @@ function fileToBase64(file: File): Promise<string> {
         canvas.width = width;
         canvas.height = height;
         const ctx = canvas.getContext("2d")!;
-        // Белый фон (для PNG с прозрачностью)
         ctx.fillStyle = "#ffffff";
         ctx.fillRect(0, 0, width, height);
         ctx.drawImage(img, 0, 0, width, height);
-        // JPEG 92% — высокое качество, текст читается, размер ~1-2MB
-        const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
         const idx = dataUrl.indexOf(",");
         resolve(idx >= 0 ? dataUrl.slice(idx + 1) : dataUrl);
       };

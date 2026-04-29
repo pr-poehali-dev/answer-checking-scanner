@@ -157,30 +157,49 @@ export const yadisk = {
   },
 };
 
-// localStorage helpers — токен учителя живёт в браузере учителя
-const LS_ACCESS = "aousp_yadisk_access";
-const LS_REFRESH = "aousp_yadisk_refresh";
-const LS_USER = "aousp_yadisk_user";
+// localStorage helpers — токен привязан к логину учителя
+// Ключи содержат логин, чтобы разные ЛК не мешали друг другу
+
+function lsKeys(login: string) {
+  const slug = login.toLowerCase().replace(/[^a-z0-9_]/g, "_");
+  return {
+    access:  `aousp_yadisk_access_${slug}`,
+    refresh: `aousp_yadisk_refresh_${slug}`,
+    user:    `aousp_yadisk_user_${slug}`,
+  };
+}
+
+/** Удаляет старые ключи без суффикса (миграция со старого формата). */
+function clearLegacyKeys() {
+  localStorage.removeItem("aousp_yadisk_access");
+  localStorage.removeItem("aousp_yadisk_refresh");
+  localStorage.removeItem("aousp_yadisk_user");
+}
 
 export const yadiskStorage = {
-  save: (tokens: YadiskTokens) => {
-    localStorage.setItem(LS_ACCESS, tokens.access_token);
-    if (tokens.refresh_token) localStorage.setItem(LS_REFRESH, tokens.refresh_token);
-    if (tokens.user) localStorage.setItem(LS_USER, JSON.stringify(tokens.user));
+  save: (tokens: YadiskTokens, login: string) => {
+    clearLegacyKeys();
+    const k = lsKeys(login);
+    localStorage.setItem(k.access, tokens.access_token);
+    if (tokens.refresh_token) localStorage.setItem(k.refresh, tokens.refresh_token);
+    if (tokens.user) localStorage.setItem(k.user, JSON.stringify(tokens.user));
   },
-  load: (): { access: string | null; refresh: string | null; user: YadiskUser | null } => {
-    const access = localStorage.getItem(LS_ACCESS);
-    const refresh = localStorage.getItem(LS_REFRESH);
-    const userRaw = localStorage.getItem(LS_USER);
+  load: (login: string): { access: string | null; refresh: string | null; user: YadiskUser | null } => {
+    const k = lsKeys(login);
+    const access = localStorage.getItem(k.access);
+    const refresh = localStorage.getItem(k.refresh);
+    const userRaw = localStorage.getItem(k.user);
     let user: YadiskUser | null = null;
     if (userRaw) {
       try { user = JSON.parse(userRaw); } catch { user = null; }
     }
     return { access, refresh, user };
   },
-  clear: () => {
-    localStorage.removeItem(LS_ACCESS);
-    localStorage.removeItem(LS_REFRESH);
-    localStorage.removeItem(LS_USER);
+  clear: (login: string) => {
+    clearLegacyKeys();
+    const k = lsKeys(login);
+    localStorage.removeItem(k.access);
+    localStorage.removeItem(k.refresh);
+    localStorage.removeItem(k.user);
   },
 };

@@ -376,7 +376,7 @@ export const appStore = {
   },
 
   disconnectYadisk: () => {
-    yadiskStorage.clear();
+    yadiskStorage.clear(state.teacher?.login || "");
     state = {
       ...state,
       yadiskConnected: false,
@@ -388,11 +388,13 @@ export const appStore = {
 
   /** Восстанавливает подключение Я.Диска из localStorage (вызывать после login). */
   restoreYadisk: async (): Promise<boolean> => {
-    const { access, user } = yadiskStorage.load();
+    const login = state.teacher?.login || "";
+    if (!login) return false;
+    const { access, user } = yadiskStorage.load(login);
     if (!access) return false;
     const ok = await yadisk.ping(access);
     if (!ok) {
-      yadiskStorage.clear();
+      yadiskStorage.clear(login);
       return false;
     }
     state = {

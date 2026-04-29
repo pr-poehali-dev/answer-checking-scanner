@@ -42,7 +42,7 @@ export default function YadiskCallback() {
     (async () => {
       try {
         const tokens = await yadiskOAuth.exchange(code, userLogin, authToken);
-        yadiskStorage.save(tokens);
+        yadiskStorage.save(tokens, userLogin);
         appStore.connectYadisk(tokens.access_token, tokens.user || null);
         setStatus("ok");
         setMessage("Яндекс.Диск подключён!");

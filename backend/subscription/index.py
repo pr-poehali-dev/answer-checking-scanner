@@ -28,7 +28,7 @@ PLANS = [
     {
         "code": "monthly",
         "name": "АОУСПТ — Месяц",
-        "amount": 1,
+        "amount": 199,
         "months": 1,
         "description": "Подписка на 1 месяц. Все разделы доступны.",
         "popular": False,

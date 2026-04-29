@@ -28,7 +28,7 @@ PLANS = [
     {
         "code": "monthly",
         "name": "АОУСПТ — Месяц",
-        "amount": 490,
+        "amount": 199,
         "months": 1,
         "description": "Подписка на 1 месяц. Все разделы доступны.",
         "popular": False,
@@ -36,17 +36,17 @@ PLANS = [
     {
         "code": "halfyear",
         "name": "АОУСПТ — Полгода",
-        "amount": 2490,
+        "amount": 1099,
         "months": 6,
-        "description": "Подписка на 6 месяцев. Экономия 15%.",
+        "description": "Подписка на 6 месяцев. Экономия 8%.",
         "popular": True,
     },
     {
         "code": "year",
         "name": "АОУСПТ — Год",
-        "amount": 4490,
+        "amount": 2299,
         "months": 12,
-        "description": "Подписка на 12 месяцев. Экономия 25%.",
+        "description": "Подписка на 12 месяцев. Экономия 4%.",
         "popular": False,
     },
 ]

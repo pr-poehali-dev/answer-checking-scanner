@@ -32,7 +32,26 @@ function callbackUri(): string {
   return `${window.location.origin}/yadisk-callback`;
 }
 
+const LS_AUTH_LOGIN = "aousp_auth_login";
+const LS_AUTH_TOKEN = "aousp_auth_token";
+
 export const yadiskOAuth = {
+  /** Сохранить данные учителя перед редиректом на Яндекс */
+  saveAuthBeforeRedirect: (userLogin: string, authToken: string) => {
+    sessionStorage.setItem(LS_AUTH_LOGIN, userLogin);
+    sessionStorage.setItem(LS_AUTH_TOKEN, authToken);
+  },
+
+  /** Восстановить данные учителя после редиректа */
+  loadAuthAfterRedirect: (): { userLogin: string; authToken: string } | null => {
+    const userLogin = sessionStorage.getItem(LS_AUTH_LOGIN);
+    const authToken = sessionStorage.getItem(LS_AUTH_TOKEN);
+    sessionStorage.removeItem(LS_AUTH_LOGIN);
+    sessionStorage.removeItem(LS_AUTH_TOKEN);
+    if (!userLogin || !authToken) return null;
+    return { userLogin, authToken };
+  },
+
   /** Открыть страницу Яндекса для авторизации (через popup или redirect) */
   startAuth: async (state: string = "") => {
     const params = new URLSearchParams({

@@ -140,8 +140,14 @@ function YadiskCard() {
   const [connecting, setConnecting] = useState(false);
 
   const connect = async () => {
+    const { teacher } = appStore.getState();
+    if (!teacher?.login || !teacher?.authToken) {
+      alert("Вы не авторизованы. Войдите в личный кабинет и попробуйте снова.");
+      return;
+    }
     setConnecting(true);
     try {
+      yadiskOAuth.saveAuthBeforeRedirect(teacher.login, teacher.authToken);
       await yadiskOAuth.startAuth();
     } catch (e) {
       alert((e as Error).message || "Не удалось начать авторизацию");

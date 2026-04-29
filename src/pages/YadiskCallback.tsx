@@ -27,8 +27,13 @@ export default function YadiskCallback() {
       return;
     }
 
-    const { teacher } = appStore.getState();
-    if (!teacher || !teacher.login || !teacher.authToken) {
+    // После редиректа память очищена — читаем из sessionStorage
+    const saved = yadiskOAuth.loadAuthAfterRedirect();
+    const teacher = appStore.getState().teacher;
+    const userLogin = saved?.userLogin || teacher?.login || "";
+    const authToken = saved?.authToken || teacher?.authToken || "";
+
+    if (!userLogin || !authToken) {
       setStatus("error");
       setMessage("Вы не авторизованы. Войдите в личный кабинет и повторите подключение.");
       return;
@@ -36,7 +41,7 @@ export default function YadiskCallback() {
 
     (async () => {
       try {
-        const tokens = await yadiskOAuth.exchange(code, teacher.login, teacher.authToken);
+        const tokens = await yadiskOAuth.exchange(code, userLogin, authToken);
         yadiskStorage.save(tokens);
         appStore.connectYadisk(tokens.access_token, tokens.user || null);
         setStatus("ok");

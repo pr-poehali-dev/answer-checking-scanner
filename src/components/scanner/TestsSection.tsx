@@ -40,12 +40,25 @@ function formatBytes(b: number) {
 
 export function TestsSection() {
   const { teacher, generatedTests, yadiskConnected } = useAppStore();
+
+  // Предзаполнение из конспекта (если пришли из раздела «Конспекты»)
+  const synTopic = sessionStorage.getItem("synopsis_test_topic") || "";
+  const synSubject = sessionStorage.getItem("synopsis_test_subject") || "";
+  const synClass = Number(sessionStorage.getItem("synopsis_test_class") || "0");
+  const synDesc = sessionStorage.getItem("synopsis_test_description") || "";
+  if (synTopic) {
+    sessionStorage.removeItem("synopsis_test_topic");
+    sessionStorage.removeItem("synopsis_test_subject");
+    sessionStorage.removeItem("synopsis_test_class");
+    sessionStorage.removeItem("synopsis_test_description");
+  }
+
   const [workType, setWorkType] = useState<WorkTypeName>("Тест");
-  const [subject, setSubject] = useState<string>(SUBJECTS[0]);
-  const [classNum, setClassNum] = useState(7);
+  const [subject, setSubject] = useState<string>(synSubject || SUBJECTS[0]);
+  const [classNum, setClassNum] = useState(synClass || 7);
   const [classLetter, setClassLetter] = useState("А");
-  const [topic, setTopic] = useState("");
-  const [description, setDescription] = useState("");
+  const [topic, setTopic] = useState(synTopic);
+  const [description, setDescription] = useState(synDesc);
   const [part1Count, setPart1Count] = useState(10);
   const [part2Count, setPart2Count] = useState(2);
   const [busy, setBusy] = useState(false);

@@ -102,13 +102,17 @@ export function SynopsisSection() {
   };
 
   const goToPresentation = (item: SynopsisItem) => {
-    // Сохраняем данные из конспекта для предзаполнения формы презентаций
     sessionStorage.setItem("synopsis_topic", item.topic);
-    sessionStorage.setItem("synopsis_description",
-      `${item.subject}, ${item.classNum} класс. ${item.description || ""}`.trim()
-    );
-    // Переключаем раздел через событие
+    sessionStorage.setItem("synopsis_description", item.text);
     window.dispatchEvent(new CustomEvent("navigate-to-section", { detail: "presentations" }));
+  };
+
+  const goToTest = (item: SynopsisItem) => {
+    sessionStorage.setItem("synopsis_test_topic", item.topic);
+    sessionStorage.setItem("synopsis_test_subject", item.subject);
+    sessionStorage.setItem("synopsis_test_class", String(item.classNum));
+    sessionStorage.setItem("synopsis_test_description", item.text);
+    window.dispatchEvent(new CustomEvent("navigate-to-section", { detail: "tests" }));
   };
 
   return (
@@ -257,15 +261,23 @@ export function SynopsisSection() {
               <Icon name="CircleCheck" size={15} className="text-green-600" fallback="CheckCircle" />
               <p className="text-sm font-semibold text-green-700">Конспект готов!</p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs text-muted-foreground">{formatWordCount(created.wordCount)}</span>
+              <button
+                onClick={() => goToTest(created)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-sm transition-colors"
+                style={{ background: "hsl(142 71% 30%)", color: "#fff" }}
+              >
+                <Icon name="FileText" size={12} />
+                Составить тест
+              </button>
               <button
                 onClick={() => goToPresentation(created)}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-sm transition-colors"
                 style={{ background: "hsl(215 60% 22%)", color: "#fff" }}
               >
                 <Icon name="Presentation" size={12} />
-                Создать презентацию по конспекту
+                Создать презентацию
               </button>
             </div>
           </div>
@@ -287,7 +299,7 @@ export function SynopsisSection() {
         ) : (
           <div className="divide-y divide-border">
             {synopses.map(s => (
-              <SynopsisRow key={s.id} item={s} onGoPresentation={goToPresentation} />
+              <SynopsisRow key={s.id} item={s} onGoPresentation={goToPresentation} onGoTest={goToTest} />
             ))}
           </div>
         )}
@@ -358,7 +370,11 @@ function renderInline(text: string): React.ReactNode {
   );
 }
 
-function SynopsisRow({ item, onGoPresentation }: { item: SynopsisItem; onGoPresentation: (item: SynopsisItem) => void }) {
+function SynopsisRow({ item, onGoPresentation, onGoTest }: {
+  item: SynopsisItem;
+  onGoPresentation: (item: SynopsisItem) => void;
+  onGoTest: (item: SynopsisItem) => void;
+}) {
   const [expanded, setExpanded] = useState(false);
 
   const onDelete = () => {
@@ -391,9 +407,16 @@ function SynopsisRow({ item, onGoPresentation }: { item: SynopsisItem; onGoPrese
         </div>
         <div className="flex items-center gap-1 flex-shrink-0">
           <button
+            onClick={() => onGoTest(item)}
+            className="p-1.5 text-muted-foreground hover:text-green-600 transition-colors"
+            title="Составить тест по конспекту"
+          >
+            <Icon name="FileText" size={14} />
+          </button>
+          <button
             onClick={() => onGoPresentation(item)}
             className="p-1.5 text-muted-foreground hover:text-primary transition-colors"
-            title="Создать презентацию по этому конспекту"
+            title="Создать презентацию по конспекту"
           >
             <Icon name="Presentation" size={14} />
           </button>

@@ -5,7 +5,7 @@ import { yadisk, yadiskStorage, ROOT_FOLDER, STUDENTS_FILE, WORKS_FILE, type Yad
 
 // ── Автосохранение на Я.Диск (дебаунс 2.5 сек) ──────────────────────────────
 let _autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
-const _autoSaveEnabled = false; // включается только после первой загрузки данных
+let _autoSaveEnabled = false; // включается только после первой загрузки данных
 
 function _scheduleAutoSave() {
   if (!_autoSaveEnabled) return;

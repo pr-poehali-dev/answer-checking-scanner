@@ -46,15 +46,20 @@ export const yadiskOAuth = {
     window.location.href = data.url;
   },
 
-  /** Обменять полученный code на токены */
-  exchange: async (code: string): Promise<YadiskTokens> => {
+  /** Обменять полученный code на токены + привязать к ЛК */
+  exchange: async (code: string, userLogin: string, authToken: string): Promise<YadiskTokens> => {
     const res = await fetch(`${OAUTH_URL}?action=exchange`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code, redirect_uri: callbackUri() }),
+      body: JSON.stringify({ code, redirect_uri: callbackUri(), user_login: userLogin, auth_token: authToken }),
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Не удалось получить токен");
+    if (!res.ok) {
+      const err = new Error(data.error || "Не удалось получить токен");
+      (err as Error & { conflict?: boolean; yadisk_login?: string }).conflict = data.conflict || false;
+      (err as Error & { conflict?: boolean; yadisk_login?: string }).yadisk_login = data.yadisk_login || "";
+      throw err;
+    }
     return data as YadiskTokens;
   },
 

@@ -32,6 +32,15 @@
       "bodyMatcher": "partial"
     },
     {
+      "name": "exchange без user_login",
+      "method": "POST",
+      "path": "/?action=exchange",
+      "body": {"code": "testcode123"},
+      "expectedStatus": 400,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
+    },
+    {
       "name": "refresh без токена",
       "method": "POST",
       "path": "/?action=refresh",

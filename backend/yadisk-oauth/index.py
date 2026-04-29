@@ -1,20 +1,28 @@
 """
 OAuth-интеграция с Яндекс.Диском для учителей АОУСПТ.
 GET  /?action=auth_url&redirect_uri=...&state=... — получить URL для авторизации
-POST /?action=exchange  body: {code, redirect_uri} — обменять код на токены
+POST /?action=exchange  body: {code, redirect_uri, auth_token, user_login} — обменять код на токены и привязать к ЛК
 POST /?action=refresh   body: {refresh_token}     — обновить access-токен
+POST /?action=unbind    body: {auth_token, user_login} — отвязать Я.Диск от ЛК
 """
 import json
 import os
 import urllib.parse
 import urllib.request
 import urllib.error
+import psycopg2
 
 CORS = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Headers": "Content-Type, X-Authorization",
 }
+
+SCHEMA = os.environ.get("MAIN_DB_SCHEMA", "t_p31556921_answer_checking_scan")
+
+
+def get_conn():
+    return psycopg2.connect(os.environ["DATABASE_URL"])
 
 
 def _resp(status: int, body: dict) -> dict:
@@ -26,7 +34,20 @@ def _resp(status: int, body: dict) -> dict:
     }
 
 
+def _get_yandex_user_info(access_token: str) -> dict:
+    try:
+        req = urllib.request.Request(
+            "https://login.yandex.ru/info?format=json",
+            headers={"Authorization": f"OAuth {access_token}"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return json.loads(r.read().decode())
+    except Exception:
+        return {}
+
+
 def handler(event: dict, context) -> dict:
+    """OAuth-привязка Яндекс.Диска к учётной записи учителя АОУСПТ с проверкой уникальности."""
     if event.get("httpMethod") == "OPTIONS":
         return {"statusCode": 200, "headers": CORS, "body": ""}
 
@@ -49,7 +70,7 @@ def handler(event: dict, context) -> dict:
     if not client_id or not client_secret:
         return _resp(500, {"error": "OAuth-приложение Яндекса не настроено"})
 
-    # Получить URL для редиректа на Яндекс
+    # ── GET auth_url: получить URL для редиректа на Яндекс ──────────────────
     if method == "GET" and action == "auth_url":
         redirect_uri = (qs.get("redirect_uri") or "").strip()
         state = (qs.get("state") or "").strip()
@@ -66,12 +87,19 @@ def handler(event: dict, context) -> dict:
         url = "https://oauth.yandex.ru/authorize?" + urllib.parse.urlencode(params)
         return _resp(200, {"url": url})
 
-    # Обменять код на токены
+    # ── POST exchange: обмен кода на токены + привязка к ЛК ─────────────────
     if method == "POST" and action == "exchange":
         code = (body.get("code") or "").strip()
         redirect_uri = (body.get("redirect_uri") or "").strip()
+        user_login = (body.get("user_login") or "").strip()
+        auth_token = (body.get("auth_token") or "").strip()
+
         if not code:
             return _resp(400, {"error": "code обязателен"})
+        if not user_login or not auth_token:
+            return _resp(400, {"error": "Необходимо войти в систему перед подключением Я.Диска"})
+
+        # Получаем токены от Яндекса
         data = urllib.parse.urlencode({
             "grant_type": "authorization_code",
             "code": code,
@@ -99,32 +127,68 @@ def handler(event: dict, context) -> dict:
         except Exception as e:
             return _resp(500, {"error": f"Ошибка обмена кода: {e}"})
 
-        # Получим инфо о пользователе для отображения подключённого аккаунта
         access = tokens.get("access_token", "")
-        user_info = {}
-        if access:
-            try:
-                req2 = urllib.request.Request(
-                    "https://login.yandex.ru/info?format=json",
-                    headers={"Authorization": f"OAuth {access}"},
-                )
-                with urllib.request.urlopen(req2, timeout=10) as r2:
-                    user_info = json.loads(r2.read().decode())
-            except Exception:
-                user_info = {}
+        refresh = tokens.get("refresh_token", "")
+
+        # Получаем логин Яндекс-аккаунта
+        user_info = _get_yandex_user_info(access)
+        yandex_login = user_info.get("login") or ""
+        if not yandex_login:
+            return _resp(500, {"error": "Не удалось получить информацию о аккаунте Яндекса"})
+
+        # Проверяем и сохраняем привязку в БД
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+
+            # Проверяем, что текущий пользователь существует в БД
+            cur.execute(
+                f"SELECT login, yadisk_login FROM {SCHEMA}.users WHERE login = %s",
+                (user_login,)
+            )
+            row = cur.fetchone()
+            if not row:
+                return _resp(403, {"error": "Пользователь не найден"})
+
+            current_yadisk = row[1]
+
+            # Если у этого ЛК уже привязан другой Я.Диск — отвязываем старый
+            # (пользователь сам переподключает свой аккаунт)
+
+            # Проверяем, не привязан ли этот Яндекс-аккаунт к ДРУГОМУ ЛК
+            cur.execute(
+                f"SELECT login FROM {SCHEMA}.users WHERE yadisk_login = %s AND login != %s",
+                (yandex_login, user_login)
+            )
+            conflict = cur.fetchone()
+            if conflict:
+                return _resp(409, {
+                    "error": f"Этот аккаунт Яндекс.Диска ({yandex_login}) уже привязан к другому личному кабинету. Подключите другой аккаунт Яндекса.",
+                    "conflict": True,
+                    "yadisk_login": yandex_login,
+                })
+
+            # Сохраняем привязку
+            cur.execute(
+                f"UPDATE {SCHEMA}.users SET yadisk_login = %s, yadisk_refresh_token = %s WHERE login = %s",
+                (yandex_login, refresh, user_login)
+            )
+            conn.commit()
+        finally:
+            conn.close()
 
         return _resp(200, {
-            "access_token": tokens.get("access_token"),
-            "refresh_token": tokens.get("refresh_token"),
+            "access_token": access,
+            "refresh_token": refresh,
             "expires_in": tokens.get("expires_in"),
             "user": {
-                "login": user_info.get("login"),
-                "display_name": user_info.get("display_name") or user_info.get("real_name") or user_info.get("login"),
+                "login": yandex_login,
+                "display_name": user_info.get("display_name") or user_info.get("real_name") or yandex_login,
                 "default_email": user_info.get("default_email"),
             },
         })
 
-    # Обновить access по refresh
+    # ── POST refresh: обновить access по refresh ─────────────────────────────
     if method == "POST" and action == "refresh":
         refresh = (body.get("refresh_token") or "").strip()
         if not refresh:
@@ -150,5 +214,22 @@ def handler(event: dict, context) -> dict:
         except Exception as e:
             return _resp(500, {"error": f"Ошибка обновления: {e}"})
         return _resp(200, tokens)
+
+    # ── POST unbind: отвязать Я.Диск от ЛК ─────────────────────────────────
+    if method == "POST" and action == "unbind":
+        user_login = (body.get("user_login") or "").strip()
+        if not user_login:
+            return _resp(400, {"error": "user_login обязателен"})
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"UPDATE {SCHEMA}.users SET yadisk_login = NULL, yadisk_refresh_token = NULL WHERE login = %s",
+                (user_login,)
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return _resp(200, {"ok": True})
 
     return _resp(404, {"error": "Неизвестное действие"})

@@ -9,6 +9,7 @@ import { PresentationsSection } from "@/components/scanner/PresentationsSection"
 import { TestsSection } from "@/components/scanner/TestsSection";
 import { SynopsisSection } from "@/components/scanner/SynopsisSection";
 import LoginPage from "@/pages/LoginPage";
+import LandingPage from "@/pages/LandingPage";
 import AdminPanel from "@/pages/AdminPanel";
 import SubscriptionGate from "@/components/SubscriptionGate";
 import CompanyFooter from "@/components/CompanyFooter";
@@ -27,6 +28,7 @@ const SECTION_COMPONENTS: Record<Section, React.FC> = {
 
 export default function Index() {
   const [active, setActive] = useState<Section>("works");
+  const [authMode, setAuthMode] = useState<"landing" | "login" | "signup">("landing");
   const { teacher, yadiskConnected } = useAppStore();
   const ActiveSection = SECTION_COMPONENTS[active];
 
@@ -49,7 +51,21 @@ export default function Index() {
   }, []);
 
   if (!teacher) {
-    return <LoginPage onLogin={() => setActive("works")} />;
+    if (authMode === "landing") {
+      return (
+        <LandingPage
+          onLogin={() => setAuthMode("login")}
+          onRegister={() => setAuthMode("signup")}
+        />
+      );
+    }
+    return (
+      <LoginPage
+        onLogin={() => { setActive("works"); setAuthMode("landing"); }}
+        initialMode={authMode === "signup" ? "signup" : "login"}
+        onBack={() => setAuthMode("landing")}
+      />
+    );
   }
 
   if (teacher.role === "admin") {

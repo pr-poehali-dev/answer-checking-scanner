@@ -5,6 +5,8 @@ import CompanyFooter from "@/components/CompanyFooter";
 
 interface LoginPageProps {
   onLogin: (role: "admin" | "teacher") => void;
+  initialMode?: "login" | "signup";
+  onBack?: () => void;
 }
 
 const TRANSLIT: Record<string, string> = {
@@ -32,8 +34,8 @@ function previewLogin(firstName: string, lastName: string): string {
 
 type Mode = "login" | "signup";
 
-export default function LoginPage({ onLogin }: LoginPageProps) {
-  const [mode, setMode] = useState<Mode>("login");
+export default function LoginPage({ onLogin, initialMode = "login", onBack }: LoginPageProps) {
+  const [mode, setMode] = useState<Mode>(initialMode);
 
   // login
   const [login, setLogin] = useState("");
@@ -92,6 +94,17 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
+      {onBack && (
+        <div className="px-4 pt-4">
+          <button
+            onClick={onBack}
+            className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <Icon name="ArrowLeft" size={13} />
+            На главную
+          </button>
+        </div>
+      )}
       <div className="flex-1 flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
         {/* Logo */}

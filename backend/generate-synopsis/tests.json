@@ -1,0 +1,37 @@
+{
+  "tests": [
+    {
+      "name": "OPTIONS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    },
+    {
+      "name": "Без предмета — 400",
+      "method": "POST",
+      "path": "/",
+      "body": {"topic": "Закон Ома", "class_num": 10},
+      "expectedStatus": 400,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Без темы — 400",
+      "method": "POST",
+      "path": "/",
+      "body": {"subject": "Физика", "class_num": 10},
+      "expectedStatus": 400,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Некорректный класс — 400",
+      "method": "POST",
+      "path": "/",
+      "body": {"subject": "Физика", "topic": "Закон Ома", "class_num": 99},
+      "expectedStatus": 400,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
+    }
+  ]
+}

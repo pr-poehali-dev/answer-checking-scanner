@@ -132,6 +132,72 @@ export const authApi = {
     ),
 };
 
+const SYNOPSIS_URL = "https://functions.poehali.dev/c757a5f9-12cd-499d-a66f-79b9f9aeb8d1";
+
+export interface SynopsisResponse {
+  text: string;
+  word_count: number;
+  topic: string;
+  subject: string;
+  class_num: number;
+}
+
+export const synopsisApi = {
+  generate: async (
+    params: {
+      subject: string;
+      class_num: number;
+      topic: string;
+      description?: string;
+      teacher_name: string;
+      teacher_school: string;
+    },
+    onRetry?: (attempt: number) => void,
+  ): Promise<SynopsisResponse> => {
+    const MAX_ATTEMPTS = 3;
+    const TIMEOUT_MS = 360_000; // 6 минут
+    let lastError: Error = new Error("Не удалось создать конспект");
+
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      if (attempt > 1 && onRetry) onRetry(attempt);
+
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
+      try {
+        const res = await fetch(SYNOPSIS_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(params),
+          signal: controller.signal,
+        });
+        clearTimeout(timer);
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 429 || res.status >= 500) {
+          lastError = new Error(data.error || `Ошибка сервера (${res.status})`);
+          await new Promise(r => setTimeout(r, 2500));
+          continue;
+        }
+        if (!res.ok) throw new Error(data.error || `Ошибка ${res.status}`);
+        return data as SynopsisResponse;
+      } catch (e) {
+        clearTimeout(timer);
+        const err = e as Error;
+        if (err.name === "AbortError" || err.message?.includes("network")) {
+          lastError = new Error("Превышено время ожидания. Попробуйте ещё раз.");
+          if (attempt < MAX_ATTEMPTS) { await new Promise(r => setTimeout(r, 2000)); continue; }
+        }
+        throw err;
+      }
+    }
+    throw lastError;
+  },
+
+  updateUrl: (url: string) => {
+    (synopsisApi as { _url: string })._url = url;
+  },
+};
+
 export const blankApi = {
   generate: async (params: { workId: string; workTitle: string; perPage: 1 | 2 | 4; part1Count?: number; part2Count?: number }) => {
     const res = await fetch(BLANK_URL, {

@@ -5,6 +5,7 @@ export type Section =
   | "works"
   | "presentations"
   | "tests"
+  | "synopsis"
   | "settings";
 
 export const NAV_ITEMS: { id: Section; label: string; icon: string }[] = [
@@ -13,6 +14,7 @@ export const NAV_ITEMS: { id: Section; label: string; icon: string }[] = [
   { id: "results", label: "Результаты", icon: "BarChart2" },
   { id: "students", label: "Ученики", icon: "Users" },
   { id: "tests", label: "Тесты", icon: "FileText" },
+  { id: "synopsis", label: "Конспекты", icon: "BookOpen" },
   { id: "presentations", label: "Презентации", icon: "Presentation" },
   { id: "settings", label: "Настройки", icon: "Settings" },
 ];
@@ -35,6 +37,7 @@ export const SECTION_TITLES: Record<Section, string> = {
   works: "Работы",
   presentations: "Презентации",
   tests: "Тесты и проверочные работы",
+  synopsis: "Конспекты",
   settings: "Настройки",
 };
 

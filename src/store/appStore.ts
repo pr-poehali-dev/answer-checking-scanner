@@ -100,6 +100,17 @@ export interface PresentationItem {
   };
 }
 
+export interface SynopsisItem {
+  id: string;
+  subject: string;
+  classNum: number;
+  topic: string;
+  description: string;
+  text: string;
+  wordCount: number;
+  createdAt: string;
+}
+
 export interface GeneratedTestItem {
   id: string;
   workId: string;
@@ -128,6 +139,7 @@ export type AppState = {
   results: StudentResult[];
   presentations: PresentationItem[];
   generatedTests: GeneratedTestItem[];
+  synopses: SynopsisItem[];
   yadiskConnected: boolean;
   yadiskUser: YadiskUser | null;
   yadiskSyncing: boolean;
@@ -142,6 +154,7 @@ let state: AppState = {
   results: [],
   presentations: [],
   generatedTests: [],
+  synopses: [],
   yadiskConnected: false,
   yadiskUser: null,
   yadiskSyncing: false,
@@ -337,6 +350,16 @@ export const appStore = {
 
   removeGeneratedTest: (id: string) => {
     state = { ...state, generatedTests: state.generatedTests.filter(t => t.id !== id) };
+    notify();
+  },
+
+  addSynopsis: (item: SynopsisItem) => {
+    state = { ...state, synopses: [item, ...state.synopses] };
+    notify();
+  },
+
+  removeSynopsis: (id: string) => {
+    state = { ...state, synopses: state.synopses.filter(s => s.id !== id) };
     notify();
   },
 

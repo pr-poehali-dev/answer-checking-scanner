@@ -7,6 +7,7 @@ import { StudentsSection } from "@/components/scanner/StudentsSection";
 import { WorksSection } from "@/components/scanner/WorksSection";
 import { PresentationsSection } from "@/components/scanner/PresentationsSection";
 import { TestsSection } from "@/components/scanner/TestsSection";
+import { SynopsisSection } from "@/components/scanner/SynopsisSection";
 import LoginPage from "@/pages/LoginPage";
 import AdminPanel from "@/pages/AdminPanel";
 import SubscriptionGate from "@/components/SubscriptionGate";
@@ -20,6 +21,7 @@ const SECTION_COMPONENTS: Record<Section, React.FC> = {
   works: WorksSection,
   presentations: PresentationsSection,
   tests: TestsSection,
+  synopsis: SynopsisSection,
   settings: SettingsSection,
 };
 
@@ -35,6 +37,16 @@ export default function Index() {
     const t = setInterval(() => appStore.refreshSubscription(), 5 * 60 * 1000);
     return () => clearInterval(t);
   }, [teacher?.login, teacher?.role]);
+
+  // Навигация из других разделов (например, из конспектов в презентации)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const section = (e as CustomEvent).detail as Section;
+      if (section) setActive(section);
+    };
+    window.addEventListener("navigate-to-section", handler);
+    return () => window.removeEventListener("navigate-to-section", handler);
+  }, []);
 
   if (!teacher) {
     return <LoginPage onLogin={() => setActive("works")} />;

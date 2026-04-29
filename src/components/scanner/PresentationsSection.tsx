@@ -41,8 +41,14 @@ function formatBytes(b: number) {
 
 export function PresentationsSection() {
   const { teacher, presentations, yadiskConnected } = useAppStore();
-  const [topic, setTopic] = useState("");
-  const [description, setDescription] = useState("");
+
+  // Предзаполнение из конспекта (если пришли из раздела «Конспекты»)
+  const synopsisTopic = sessionStorage.getItem("synopsis_topic") || "";
+  const synopsisDesc = sessionStorage.getItem("synopsis_description") || "";
+  if (synopsisTopic) { sessionStorage.removeItem("synopsis_topic"); sessionStorage.removeItem("synopsis_description"); }
+
+  const [topic, setTopic] = useState(synopsisTopic);
+  const [description, setDescription] = useState(synopsisDesc);
   const [audience, setAudience] = useState(AUDIENCE_PRESETS[3]);
   const [slidesCount, setSlidesCount] = useState(8);
   const [busy, setBusy] = useState(false);

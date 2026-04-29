@@ -253,6 +253,12 @@ export const appStore = {
     notify();
   },
 
+  updateTeacherProfile: (fields: Partial<Pick<Teacher, "name" | "firstName" | "lastName" | "email" | "school">>) => {
+    if (!state.teacher) return;
+    state = { ...state, teacher: { ...state.teacher, ...fields } };
+    notify();
+  },
+
   addStudent: (student: Student) => {
     state = { ...state, students: [...state.students, student] };
     notify();

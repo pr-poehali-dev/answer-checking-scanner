@@ -472,6 +472,88 @@ def handler(event: dict, context) -> dict:
         finally:
             conn.close()
 
+    # ── POST update-profile (teacher — самостоятельное редактирование) ─────
+    if method == "POST" and route in ("update-profile", "update_profile"):
+        token = headers.get("x-authorization", "")
+        if not token.startswith("teacher:"):
+            return _resp(403, {"error": "Нет доступа"})
+
+        login = (body.get("login") or "").strip()
+        if not login:
+            return _resp(400, {"error": "Укажите login"})
+
+        first_name = (body.get("first_name") or "").strip()
+        last_name = (body.get("last_name") or "").strip()
+        email = (body.get("email") or "").strip().lower()
+        school = (body.get("school") or "").strip()
+        new_password = (body.get("new_password") or "").strip()
+        current_password = (body.get("current_password") or "").strip()
+
+        if not first_name or not last_name:
+            return _resp(400, {"error": "Укажите имя и фамилию"})
+        if email and not is_valid_email(email):
+            return _resp(400, {"error": "Некорректный email"})
+        if new_password and len(new_password) < 6:
+            return _resp(400, {"error": "Пароль должен быть не менее 6 символов"})
+
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"SELECT password_hash FROM {SCHEMA}.users WHERE login = %s",
+                (login,)
+            )
+            row = cur.fetchone()
+            if not row:
+                return _resp(404, {"error": "Пользователь не найден"})
+
+            # Если меняем пароль — проверяем текущий
+            if new_password:
+                if not current_password:
+                    return _resp(400, {"error": "Для смены пароля укажите текущий пароль"})
+                if row[0] != hash_password(current_password):
+                    return _resp(403, {"error": "Текущий пароль неверен"})
+
+            full_name = f"{last_name} {first_name}"
+
+            if email:
+                cur.execute(
+                    f"SELECT 1 FROM {SCHEMA}.users WHERE LOWER(email) = %s AND login != %s",
+                    (email, login)
+                )
+                if cur.fetchone():
+                    return _resp(409, {"error": "Этот email уже используется другим пользователем"})
+
+            if new_password:
+                cur.execute(
+                    f"""UPDATE {SCHEMA}.users
+                        SET first_name=%s, last_name=%s, full_name=%s, email=%s, school=%s, password_hash=%s
+                        WHERE login=%s""",
+                    (first_name, last_name, full_name, email or None, school or None, hash_password(new_password), login)
+                )
+            else:
+                cur.execute(
+                    f"""UPDATE {SCHEMA}.users
+                        SET first_name=%s, last_name=%s, full_name=%s, email=%s, school=%s
+                        WHERE login=%s""",
+                    (first_name, last_name, full_name, email or None, school or None, login)
+                )
+            conn.commit()
+            return _resp(200, {
+                "success": True,
+                "login": login,
+                "full_name": full_name,
+                "first_name": first_name,
+                "last_name": last_name,
+                "email": email or None,
+                "school": school or None,
+            })
+        except psycopg2.errors.UniqueViolation:
+            conn.rollback()
+            return _resp(409, {"error": "Email уже используется"})
+        finally:
+            conn.close()
+
     # ── DELETE delete (admin) ───────────────────────────────────────────────
     if method == "DELETE" and route == "delete":
         if not check_admin_token(headers):

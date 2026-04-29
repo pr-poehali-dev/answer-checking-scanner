@@ -113,6 +113,23 @@ export const authApi = {
       token,
       body: JSON.stringify({ login }),
     }),
+
+  updateProfile: (
+    token: string,
+    payload: {
+      login: string;
+      first_name: string;
+      last_name: string;
+      email?: string;
+      school?: string;
+      current_password?: string;
+      new_password?: string;
+    }
+  ) =>
+    request<{ success: boolean; login: string; full_name: string; first_name: string; last_name: string; email?: string; school?: string }>(
+      "update-profile",
+      { method: "POST", token, body: JSON.stringify(payload) }
+    ),
 };
 
 export const blankApi = {

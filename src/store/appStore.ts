@@ -201,6 +201,15 @@ export const appStore = {
       };
       notify();
       if (user.role === "teacher") {
+        // Сбрасываем Я.Диск-состояние от предыдущего пользователя (защита от смешения аккаунтов)
+        state = {
+          ...state,
+          yadiskConnected: false,
+          yadiskUser: null,
+          yadiskSyncing: false,
+          yadiskLastSync: null,
+        };
+        notify();
         appStore.restoreYadisk().then((restored) => {
           if (restored) {
             appStore.loadFromYadisk();
@@ -262,7 +271,22 @@ export const appStore = {
   },
 
   logout: () => {
-    state = { ...state, teacher: null };
+    const login = state.teacher?.login || "";
+    if (login) yadiskStorage.clear(login);
+    state = {
+      ...state,
+      teacher: null,
+      yadiskConnected: false,
+      yadiskUser: null,
+      yadiskSyncing: false,
+      yadiskLastSync: null,
+      students: [],
+      works: [],
+      results: [],
+      presentations: [],
+      generatedTests: [],
+      synopses: [],
+    };
     notify();
   },
 
@@ -390,6 +414,10 @@ export const appStore = {
   restoreYadisk: async (): Promise<boolean> => {
     const login = state.teacher?.login || "";
     if (!login) return false;
+    // Чистим старые ключи без суффикса (миграция) чтобы они не попали другому пользователю
+    localStorage.removeItem("aousp_yadisk_access");
+    localStorage.removeItem("aousp_yadisk_refresh");
+    localStorage.removeItem("aousp_yadisk_user");
     const { access, user } = yadiskStorage.load(login);
     if (!access) return false;
     const ok = await yadisk.ping(access);

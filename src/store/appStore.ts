@@ -1,7 +1,64 @@
 // Глобальное хранилище приложения АОУСПТ
-// Все данные хранятся ТОЛЬКО в памяти браузера и на Яндекс Диске учителя
 import { authApi } from "@/lib/api";
 import { yadisk, yadiskStorage, ROOT_FOLDER, STUDENTS_FILE, WORKS_FILE, type YadiskUser } from "@/lib/yadisk";
+
+// ── Персистентность сессии ─────────────────────────────────────────────────
+const SESSION_KEY = "aousp_session_v1";
+
+function saveSession(teacher: Teacher) {
+  try {
+    localStorage.setItem(SESSION_KEY, JSON.stringify({
+      login: teacher.login,
+      name: teacher.name,
+      firstName: teacher.firstName,
+      lastName: teacher.lastName,
+      email: teacher.email,
+      school: teacher.school,
+      role: teacher.role,
+      authToken: teacher.authToken,
+      subscriptionStatus: teacher.subscriptionStatus,
+      subscriptionActive: teacher.subscriptionActive,
+      subscriptionUntil: teacher.subscriptionUntil,
+      trialActive: teacher.trialActive,
+      trialExpired: teacher.trialExpired,
+      trialUntil: teacher.trialUntil,
+      trialAiCallsToday: teacher.trialAiCallsToday,
+      trialAiLimit: teacher.trialAiLimit,
+    }));
+  } catch { /* ignore */ }
+}
+
+function clearSession() {
+  try { localStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
+}
+
+function loadSession(): Teacher | null {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    const d = JSON.parse(raw);
+    if (!d.authToken || !d.login) return null;
+    return {
+      login: d.login,
+      name: d.name || "",
+      firstName: d.firstName,
+      lastName: d.lastName,
+      email: d.email,
+      school: d.school || "",
+      role: d.role || "teacher",
+      authToken: d.authToken,
+      yadiskToken: null,
+      subscriptionStatus: d.subscriptionStatus || "none",
+      subscriptionActive: !!d.subscriptionActive,
+      subscriptionUntil: d.subscriptionUntil || null,
+      trialActive: !!d.trialActive,
+      trialExpired: !!d.trialExpired,
+      trialUntil: d.trialUntil || null,
+      trialAiCallsToday: d.trialAiCallsToday || 0,
+      trialAiLimit: d.trialAiLimit || 5,
+    };
+  } catch { return null; }
+}
 
 // ── Автосохранение на Я.Диск (дебаунс 2.5 сек) ──────────────────────────────
 let _autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -151,9 +208,11 @@ export type AppState = {
   yadiskLastSync: string | null;
 };
 
-// Начальное состояние
+// Начальное состояние — восстанавливаем сессию из localStorage
+const _restoredTeacher = loadSession();
+
 let state: AppState = {
-  teacher: null,
+  teacher: _restoredTeacher,
   students: [],
   works: [],
   results: [],
@@ -187,28 +246,27 @@ export const appStore = {
   login: async (login: string, password: string): Promise<{ ok: true; role: UserRole } | { ok: false; error: string }> => {
     try {
       const user = await authApi.login(login.trim(), password);
-      state = {
-        ...state,
-        teacher: {
-          login: user.login,
-          name: user.full_name,
-          firstName: user.first_name,
-          lastName: user.last_name,
-          email: user.email,
-          school: user.school,
-          role: user.role,
-          authToken: user.token,
-          yadiskToken: null,
-          subscriptionStatus: user.subscription_status || "none",
-          subscriptionActive: !!user.subscription_active,
-          subscriptionUntil: user.subscription_until,
-          trialActive: !!user.trial_active,
-          trialExpired: !!user.trial_expired,
-          trialUntil: user.trial_until || null,
-          trialAiCallsToday: user.trial_ai_calls_today || 0,
-          trialAiLimit: user.trial_ai_limit || 5,
-        },
+      const newTeacher: Teacher = {
+        login: user.login,
+        name: user.full_name,
+        firstName: user.first_name,
+        lastName: user.last_name,
+        email: user.email,
+        school: user.school,
+        role: user.role,
+        authToken: user.token,
+        yadiskToken: null,
+        subscriptionStatus: user.subscription_status || "none",
+        subscriptionActive: !!user.subscription_active,
+        subscriptionUntil: user.subscription_until,
+        trialActive: !!user.trial_active,
+        trialExpired: !!user.trial_expired,
+        trialUntil: user.trial_until || null,
+        trialAiCallsToday: user.trial_ai_calls_today || 0,
+        trialAiLimit: user.trial_ai_limit || 5,
       };
+      saveSession(newTeacher);
+      state = { ...state, teacher: newTeacher };
       notify();
       if (user.role === "teacher") {
         // Сбрасываем Я.Диск-состояние от предыдущего пользователя (защита от смешения аккаунтов)
@@ -237,28 +295,27 @@ export const appStore = {
   > => {
     try {
       const user = await authApi.signup(payload);
-      state = {
-        ...state,
-        teacher: {
-          login: user.login,
-          name: user.full_name,
-          firstName: user.first_name,
-          lastName: user.last_name,
-          email: user.email,
-          school: user.school,
-          role: user.role,
-          authToken: user.token,
-          yadiskToken: null,
-          subscriptionStatus: user.subscription_status || "none",
-          subscriptionActive: !!user.subscription_active,
-          subscriptionUntil: user.subscription_until,
-          trialActive: !!user.trial_active,
-          trialExpired: !!user.trial_expired,
-          trialUntil: user.trial_until || null,
-          trialAiCallsToday: user.trial_ai_calls_today || 0,
-          trialAiLimit: user.trial_ai_limit || 5,
-        },
+      const signupTeacher: Teacher = {
+        login: user.login,
+        name: user.full_name,
+        firstName: user.first_name,
+        lastName: user.last_name,
+        email: user.email,
+        school: user.school,
+        role: user.role,
+        authToken: user.token,
+        yadiskToken: null,
+        subscriptionStatus: user.subscription_status || "none",
+        subscriptionActive: !!user.subscription_active,
+        subscriptionUntil: user.subscription_until,
+        trialActive: !!user.trial_active,
+        trialExpired: !!user.trial_expired,
+        trialUntil: user.trial_until || null,
+        trialAiCallsToday: user.trial_ai_calls_today || 0,
+        trialAiLimit: user.trial_ai_limit || 5,
       };
+      saveSession(signupTeacher);
+      state = { ...state, teacher: signupTeacher };
       notify();
       return { ok: true, role: user.role, login: user.login };
     } catch (e) {
@@ -270,20 +327,19 @@ export const appStore = {
     if (!state.teacher || state.teacher.role === "admin") return;
     try {
       const data = await authApi.me(state.teacher.login);
-      state = {
-        ...state,
-        teacher: {
-          ...state.teacher,
-          subscriptionStatus: data.subscription_status,
-          subscriptionActive: !!data.subscription_active,
-          subscriptionUntil: data.subscription_until,
-          trialActive: !!data.trial_active,
-          trialExpired: !!data.trial_expired,
-          trialUntil: data.trial_until || null,
-          trialAiCallsToday: data.trial_ai_calls_today || 0,
-          trialAiLimit: data.trial_ai_limit || 5,
-        },
+      const updatedTeacher = {
+        ...state.teacher,
+        subscriptionStatus: data.subscription_status,
+        subscriptionActive: !!data.subscription_active,
+        subscriptionUntil: data.subscription_until,
+        trialActive: !!data.trial_active,
+        trialExpired: !!data.trial_expired,
+        trialUntil: data.trial_until || null,
+        trialAiCallsToday: data.trial_ai_calls_today || 0,
+        trialAiLimit: data.trial_ai_limit || 5,
       };
+      saveSession(updatedTeacher);
+      state = { ...state, teacher: updatedTeacher };
       notify();
     } catch (e) {
       console.warn("refreshSubscription failed:", e);
@@ -317,6 +373,7 @@ export const appStore = {
   logout: () => {
     const login = state.teacher?.login || "";
     if (login) yadiskStorage.clear(login);
+    clearSession();
     state = {
       ...state,
       teacher: null,
@@ -336,7 +393,9 @@ export const appStore = {
 
   updateTeacherProfile: (fields: Partial<Pick<Teacher, "name" | "firstName" | "lastName" | "email" | "school">>) => {
     if (!state.teacher) return;
-    state = { ...state, teacher: { ...state.teacher, ...fields } };
+    const updated = { ...state.teacher, ...fields };
+    saveSession(updated);
+    state = { ...state, teacher: updated };
     notify();
   },
 
@@ -595,12 +654,22 @@ export const appStore = {
 };
 
 // Хук для использования в компонентах
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
 export function useAppStore(): AppState {
   const [s, setS] = useState<AppState>(appStore.getState());
+  const initialized = useRef(false);
+
   useEffect(() => {
+    // Восстанавливаем Я.Диск после перезагрузки страницы (один раз)
+    if (!initialized.current && _restoredTeacher?.role === "teacher") {
+      initialized.current = true;
+      appStore.restoreYadisk().then((restored) => {
+        if (restored) appStore.loadFromYadisk();
+      });
+    }
     return appStore.subscribe(() => setS({ ...appStore.getState() }));
   }, []);
+
   return s;
 }

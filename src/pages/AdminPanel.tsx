@@ -3,6 +3,10 @@ import Icon from "@/components/ui/icon";
 import { appStore, useAppStore } from "@/store/appStore";
 import { authApi, UserRow } from "@/lib/api";
 import CompanyFooter from "@/components/CompanyFooter";
+import AdminCreateForm from "@/pages/admin/AdminCreateForm";
+import AdminUsersTable from "@/pages/admin/AdminUsersTable";
+import AdminSubscriptionModal from "@/pages/admin/AdminSubscriptionModal";
+import AdminResetPasswordModal from "@/pages/admin/AdminResetPasswordModal";
 
 export default function AdminPanel() {
   const { teacher } = useAppStore();
@@ -204,299 +208,55 @@ export default function AdminPanel() {
           </div>
         )}
 
-        {/* Форма добавления */}
         {showForm && (
-          <form onSubmit={handleCreate} className="border border-border rounded-sm bg-white p-5 space-y-3">
-            <h3 className="text-sm font-bold">Новый учитель</h3>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">ФИО</label>
-                <input
-                  required
-                  value={newName}
-                  onChange={e => setNewName(e.target.value)}
-                  placeholder="Иванова Наталья Петровна"
-                  className="w-full px-3 py-2 border border-border rounded-sm text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Школа</label>
-                <input
-                  value={newSchool}
-                  onChange={e => setNewSchool(e.target.value)}
-                  placeholder="АОУСПТ"
-                  className="w-full px-3 py-2 border border-border rounded-sm text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Логин</label>
-                <input
-                  required
-                  value={newLogin}
-                  onChange={e => setNewLogin(e.target.value.toLowerCase().replace(/\s/g, ""))}
-                  placeholder="ivanova"
-                  className="w-full px-3 py-2 border border-border rounded-sm text-sm focus:outline-none focus:ring-1 focus:ring-ring mono"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Пароль (мин. 6 символов)</label>
-                <div className="flex gap-1">
-                  <input
-                    required
-                    minLength={6}
-                    value={newPassword}
-                    onChange={e => setNewPassword(e.target.value)}
-                    placeholder="••••••"
-                    className="flex-1 px-3 py-2 border border-border rounded-sm text-sm focus:outline-none focus:ring-1 focus:ring-ring mono"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setNewPassword(generatePassword())}
-                    title="Сгенерировать"
-                    className="px-2 border border-border rounded-sm text-xs hover:bg-muted"
-                  >
-                    <Icon name="Wand2" size={13} />
-                  </button>
-                </div>
-              </div>
-            </div>
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setShowForm(false)}
-                className="px-3 py-2 border border-border text-xs rounded-sm hover:bg-muted"
-              >Отмена</button>
-              <button
-                type="submit"
-                disabled={busy}
-                className="px-4 py-2 bg-primary text-primary-foreground text-xs font-semibold rounded-sm hover:opacity-90 disabled:opacity-50"
-              >
-                {busy ? "Создаём..." : "Создать"}
-              </button>
-            </div>
-          </form>
+          <AdminCreateForm
+            busy={busy}
+            newLogin={newLogin}
+            newPassword={newPassword}
+            newName={newName}
+            newSchool={newSchool}
+            setNewLogin={setNewLogin}
+            setNewPassword={setNewPassword}
+            setNewName={setNewName}
+            setNewSchool={setNewSchool}
+            onSubmit={handleCreate}
+            onCancel={() => setShowForm(false)}
+            onGeneratePassword={generatePassword}
+          />
         )}
 
-        {/* Таблица учителей */}
-        <div className="border border-border rounded-sm bg-white overflow-hidden">
-          <table className="w-full text-xs">
-            <thead className="bg-muted">
-              <tr>
-                <th className="px-3 py-2 text-left font-semibold">Логин</th>
-                <th className="px-3 py-2 text-left font-semibold">ФИО</th>
-                <th className="px-3 py-2 text-left font-semibold">Email</th>
-                <th className="px-3 py-2 text-left font-semibold">Подписка / Trial</th>
-                <th className="px-3 py-2 text-left font-semibold">Был в сети</th>
-                <th className="px-3 py-2 text-left font-semibold">Статус</th>
-                <th className="px-3 py-2 text-right font-semibold">Действия</th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.length === 0 && !loading && (
-                <tr><td colSpan={7} className="px-3 py-8 text-center text-muted-foreground">Учителей пока нет. Добавьте первого.</td></tr>
-              )}
-              {users.map(u => (
-                <tr key={u.id} className="border-t border-border">
-                  <td className="px-3 py-2">
-                    <span className="font-mono text-xs">{u.login}</span>
-                    {u.role === "admin" && (
-                      <span className="ml-1.5 px-1.5 py-0.5 rounded-sm text-[9px] font-bold bg-primary/10 text-primary">ADMIN</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2">{u.full_name}</td>
-                  <td className="px-3 py-2 text-muted-foreground">{u.email || "—"}</td>
-                  <td className="px-3 py-2">
-                    {u.role === "admin" ? (
-                      <span className="text-muted-foreground">—</span>
-                    ) : u.subscription_active && u.subscription_status !== "trial" ? (
-                      <span className="inline-flex items-center gap-1 text-green-600">
-                        <Icon name="CircleCheck" size={12} fallback="CheckCircle" />
-                        до {formatSubUntil(u.subscription_until)}
-                      </span>
-                    ) : u.subscription_status === "trial" || u.trial_active ? (
-                      <span className="inline-flex items-center gap-1 text-blue-600">
-                        <Icon name="Gift" size={12} />
-                        пробный до {formatSubUntil(u.trial_until ?? null)}
-                      </span>
-                    ) : u.trial_expired ? (
-                      <span className="inline-flex items-center gap-1 text-amber-600">
-                        <Icon name="Clock" size={12} />
-                        trial истёк
-                      </span>
-                    ) : u.subscription_status === "expired" ? (
-                      <span className="inline-flex items-center gap-1 text-amber-600">
-                        <Icon name="Clock" size={12} />
-                        истекла {formatSubUntil(u.subscription_until)}
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 text-muted-foreground">
-                        <Icon name="CircleX" size={12} fallback="X" />
-                        нет
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2 text-muted-foreground">
-                    {formatLastSeen(u.last_seen_at)}
-                  </td>
-                  <td className="px-3 py-2">
-                    {u.is_active ? (
-                      <span className="text-green-600 inline-flex items-center gap-1"><Icon name="CheckCircle2" size={12} /> Активен</span>
-                    ) : (
-                      <span className="text-muted-foreground inline-flex items-center gap-1"><Icon name="Ban" size={12} /> Заблокирован</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    <div className="inline-flex gap-1">
-                      {u.role !== "admin" && (
-                        <button
-                          onClick={() => { setSubFor(u); setSubMonths(1); }}
-                          title="Управление подпиской АОУСПТ"
-                          className="p-1.5 hover:bg-primary/10 rounded-sm text-muted-foreground hover:text-primary"
-                        ><Icon name="Crown" size={13} fallback="Star" /></button>
-                      )}
-                      <button
-                        onClick={() => { setResetFor(u.login); setResetPass(""); }}
-                        title="Сбросить пароль"
-                        className="p-1.5 hover:bg-muted rounded-sm text-muted-foreground hover:text-foreground"
-                      ><Icon name="KeyRound" size={13} /></button>
-                      <button
-                        onClick={() => handleToggle(u.login)}
-                        title={u.is_active ? "Заблокировать" : "Разблокировать"}
-                        className="p-1.5 hover:bg-muted rounded-sm text-muted-foreground hover:text-foreground"
-                      ><Icon name={u.is_active ? "Lock" : "Unlock"} size={13} /></button>
-                      {u.role !== "admin" && (
-                        <button
-                          onClick={() => handleDelete(u.login)}
-                          title="Удалить"
-                          className="p-1.5 hover:bg-destructive/10 rounded-sm text-muted-foreground hover:text-destructive"
-                        ><Icon name="Trash2" size={13} /></button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <AdminUsersTable
+          users={users}
+          loading={loading}
+          formatSubUntil={formatSubUntil}
+          formatLastSeen={formatLastSeen}
+          onSubscription={u => { setSubFor(u); setSubMonths(1); }}
+          onResetPassword={login => { setResetFor(login); setResetPass(""); }}
+          onToggle={handleToggle}
+          onDelete={handleDelete}
+        />
 
-        {/* Модалка выдачи подписки */}
         {subFor && (
-          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={() => !subBusy && setSubFor(null)}>
-            <div className="bg-white rounded-sm border border-border max-w-md w-full p-5" onClick={e => e.stopPropagation()}>
-              <div className="flex items-center gap-2 mb-1">
-                <Icon name="Crown" size={16} className="text-primary" fallback="Star" />
-                <h3 className="text-sm font-bold">Подписка АОУСПТ</h3>
-              </div>
-              <p className="text-xs text-muted-foreground mb-4">
-                Пользователь: <span className="font-semibold text-foreground">{subFor.full_name}</span>{" "}
-                · <span className="mono">{subFor.login}</span>
-              </p>
-
-              <div className="border border-border rounded-sm p-3 mb-4 bg-muted/30 text-xs">
-                <p className="text-muted-foreground mb-1">Текущий статус:</p>
-                {subFor.subscription_active ? (
-                  <p className="text-green-600 font-semibold">
-                    Активна до {formatSubUntil(subFor.subscription_until)}
-                  </p>
-                ) : subFor.subscription_status === "expired" ? (
-                  <p className="text-amber-600 font-semibold">
-                    Истекла {formatSubUntil(subFor.subscription_until)}
-                  </p>
-                ) : (
-                  <p className="text-muted-foreground font-semibold">Нет подписки</p>
-                )}
-              </div>
-
-              <p className="text-xs font-semibold mb-2">Выдать или продлить подписку</p>
-              <div className="grid grid-cols-4 gap-2 mb-4">
-                {[1, 3, 6, 12].map(m => (
-                  <button
-                    key={m}
-                    onClick={() => setSubMonths(m)}
-                    disabled={subBusy}
-                    className={`py-2 text-xs font-semibold rounded-sm border transition-colors disabled:opacity-50 ${
-                      subMonths === m
-                        ? "border-primary bg-primary/10 text-primary"
-                        : "border-border hover:bg-muted"
-                    }`}
-                  >
-                    {m} мес.
-                  </button>
-                ))}
-              </div>
-
-              <p className="text-[11px] text-muted-foreground mb-4">
-                Подписка добавится к текущей дате окончания (если активна) или начнётся с сегодняшнего дня.
-              </p>
-
-              <div className="flex gap-2 justify-between">
-                {subFor.subscription_active ? (
-                  <button
-                    onClick={() => {
-                      if (confirm(`Отозвать подписку у ${subFor.full_name}? Доступ к разделам будет закрыт.`)) {
-                        handleGrantSubscription(subFor.login, 0, true);
-                      }
-                    }}
-                    disabled={subBusy}
-                    className="px-3 py-2 border border-destructive/40 text-destructive text-xs rounded-sm hover:bg-destructive/5 disabled:opacity-50"
-                  >
-                    Отозвать
-                  </button>
-                ) : <div />}
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setSubFor(null)}
-                    disabled={subBusy}
-                    className="px-3 py-2 border border-border text-xs rounded-sm hover:bg-muted disabled:opacity-50"
-                  >
-                    Отмена
-                  </button>
-                  <button
-                    onClick={() => handleGrantSubscription(subFor.login, subMonths, false)}
-                    disabled={subBusy}
-                    className="px-4 py-2 bg-primary text-primary-foreground text-xs font-semibold rounded-sm hover:opacity-90 disabled:opacity-50 inline-flex items-center gap-2"
-                  >
-                    {subBusy && <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
-                    {subFor.subscription_active ? "Продлить" : "Активировать"} на {subMonths} мес.
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
+          <AdminSubscriptionModal
+            subFor={subFor}
+            subMonths={subMonths}
+            subBusy={subBusy}
+            formatSubUntil={formatSubUntil}
+            setSubMonths={setSubMonths}
+            onGrant={handleGrantSubscription}
+            onClose={() => setSubFor(null)}
+          />
         )}
 
-        {/* Модалка сброса пароля */}
         {resetFor && (
-          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={() => setResetFor(null)}>
-            <div className="bg-white rounded-sm border border-border max-w-sm w-full p-5" onClick={e => e.stopPropagation()}>
-              <h3 className="text-sm font-bold mb-1">Сброс пароля</h3>
-              <p className="text-xs text-muted-foreground mb-4">для <span className="mono font-bold">{resetFor}</span></p>
-              <div className="flex gap-1 mb-4">
-                <input
-                  autoFocus
-                  value={resetPass}
-                  onChange={e => setResetPass(e.target.value)}
-                  placeholder="Новый пароль (мин. 6 символов)"
-                  className="flex-1 px-3 py-2 border border-border rounded-sm text-sm mono focus:outline-none focus:ring-1 focus:ring-ring"
-                />
-                <button
-                  type="button"
-                  onClick={() => setResetPass(generatePassword())}
-                  className="px-2 border border-border rounded-sm text-xs hover:bg-muted"
-                ><Icon name="Wand2" size={13} /></button>
-              </div>
-              <div className="flex justify-end gap-2">
-                <button
-                  onClick={() => setResetFor(null)}
-                  className="px-3 py-2 border border-border text-xs rounded-sm hover:bg-muted"
-                >Отмена</button>
-                <button
-                  onClick={() => handleReset(resetFor)}
-                  className="px-4 py-2 bg-primary text-primary-foreground text-xs font-semibold rounded-sm hover:opacity-90"
-                >Сохранить</button>
-              </div>
-            </div>
-          </div>
+          <AdminResetPasswordModal
+            resetFor={resetFor}
+            resetPass={resetPass}
+            setResetPass={setResetPass}
+            onReset={handleReset}
+            onClose={() => setResetFor(null)}
+            onGeneratePassword={generatePassword}
+          />
         )}
       </main>
       <CompanyFooter variant="full" />

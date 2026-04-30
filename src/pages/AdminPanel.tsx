@@ -127,6 +127,21 @@ export default function AdminPanel() {
     return d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
   };
 
+  const formatLastSeen = (iso: string | null | undefined) => {
+    if (!iso) return "никогда";
+    const d = new Date(iso);
+    const now = new Date();
+    const diff = now.getTime() - d.getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 2) return "только что";
+    if (mins < 60) return `${mins} мин назад`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours} ч назад`;
+    const days = Math.floor(hours / 24);
+    if (days < 7) return `${days} д назад`;
+    return d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
+  };
+
   const generatePassword = () => {
     const chars = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     let pwd = "";
@@ -270,8 +285,8 @@ export default function AdminPanel() {
                 <th className="px-3 py-2 text-left font-semibold">Логин</th>
                 <th className="px-3 py-2 text-left font-semibold">ФИО</th>
                 <th className="px-3 py-2 text-left font-semibold">Email</th>
-                <th className="px-3 py-2 text-left font-semibold">Роль</th>
-                <th className="px-3 py-2 text-left font-semibold">Подписка</th>
+                <th className="px-3 py-2 text-left font-semibold">Подписка / Trial</th>
+                <th className="px-3 py-2 text-left font-semibold">Был в сети</th>
                 <th className="px-3 py-2 text-left font-semibold">Статус</th>
                 <th className="px-3 py-2 text-right font-semibold">Действия</th>
               </tr>
@@ -282,21 +297,31 @@ export default function AdminPanel() {
               )}
               {users.map(u => (
                 <tr key={u.id} className="border-t border-border">
-                  <td className="px-3 py-2 mono">{u.login}</td>
+                  <td className="px-3 py-2">
+                    <span className="font-mono text-xs">{u.login}</span>
+                    {u.role === "admin" && (
+                      <span className="ml-1.5 px-1.5 py-0.5 rounded-sm text-[9px] font-bold bg-primary/10 text-primary">ADMIN</span>
+                    )}
+                  </td>
                   <td className="px-3 py-2">{u.full_name}</td>
                   <td className="px-3 py-2 text-muted-foreground">{u.email || "—"}</td>
                   <td className="px-3 py-2">
-                    <span className={`px-2 py-0.5 rounded-sm text-[10px] font-semibold ${u.role === "admin" ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}>
-                      {u.role === "admin" ? "АДМИН" : "УЧИТЕЛЬ"}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2">
                     {u.role === "admin" ? (
                       <span className="text-muted-foreground">—</span>
-                    ) : u.subscription_active ? (
+                    ) : u.subscription_active && u.subscription_status !== "trial" ? (
                       <span className="inline-flex items-center gap-1 text-green-600">
                         <Icon name="CircleCheck" size={12} fallback="CheckCircle" />
                         до {formatSubUntil(u.subscription_until)}
+                      </span>
+                    ) : u.subscription_status === "trial" || u.trial_active ? (
+                      <span className="inline-flex items-center gap-1 text-blue-600">
+                        <Icon name="Gift" size={12} />
+                        пробный до {formatSubUntil(u.trial_until ?? null)}
+                      </span>
+                    ) : u.trial_expired ? (
+                      <span className="inline-flex items-center gap-1 text-amber-600">
+                        <Icon name="Clock" size={12} />
+                        trial истёк
                       </span>
                     ) : u.subscription_status === "expired" ? (
                       <span className="inline-flex items-center gap-1 text-amber-600">
@@ -309,6 +334,9 @@ export default function AdminPanel() {
                         нет
                       </span>
                     )}
+                  </td>
+                  <td className="px-3 py-2 text-muted-foreground">
+                    {formatLastSeen(u.last_seen_at)}
                   </td>
                   <td className="px-3 py-2">
                     {u.is_active ? (

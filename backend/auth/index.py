@@ -273,13 +273,19 @@ def handler(event: dict, context) -> dict:
 
             sub = get_subscription_payload(sub_status, sub_until, trial_until, trial_ai_calls_today or 0, trial_ai_date)
 
-            # Если подписка истекла — фиксируем в БД
+            # Обновляем last_seen_at и, если нужно, статус подписки
+            now_ts = datetime.utcnow()
             if sub_status == 'active' and sub['subscription_status'] == 'expired':
                 cur.execute(
-                    f"UPDATE {SCHEMA}.users SET subscription_status = 'expired' WHERE login = %s",
-                    (login,)
+                    f"UPDATE {SCHEMA}.users SET subscription_status = 'expired', last_seen_at = %s WHERE login = %s",
+                    (now_ts, login)
                 )
-                conn.commit()
+            else:
+                cur.execute(
+                    f"UPDATE {SCHEMA}.users SET last_seen_at = %s WHERE login = %s",
+                    (now_ts, login)
+                )
+            conn.commit()
 
             token = f"teacher:{hash_password(login + password + 'salt')}"
             return _resp(200, {
@@ -471,19 +477,21 @@ def handler(event: dict, context) -> dict:
             cur = conn.cursor()
             cur.execute(
                 f"""SELECT id, login, full_name, first_name, last_name, email, school, role, is_active, created_at,
-                           subscription_status, subscription_plan, subscription_until
+                           subscription_status, subscription_plan, subscription_until,
+                           trial_until, trial_ai_calls_today, trial_ai_date, last_seen_at
                     FROM {SCHEMA}.users ORDER BY created_at DESC"""
             )
             rows = cur.fetchall()
             users = []
             for r in rows:
-                sub = get_subscription_payload(r[10], r[12])
+                sub = get_subscription_payload(r[10], r[12], r[13], r[14] or 0, r[15])
                 users.append({
                     "id": r[0], "login": r[1], "full_name": r[2],
                     "first_name": r[3], "last_name": r[4], "email": r[5],
                     "school": r[6], "role": r[7], "is_active": r[8],
                     "created_at": str(r[9]),
                     "subscription_plan": r[11],
+                    "last_seen_at": r[16].isoformat() if r[16] else None,
                     **sub,
                 })
             return _resp(200, {"users": users})

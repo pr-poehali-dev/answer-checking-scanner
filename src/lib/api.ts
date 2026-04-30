@@ -42,6 +42,7 @@ export interface UserRow extends SubscriptionInfo {
   is_active: boolean;
   created_at: string;
   subscription_plan?: string | null;
+  last_seen_at?: string | null;
 }
 
 async function request<T>(action: string, options: RequestInit & { token?: string } = {}): Promise<T> {

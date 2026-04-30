@@ -475,6 +475,97 @@ export const testApi = {
   },
 };
 
+// ── ОГЭ / ЕГЭ по ФИПИ ──────────────────────────────────────────────────────
+
+const EXAM_URL = "https://functions.poehali.dev/c9f3e9b4-4765-416b-a8ed-59f420df43d8";
+
+export interface ExamTask {
+  num: number;
+  type: string;
+  topic: string;
+  points: number;
+  instruction: string;
+  question: string;
+  options: string[];
+  answer: string;
+  explanation: string;
+}
+
+export interface ExamResponse {
+  docx_b64: string;
+  answers_docx_b64: string;
+  filename: string;
+  answers_filename: string;
+  examType: "ОГЭ" | "ЕГЭ";
+  subject: string;
+  variantNum: number;
+  totalTasks: number;
+  totalPoints: number;
+  tasks: ExamTask[];
+  size: number;
+}
+
+export const examApi = {
+  getSubjects: async (examType: "ОГЭ" | "ЕГЭ"): Promise<string[]> => {
+    const res = await fetch(`${EXAM_URL}?action=subjects&examType=${encodeURIComponent(examType)}`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Ошибка загрузки предметов");
+    return data.subjects as string[];
+  },
+
+  generate: async (
+    params: {
+      examType: "ОГЭ" | "ЕГЭ";
+      subject: string;
+      teacherName: string;
+      teacherSchool: string;
+      login?: string;
+    },
+    onRetry?: (attempt: number) => void,
+  ): Promise<ExamResponse> => {
+    const MAX_ATTEMPTS = 2;
+    const TIMEOUT_MS = 600_000; // 10 минут — варианты большие
+    let lastError: Error = new Error("Не удалось создать вариант");
+
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      if (attempt > 1 && onRetry) onRetry(attempt);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+      try {
+        const res = await fetch(EXAM_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(params),
+          signal: controller.signal,
+        });
+        clearTimeout(timer);
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 429 || res.status >= 500) {
+          lastError = new Error(data.error || `Ошибка сервера (${res.status})`);
+          if (attempt < MAX_ATTEMPTS) { await new Promise(r => setTimeout(r, 3000)); continue; }
+          throw lastError;
+        }
+        if (!res.ok) throw new Error(data.error || `Ошибка генерации (${res.status})`);
+        return data as ExamResponse;
+      } catch (e) {
+        clearTimeout(timer);
+        const err = e as Error;
+        if (err.name === "AbortError" || err.message.includes("Failed to fetch")) {
+          lastError = new Error("ИИ-сервис не успел ответить — пробуем ещё раз…");
+          if (attempt < MAX_ATTEMPTS) { await new Promise(r => setTimeout(r, 2000)); continue; }
+          throw new Error("ИИ-сервис не отвечает. Попробуйте ещё раз через несколько минут.");
+        }
+        throw err;
+      }
+    }
+    throw lastError;
+  },
+
+  setUrl: (url: string) => {
+    (examApi as unknown as { _url: string })._url = url;
+  },
+};
+
 // ── Подписки АОУСПТ ────────────────────────────────────────────────────────
 
 export interface SubscriptionPlan {

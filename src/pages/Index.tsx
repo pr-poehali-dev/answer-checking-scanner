@@ -8,6 +8,7 @@ import { WorksSection } from "@/components/scanner/WorksSection";
 import { PresentationsSection } from "@/components/scanner/PresentationsSection";
 import { TestsSection } from "@/components/scanner/TestsSection";
 import { SynopsisSection } from "@/components/scanner/SynopsisSection";
+import { ExamsSection } from "@/components/scanner/ExamsSection";
 import LoginPage from "@/pages/LoginPage";
 import LandingPage from "@/pages/LandingPage";
 import AdminPanel from "@/pages/AdminPanel";
@@ -24,6 +25,7 @@ const SECTION_COMPONENTS: Record<Section, React.FC> = {
   presentations: PresentationsSection,
   tests: TestsSection,
   synopsis: SynopsisSection,
+  exams: ExamsSection,
   settings: SettingsSection,
 };
 

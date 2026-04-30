@@ -1,0 +1,43 @@
+{
+  "tests": [
+    {
+      "name": "OPTIONS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    },
+    {
+      "name": "GET список предметов ОГЭ",
+      "method": "GET",
+      "path": "/?action=subjects&examType=%D0%9E%D0%93%D0%AD",
+      "expectedStatus": 200
+    },
+    {
+      "name": "GET список предметов ЕГЭ",
+      "method": "GET",
+      "path": "/?action=subjects&examType=%D0%95%D0%93%D0%AD",
+      "expectedStatus": 200
+    },
+    {
+      "name": "POST без предмета — 400",
+      "method": "POST",
+      "path": "/",
+      "body": {"examType": "ОГЭ", "subject": ""},
+      "expectedStatus": 400
+    },
+    {
+      "name": "POST без типа экзамена — 400",
+      "method": "POST",
+      "path": "/",
+      "body": {"examType": "", "subject": "Математика"},
+      "expectedStatus": 400
+    },
+    {
+      "name": "POST несуществующий предмет — 400",
+      "method": "POST",
+      "path": "/",
+      "body": {"examType": "ОГЭ", "subject": "Астрология"},
+      "expectedStatus": 400
+    }
+  ]
+}

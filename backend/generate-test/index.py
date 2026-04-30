@@ -118,28 +118,41 @@ def _gigachat_call_once(messages: list, max_tokens: int, temperature: float, mod
     return choices[0].get("message", {}).get("content", "").strip()
 
 
-def gigachat_chat(messages: list, max_tokens: int = 2400, temperature: float = 0.4, req_timeout: int = 25, max_retries: int = 2) -> str:
+def gigachat_chat(messages: list, max_tokens: int = 2400, temperature: float = 0.4, req_timeout: int = 25, max_retries: int = 3) -> str:
     last_err = None
-    for attempt in range(1, max_retries + 1):
-        try:
-            return _gigachat_call_once(messages, max_tokens, temperature, "GigaChat", req_timeout)
-        except urllib.error.HTTPError as e:
-            err_text = e.read().decode(errors='ignore')[:300] if hasattr(e, 'read') else str(e)
-            if e.code in (401, 403, 404):
-                raise RuntimeError(f"GigaChat HTTP {e.code}: {err_text}")
-            last_err = RuntimeError(f"GigaChat HTTP {e.code}: {err_text}")
-            if attempt < max_retries:
-                time.sleep(1.0)
-                continue
-            raise last_err
-        except Exception as e:
-            last_err = RuntimeError(f"GigaChat недоступен: {e}")
-            if attempt < max_retries:
-                time.sleep(1.0)
+    for model in ("GigaChat-2", "GigaChat", "GigaChat-Lite"):
+        for attempt in range(1, max_retries + 1):
+            try:
+                return _gigachat_call_once(messages, max_tokens, temperature, model, req_timeout)
+            except urllib.error.HTTPError as e:
+                err_text = e.read().decode(errors='ignore')[:300] if hasattr(e, 'read') else str(e)
+                if e.code in (401, 403):
+                    raise RuntimeError(f"GigaChat HTTP {e.code}: {err_text}")
+                if e.code == 404:
+                    last_err = RuntimeError(f"MODEL_NOT_FOUND: {err_text}")
+                    break  # пробуем следующую модель
+                last_err = RuntimeError(f"GigaChat HTTP {e.code}: {err_text}")
+                if attempt < max_retries:
+                    time.sleep(2.0)
+                    continue
+                break
+            except Exception as e:
+                msg = str(e)
+                last_err = RuntimeError(f"GigaChat недоступен: {e}")
+                is_conn_err = (
+                    "remote end closed" in msg.lower()
+                    or "remotedisconnected" in msg.lower()
+                    or "connection reset" in msg.lower()
+                )
                 _TOKEN_CACHE["token"] = None
                 _TOKEN_CACHE["expires_at"] = None
-                continue
-            raise last_err
+                if is_conn_err:
+                    time.sleep(2.0)
+                    break  # соединение оборвано — пробуем следующую модель
+                if attempt < max_retries:
+                    time.sleep(2.0)
+                    continue
+                break
     raise last_err if last_err else RuntimeError("GigaChat: не удалось получить ответ")
 
 

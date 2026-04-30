@@ -265,6 +265,13 @@ def gigachat_with_fallback(messages: list, max_tokens: int = 3000) -> str:
                 continue
             if "timed out" in msg.lower() or "timeout" in msg.lower():
                 continue
+            # RemoteDisconnected / connection reset — пробуем следующую модель
+            if "remote end closed" in msg.lower() or "remotedisconnected" in msg.lower() \
+                    or "connection reset" in msg.lower() or "недоступен" in msg.lower():
+                _TOKEN_CACHE["token"] = None
+                _TOKEN_CACHE["expires_at"] = None
+                time.sleep(2.0)
+                continue
             raise
     raise last_err if last_err else RuntimeError("Все модели GigaChat недоступны")
 

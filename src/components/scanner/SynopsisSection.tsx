@@ -73,6 +73,7 @@ export function SynopsisSection() {
           description: description.trim(),
           teacher_name: teacher.name,
           teacher_school: teacher.school,
+          login: teacher.login,
         },
         (attempt) => setStage(`Повторная попытка ${attempt} из 3 — сервис занят, ждём…`),
       );

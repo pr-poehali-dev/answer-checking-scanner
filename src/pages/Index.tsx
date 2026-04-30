@@ -12,6 +12,7 @@ import LoginPage from "@/pages/LoginPage";
 import LandingPage from "@/pages/LandingPage";
 import AdminPanel from "@/pages/AdminPanel";
 import SubscriptionGate from "@/components/SubscriptionGate";
+import YadiskRequiredGate from "@/components/YadiskRequiredGate";
 import CompanyFooter from "@/components/CompanyFooter";
 import { useAppStore, appStore } from "@/store/appStore";
 
@@ -56,6 +57,7 @@ export default function Index() {
         <LandingPage
           onLogin={() => setAuthMode("login")}
           onRegister={() => setAuthMode("signup")}
+          onTrial={() => setAuthMode("signup")}
         />
       );
     }
@@ -75,6 +77,11 @@ export default function Index() {
   // Гейт подписки — показываем если она не активна
   if (!teacher.subscriptionActive) {
     return <SubscriptionGate />;
+  }
+
+  // Обязательная привязка Я.Диска перед началом работы
+  if (!yadiskConnected) {
+    return <YadiskRequiredGate />;
   }
 
   const initials = teacher.name

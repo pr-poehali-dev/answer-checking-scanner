@@ -22,6 +22,8 @@ import urllib.request
 import urllib.error
 from datetime import datetime, timedelta
 
+AUTH_URL = os.environ.get("AUTH_FUNCTION_URL", "https://functions.poehali.dev/b08ae7cf-6c0b-4178-acc9-4b62b2c2a61b")
+
 from docx import Document
 from docx.shared import Pt, Cm, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -556,6 +558,7 @@ def handler(event: dict, context) -> dict:
     work_type = (body.get("workType") or "Тест").strip()
     if work_type not in ("Тест", "Проверочная работа", "Контрольная работа"):
         work_type = "Тест"
+    login = (body.get("login") or "").strip()
     subject = (body.get("subject") or "").strip()
     topic = (body.get("topic") or "").strip()
     description = (body.get("description") or "").strip()
@@ -586,6 +589,26 @@ def handler(event: dict, context) -> dict:
         return _resp(400, {"error": "Укажите тему"})
     if part1_count + part2_count == 0:
         return _resp(400, {"error": "Должен быть хотя бы один вопрос (часть 1 или часть 2)"})
+
+    # Проверяем лимит AI-запросов для trial-пользователей
+    if login:
+        try:
+            limit_req = urllib.request.Request(
+                f"{AUTH_URL}?action=check-ai-limit",
+                data=json.dumps({"login": login}).encode("utf-8"),
+                method="POST",
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(limit_req, timeout=10) as r:
+                limit_data = json.loads(r.read().decode())
+            if not limit_data.get("allowed"):
+                return _resp(429, {"error": limit_data.get("error", "Достигнут лимит ИИ-запросов")})
+        except urllib.error.HTTPError as e:
+            err_body = json.loads(e.read().decode() or "{}")
+            if e.code == 429:
+                return _resp(429, {"error": err_body.get("error", "Достигнут лимит ИИ-запросов на сегодня")})
+        except Exception:
+            pass
 
     try:
         questions = generate_questions(work_type, subject, class_num, topic, description, part1_count, part2_count)

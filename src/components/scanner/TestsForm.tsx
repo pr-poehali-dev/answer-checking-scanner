@@ -77,6 +77,7 @@ export function TestsForm() {
         part1Count, part2Count,
         teacherName: teacher.name,
         teacherSchool: teacher.school,
+        login: teacher.login,
       });
 
       let yadiskPath: string | null = null;

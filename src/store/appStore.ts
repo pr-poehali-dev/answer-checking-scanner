@@ -20,7 +20,7 @@ function _scheduleAutoSave() {
 
 export type UserRole = "admin" | "teacher";
 
-export type SubscriptionStatus = "none" | "active" | "expired";
+export type SubscriptionStatus = "none" | "active" | "expired" | "trial";
 
 export interface Teacher {
   login: string;
@@ -35,6 +35,11 @@ export interface Teacher {
   subscriptionStatus: SubscriptionStatus;
   subscriptionActive: boolean;
   subscriptionUntil: string | null;
+  trialActive: boolean;
+  trialExpired: boolean;
+  trialUntil: string | null;
+  trialAiCallsToday: number;
+  trialAiLimit: number;
 }
 
 export interface Student {
@@ -197,6 +202,11 @@ export const appStore = {
           subscriptionStatus: user.subscription_status || "none",
           subscriptionActive: !!user.subscription_active,
           subscriptionUntil: user.subscription_until,
+          trialActive: !!user.trial_active,
+          trialExpired: !!user.trial_expired,
+          trialUntil: user.trial_until || null,
+          trialAiCallsToday: user.trial_ai_calls_today || 0,
+          trialAiLimit: user.trial_ai_limit || 5,
         },
       };
       notify();
@@ -242,6 +252,11 @@ export const appStore = {
           subscriptionStatus: user.subscription_status || "none",
           subscriptionActive: !!user.subscription_active,
           subscriptionUntil: user.subscription_until,
+          trialActive: !!user.trial_active,
+          trialExpired: !!user.trial_expired,
+          trialUntil: user.trial_until || null,
+          trialAiCallsToday: user.trial_ai_calls_today || 0,
+          trialAiLimit: user.trial_ai_limit || 5,
         },
       };
       notify();
@@ -262,11 +277,40 @@ export const appStore = {
           subscriptionStatus: data.subscription_status,
           subscriptionActive: !!data.subscription_active,
           subscriptionUntil: data.subscription_until,
+          trialActive: !!data.trial_active,
+          trialExpired: !!data.trial_expired,
+          trialUntil: data.trial_until || null,
+          trialAiCallsToday: data.trial_ai_calls_today || 0,
+          trialAiLimit: data.trial_ai_limit || 5,
         },
       };
       notify();
     } catch (e) {
       console.warn("refreshSubscription failed:", e);
+    }
+  },
+
+  activateTrial: async (): Promise<{ ok: true } | { ok: false; error: string }> => {
+    if (!state.teacher) return { ok: false, error: "Не авторизован" };
+    try {
+      const data = await authApi.activateTrial(state.teacher.login);
+      state = {
+        ...state,
+        teacher: {
+          ...state.teacher,
+          subscriptionStatus: "trial",
+          subscriptionActive: true,
+          trialActive: true,
+          trialExpired: false,
+          trialUntil: data.trial_until,
+          trialAiCallsToday: 0,
+          trialAiLimit: data.trial_ai_limit,
+        },
+      };
+      notify();
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: (e as Error).message || "Ошибка активации" };
     }
   },
 

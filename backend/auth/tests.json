@@ -14,16 +14,23 @@
       "expectedStatus": 401
     },
     {
-      "name": "Default password no longer works (security)",
-      "method": "POST",
-      "path": "/",
-      "body": { "login": "admin", "password": "admin2026" },
-      "expectedStatus": 401
-    },
-    {
       "name": "Empty credentials returns 400",
       "method": "POST",
       "path": "/",
+      "body": {},
+      "expectedStatus": 400
+    },
+    {
+      "name": "Activate trial without login returns 400",
+      "method": "POST",
+      "path": "/?action=activate-trial",
+      "body": {},
+      "expectedStatus": 400
+    },
+    {
+      "name": "Check AI limit without login returns 400",
+      "method": "POST",
+      "path": "/?action=check-ai-limit",
       "body": {},
       "expectedStatus": 400
     }

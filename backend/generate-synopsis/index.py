@@ -14,6 +14,8 @@ import urllib.request
 import urllib.error
 from datetime import datetime, timedelta
 
+AUTH_URL = os.environ.get("AUTH_FUNCTION_URL", "https://functions.poehali.dev/b08ae7cf-6c0b-4178-acc9-4b62b2c2a61b")
+
 CORS = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -244,6 +246,27 @@ def handler(event: dict, context) -> dict:
         return _resp(400, {"error": "Укажите тему урока"})
     if not class_num or class_num < 1 or class_num > 11:
         return _resp(400, {"error": "Укажите класс (1–11)"})
+
+    # Проверяем лимит AI-запросов для trial-пользователей
+    login = (body.get("login") or "").strip()
+    if login:
+        try:
+            limit_req = urllib.request.Request(
+                f"{AUTH_URL}?action=check-ai-limit",
+                data=json.dumps({"login": login}).encode("utf-8"),
+                method="POST",
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(limit_req, timeout=10) as r:
+                limit_data = json.loads(r.read().decode())
+            if not limit_data.get("allowed"):
+                return _resp(429, {"error": limit_data.get("error", "Достигнут лимит ИИ-запросов")})
+        except urllib.error.HTTPError as e:
+            err_body = json.loads(e.read().decode() or "{}")
+            if e.code == 429:
+                return _resp(429, {"error": err_body.get("error", "Достигнут лимит ИИ-запросов на сегодня")})
+        except Exception:
+            pass  # При ошибке проверки лимита — не блокируем
 
     try:
         text = generate_synopsis(

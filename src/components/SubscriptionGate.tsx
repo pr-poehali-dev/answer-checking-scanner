@@ -4,6 +4,12 @@ import { appStore, useAppStore } from "@/store/appStore";
 import { subscriptionApi, type SubscriptionPlan } from "@/lib/api";
 import CompanyFooter from "@/components/CompanyFooter";
 
+function daysLeft(iso: string | null | undefined): number {
+  if (!iso) return 0;
+  const diff = new Date(iso).getTime() - Date.now();
+  return Math.max(0, Math.ceil(diff / 86400000));
+}
+
 function formatRub(n: number) {
   return new Intl.NumberFormat("ru-RU").format(n) + " ₽";
 }
@@ -24,6 +30,7 @@ export default function SubscriptionGate() {
   const [info, setInfo] = useState<string | null>(null);
   const [returnedPaymentId, setReturnedPaymentId] = useState<string | null>(null);
   const [agreedSub, setAgreedSub] = useState(false);
+  const [activatingTrial, setActivatingTrial] = useState(false);
 
   useEffect(() => {
     subscriptionApi.plans()
@@ -94,7 +101,22 @@ export default function SubscriptionGate() {
 
   const handleLogout = () => appStore.logout();
 
+  const handleActivateTrial = async () => {
+    setActivatingTrial(true);
+    setError(null);
+    const result = await appStore.activateTrial();
+    if (result.ok) {
+      await appStore.refreshSubscription();
+    } else {
+      setError(result.error);
+    }
+    setActivatingTrial(false);
+  };
+
   const status = teacher?.subscriptionStatus || "none";
+  const trialExpired = teacher?.trialExpired ?? false;
+  const trialNeverUsed = !teacher?.trialActive && !trialExpired;
+  const trialDaysLeft = daysLeft(teacher?.trialUntil);
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -130,15 +152,60 @@ export default function SubscriptionGate() {
               <span className="text-xs font-semibold uppercase tracking-wider opacity-80">Подписка АОУСПТ</span>
             </div>
             <h1 className="text-2xl font-bold mb-2">
-              {status === "expired" ? "Подписка истекла" : "Активируйте подписку"}
+              {status === "expired" ? "Подписка истекла" : trialExpired ? "Пробный период завершён" : "Активируйте подписку"}
             </h1>
             <p className="text-sm opacity-85 max-w-xl">
               {status === "expired"
-                ? `Ваша подписка закончилась ${formatDate(teacher?.subscriptionUntil ?? null)}. Продлите её, чтобы вернуть доступ к работам, тестам, сканеру бланков и презентациям.`
+                ? `Ваша подписка закончилась ${formatDate(teacher?.subscriptionUntil ?? null)}. Продлите её, чтобы вернуть доступ.`
+                : trialExpired
+                ? "Ваш пробный период на 5 дней завершён. Оформите подписку, чтобы продолжить работу."
                 : "Получите полный доступ ко всем разделам: работы, ученики, сканер ответов, ИИ-генератор тестов и презентаций, синхронизация с Я.Диском."}
             </p>
           </div>
         </div>
+
+        {/* Trial — кнопка активации (если никогда не использовался) */}
+        {trialNeverUsed && (
+          <div className="border-2 border-green-400 rounded-sm p-5 mb-6 flex flex-col sm:flex-row items-center gap-4"
+            style={{ background: "linear-gradient(135deg, hsl(142 70% 97%) 0%, hsl(160 60% 95%) 100%)" }}>
+            <div className="flex-1 text-center sm:text-left">
+              <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider mb-1"
+                style={{ background: "hsl(142 70% 40%)", color: "#fff" }}>
+                <Icon name="Gift" size={9} />
+                Бесплатно
+              </div>
+              <p className="text-sm font-bold text-foreground">Пробный период — 5 дней</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Полный доступ · До 5 ИИ-запросов в день · Карта не нужна</p>
+            </div>
+            <button
+              onClick={handleActivateTrial}
+              disabled={activatingTrial}
+              className="flex-shrink-0 inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold rounded-sm text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+              style={{ background: "hsl(142 70% 40%)" }}
+            >
+              {activatingTrial ? (
+                <><Icon name="Loader2" size={15} className="animate-spin" />Активируем…</>
+              ) : (
+                <><Icon name="Zap" size={15} />Начать пробный период</>
+              )}
+            </button>
+          </div>
+        )}
+
+        {/* Trial — активен, показываем инфо-баннер */}
+        {teacher?.trialActive && (
+          <div className="border border-blue-300 bg-blue-50 rounded-sm p-4 mb-5 flex items-center gap-3">
+            <Icon name="Clock" size={16} className="text-blue-600 flex-shrink-0" />
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-blue-800">
+                Пробный период активен — ещё {trialDaysLeft} {trialDaysLeft === 1 ? "день" : "дней"}
+              </p>
+              <p className="text-xs text-blue-600 mt-0.5">
+                Использовано ИИ-запросов сегодня: {teacher.trialAiCallsToday} из {teacher.trialAiLimit} · Истекает {formatDate(teacher.trialUntil ?? null)}
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Возврат после оплаты */}
         {returnedPaymentId && busyPlan === "__check__" && (

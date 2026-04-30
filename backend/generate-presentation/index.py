@@ -26,6 +26,8 @@ import urllib.request
 import urllib.error
 from datetime import datetime, timedelta
 
+AUTH_URL = os.environ.get("AUTH_FUNCTION_URL", "https://functions.poehali.dev/b08ae7cf-6c0b-4178-acc9-4b62b2c2a61b")
+
 from pptx import Presentation
 from pptx.util import Inches, Pt, Emu
 from pptx.dml.color import RGBColor
@@ -770,6 +772,7 @@ def handler(event: dict, context) -> dict:
     except Exception:
         body = {}
 
+    login = (body.get("login") or "").strip()
     topic = (body.get("topic") or "").strip()
     description = (body.get("description") or "").strip()
     audience = (body.get("audience") or "").strip()
@@ -784,6 +787,26 @@ def handler(event: dict, context) -> dict:
 
     if not topic:
         return _resp(400, {"error": "Укажите тему урока"})
+
+    # Проверяем лимит AI-запросов для trial-пользователей
+    if login:
+        try:
+            limit_req = urllib.request.Request(
+                f"{AUTH_URL}?action=check-ai-limit",
+                data=json.dumps({"login": login}).encode("utf-8"),
+                method="POST",
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(limit_req, timeout=10) as r:
+                limit_data = json.loads(r.read().decode())
+            if not limit_data.get("allowed"):
+                return _resp(429, {"error": limit_data.get("error", "Достигнут лимит ИИ-запросов")})
+        except urllib.error.HTTPError as e:
+            err_body = json.loads(e.read().decode() or "{}")
+            if e.code == 429:
+                return _resp(429, {"error": err_body.get("error", "Достигнут лимит ИИ-запросов на сегодня")})
+        except Exception:
+            pass
 
     theme = pick_theme(topic)
 

@@ -6,6 +6,7 @@ import { subscriptionApi, type SubscriptionPlan } from "@/lib/api";
 interface LandingPageProps {
   onLogin: () => void;
   onRegister: () => void;
+  onTrial?: () => void;
 }
 
 const FEATURES = [
@@ -58,7 +59,7 @@ function formatRub(n: number) {
   return new Intl.NumberFormat("ru-RU").format(n) + " ₽";
 }
 
-export default function LandingPage({ onLogin, onRegister }: LandingPageProps) {
+export default function LandingPage({ onLogin, onRegister, onTrial }: LandingPageProps) {
   const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
   const [loadingPlans, setLoadingPlans] = useState(true);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -167,23 +168,26 @@ export default function LandingPage({ onLogin, onRegister }: LandingPageProps) {
             <p className="text-base sm:text-lg text-white/75 mb-8 leading-relaxed max-w-2xl">
               АОУСПТ экономит учителям часы ручной проверки: сканирует бланки ответов, генерирует тесты и презентации, пишет конспекты — строго по программе Минпросвещения РФ.
             </p>
-            <div className="flex flex-col sm:flex-row gap-3">
+            <div className="flex flex-col sm:flex-row gap-3 flex-wrap">
               <button
-                onClick={onRegister}
+                onClick={onTrial || onRegister}
                 className="inline-flex items-center justify-center gap-2 px-6 py-3.5 text-sm font-bold rounded-sm transition-opacity hover:opacity-90"
-                style={{ background: "hsl(210 80% 56%)", color: "#fff" }}
+                style={{ background: "hsl(142 70% 40%)", color: "#fff" }}
               >
-                <Icon name="Zap" size={16} />
-                Начать бесплатно
+                <Icon name="Gift" size={16} />
+                Попробовать 5 дней бесплатно
               </button>
               <button
-                onClick={() => scrollTo("how-it-works")}
+                onClick={onLogin}
                 className="inline-flex items-center justify-center gap-2 px-6 py-3.5 text-sm font-semibold rounded-sm border border-white/30 text-white hover:bg-white/10 transition-colors"
               >
-                <Icon name="PlayCircle" size={16} />
-                Как это работает
+                <Icon name="LogIn" size={16} />
+                Войти
               </button>
             </div>
+            <p className="text-xs text-white/50 mt-3">
+              Пробный период: 5 дней, до 5 ИИ-запросов в день. Карта не нужна.
+            </p>
 
             {/* Статистика */}
             <div className="grid grid-cols-3 gap-6 mt-12 pt-8 border-t border-white/15">
@@ -290,6 +294,34 @@ export default function LandingPage({ onLogin, onRegister }: LandingPageProps) {
             <p className="text-muted-foreground max-w-xl mx-auto text-sm">
               Все функции доступны на любом тарифе. Разница — только в длительности подписки.
             </p>
+          </div>
+
+          {/* Trial-карточка */}
+          <div className="max-w-4xl mx-auto mb-6">
+            <div className="border-2 border-green-400 rounded-sm p-6 flex flex-col sm:flex-row items-center gap-5"
+              style={{ background: "linear-gradient(135deg, hsl(142 70% 96%) 0%, hsl(160 60% 94%) 100%)" }}>
+              <div className="w-14 h-14 rounded-sm flex items-center justify-center flex-shrink-0"
+                style={{ background: "hsl(142 70% 40%)" }}>
+                <Icon name="Gift" size={26} className="text-white" />
+              </div>
+              <div className="flex-1 text-center sm:text-left">
+                <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider mb-1"
+                  style={{ background: "hsl(142 70% 40%)", color: "#fff" }}>
+                  <Icon name="Clock" size={9} />
+                  Бесплатно
+                </div>
+                <p className="text-base font-bold text-foreground">Пробный период — 5 дней</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Полный доступ ко всем разделам · До 5 ИИ-запросов в день · Карта не нужна · Без обязательств</p>
+              </div>
+              <button
+                onClick={onTrial || onRegister}
+                className="flex-shrink-0 inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold rounded-sm text-white transition-opacity hover:opacity-90"
+                style={{ background: "hsl(142 70% 40%)" }}
+              >
+                <Icon name="Zap" size={15} />
+                Начать пробный период
+              </button>
+            </div>
           </div>
 
           {loadingPlans ? (

@@ -4,6 +4,8 @@ POST /login — вход (учитель/админ)
 POST /signup — самостоятельная регистрация (имя, фамилия, email, пароль) — логин генерируется автоматически
 POST /register — добавление пользователя админом
 POST /me — получить актуальный статус подписки (по токену)
+POST /activate-trial — активация пробного периода 5 дней
+POST /check-ai-limit — проверить/увеличить счётчик AI-запросов (trial: макс 5 в день)
 GET /users — список пользователей (admin)
 POST /toggle, /reset-password — admin
 DELETE /delete — admin
@@ -79,11 +81,18 @@ def generate_login(first_name: str, last_name: str, cur) -> str:
         candidate = f"{base}{n}"
 
 
-# ── Подписка ───────────────────────────────────────────────────────────────
+# ── Подписка и trial ────────────────────────────────────────────────────────
 
-def get_subscription_payload(row_status, row_until) -> dict:
-    """Нормализуем статус подписки к фронту."""
+TRIAL_DAYS = 5
+TRIAL_AI_LIMIT = 5
+
+
+def get_subscription_payload(row_status, row_until, trial_until=None, trial_ai_calls_today=0, trial_ai_date=None) -> dict:
+    """Нормализуем статус подписки и trial к фронту."""
     now = datetime.utcnow()
+    today = now.date()
+
+    # Платная подписка
     until = row_until
     is_active = False
     status = row_status or 'none'
@@ -93,10 +102,39 @@ def get_subscription_payload(row_status, row_until) -> dict:
             status = 'active'
         elif status == 'active':
             status = 'expired'
+
+    # Trial
+    trial_active = False
+    trial_expired = False
+    trial_until_iso = None
+    if trial_until and isinstance(trial_until, datetime):
+        trial_until_iso = trial_until.isoformat()
+        if trial_until > now:
+            trial_active = True
+        else:
+            trial_expired = True
+
+    # Счётчик AI на сегодня
+    if trial_ai_date and hasattr(trial_ai_date, 'year'):
+        ai_date_is_today = (trial_ai_date == today)
+    else:
+        ai_date_is_today = False
+    ai_calls_today = trial_ai_calls_today if ai_date_is_today else 0
+
+    # Общий доступ = платная активна ИЛИ trial активен
+    if not is_active and trial_active:
+        is_active = True
+        status = 'trial'
+
     return {
         "subscription_status": status,
         "subscription_active": is_active,
         "subscription_until": until.isoformat() if isinstance(until, datetime) else None,
+        "trial_active": trial_active,
+        "trial_expired": trial_expired,
+        "trial_until": trial_until_iso,
+        "trial_ai_calls_today": ai_calls_today,
+        "trial_ai_limit": TRIAL_AI_LIMIT,
     }
 
 
@@ -217,7 +255,8 @@ def handler(event: dict, context) -> dict:
             # Поиск по логину или email
             cur.execute(
                 f"""SELECT login, password_hash, full_name, first_name, last_name, email, school, role, is_active,
-                          subscription_status, subscription_until
+                          subscription_status, subscription_until,
+                          trial_until, trial_ai_calls_today, trial_ai_date
                     FROM {SCHEMA}.users
                     WHERE login = %s OR LOWER(email) = LOWER(%s)
                     LIMIT 1""",
@@ -228,11 +267,11 @@ def handler(event: dict, context) -> dict:
                 return _resp(401, {"error": "Неверный логин или пароль"})
 
             (login, _ph, full_name, first_name, last_name, email, school, role, is_active,
-             sub_status, sub_until) = row
+             sub_status, sub_until, trial_until, trial_ai_calls_today, trial_ai_date) = row
             if not is_active:
                 return _resp(403, {"error": "Аккаунт заблокирован. Обратитесь к администратору."})
 
-            sub = get_subscription_payload(sub_status, sub_until)
+            sub = get_subscription_payload(sub_status, sub_until, trial_until, trial_ai_calls_today or 0, trial_ai_date)
 
             # Если подписка истекла — фиксируем в БД
             if sub_status == 'active' and sub['subscription_status'] == 'expired':
@@ -264,19 +303,127 @@ def handler(event: dict, context) -> dict:
             return _resp(400, {"error": "Укажите login"})
         if login == "admin":
             return _resp(200, {"login": "admin", "subscription_status": "active",
-                               "subscription_active": True, "subscription_until": None})
+                               "subscription_active": True, "subscription_until": None,
+                               "trial_active": False, "trial_expired": False, "trial_until": None,
+                               "trial_ai_calls_today": 0, "trial_ai_limit": TRIAL_AI_LIMIT})
         conn = get_conn()
         try:
             cur = conn.cursor()
             cur.execute(
-                f"SELECT subscription_status, subscription_until FROM {SCHEMA}.users WHERE login = %s",
+                f"""SELECT subscription_status, subscription_until,
+                           trial_until, trial_ai_calls_today, trial_ai_date
+                    FROM {SCHEMA}.users WHERE login = %s""",
                 (login,)
             )
             row = cur.fetchone()
             if not row:
                 return _resp(404, {"error": "Пользователь не найден"})
-            sub = get_subscription_payload(row[0], row[1])
+            sub = get_subscription_payload(row[0], row[1], row[2], row[3] or 0, row[4])
             return _resp(200, {"login": login, **sub})
+        finally:
+            conn.close()
+
+    # ── POST activate-trial ──────────────────────────────────────────────────
+    if method == "POST" and route in ("activate-trial", "activate_trial"):
+        login = (body.get("login") or "").strip()
+        if not login:
+            return _resp(400, {"error": "Укажите login"})
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"SELECT subscription_status, subscription_until, trial_until FROM {SCHEMA}.users WHERE login = %s",
+                (login,)
+            )
+            row = cur.fetchone()
+            if not row:
+                return _resp(404, {"error": "Пользователь не найден"})
+
+            sub_status, sub_until, trial_until = row
+            now = datetime.utcnow()
+
+            # Если уже есть активная платная подписка — не нужен trial
+            if sub_until and isinstance(sub_until, datetime) and sub_until > now:
+                return _resp(400, {"error": "У вас уже есть активная подписка"})
+
+            # Trial уже был активирован
+            if trial_until is not None:
+                return _resp(400, {"error": "Пробный период уже был использован"})
+
+            new_trial_until = now + timedelta(days=TRIAL_DAYS)
+            cur.execute(
+                f"""UPDATE {SCHEMA}.users
+                    SET trial_until = %s, trial_ai_calls_today = 0, trial_ai_date = NULL
+                    WHERE login = %s""",
+                (new_trial_until, login)
+            )
+            conn.commit()
+            return _resp(200, {
+                "success": True,
+                "trial_active": True,
+                "trial_until": new_trial_until.isoformat(),
+                "trial_ai_calls_today": 0,
+                "trial_ai_limit": TRIAL_AI_LIMIT,
+            })
+        finally:
+            conn.close()
+
+    # ── POST check-ai-limit (проверить и увеличить счётчик AI-запросов) ──────
+    if method == "POST" and route in ("check-ai-limit", "check_ai_limit"):
+        login = (body.get("login") or "").strip()
+        if not login:
+            return _resp(400, {"error": "Укажите login"})
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"""SELECT subscription_status, subscription_until,
+                           trial_until, trial_ai_calls_today, trial_ai_date
+                    FROM {SCHEMA}.users WHERE login = %s""",
+                (login,)
+            )
+            row = cur.fetchone()
+            if not row:
+                return _resp(404, {"error": "Пользователь не найден"})
+
+            sub_status, sub_until, trial_until, ai_calls, ai_date = row
+            now = datetime.utcnow()
+            today = now.date()
+
+            # Платная подписка активна — лимит не нужен
+            if sub_until and isinstance(sub_until, datetime) and sub_until > now:
+                return _resp(200, {"allowed": True, "is_trial": False})
+
+            # Trial не активирован или истёк
+            if not trial_until or not isinstance(trial_until, datetime) or trial_until <= now:
+                return _resp(403, {"allowed": False, "error": "Нет активной подписки или пробного периода"})
+
+            # Считаем вызовы за сегодня
+            current_calls = ai_calls if (ai_date and hasattr(ai_date, 'year') and ai_date == today) else 0
+
+            if current_calls >= TRIAL_AI_LIMIT:
+                return _resp(429, {
+                    "allowed": False,
+                    "is_trial": True,
+                    "error": f"Достигнут дневной лимит {TRIAL_AI_LIMIT} ИИ-запросов для пробного периода. Попробуйте завтра или оформите подписку.",
+                    "trial_ai_calls_today": current_calls,
+                    "trial_ai_limit": TRIAL_AI_LIMIT,
+                })
+
+            new_calls = current_calls + 1
+            cur.execute(
+                f"""UPDATE {SCHEMA}.users
+                    SET trial_ai_calls_today = %s, trial_ai_date = %s
+                    WHERE login = %s""",
+                (new_calls, today, login)
+            )
+            conn.commit()
+            return _resp(200, {
+                "allowed": True,
+                "is_trial": True,
+                "trial_ai_calls_today": new_calls,
+                "trial_ai_limit": TRIAL_AI_LIMIT,
+            })
         finally:
             conn.close()
 

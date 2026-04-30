@@ -76,6 +76,7 @@ export function PresentationsSection() {
           slidesCount,
           teacherName: teacher.name,
           teacherSchool: teacher.school,
+          login: teacher.login,
         },
         (attempt) => setStage(`Повторная попытка ${attempt} из 3 — ИИ-сервис занят, ждём…`),
       );

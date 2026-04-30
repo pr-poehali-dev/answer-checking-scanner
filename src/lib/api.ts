@@ -6,12 +6,17 @@ const PRESENTATION_URL = "https://functions.poehali.dev/9aa03e93-715c-41fd-91f4-
 const TEST_URL = "https://functions.poehali.dev/80f9c6ec-e492-47b6-881a-633a41d7e4f4";
 const SUBSCRIPTION_URL = "https://functions.poehali.dev/0dc83bdb-3da2-4cb9-b9d9-f0b48cfb25da";
 
-export type SubscriptionStatus = "none" | "active" | "expired";
+export type SubscriptionStatus = "none" | "active" | "expired" | "trial";
 
 export interface SubscriptionInfo {
   subscription_status: SubscriptionStatus;
   subscription_active: boolean;
   subscription_until: string | null;
+  trial_active?: boolean;
+  trial_expired?: boolean;
+  trial_until?: string | null;
+  trial_ai_calls_today?: number;
+  trial_ai_limit?: number;
 }
 
 export interface AuthUser extends SubscriptionInfo {
@@ -130,6 +135,18 @@ export const authApi = {
       "update-profile",
       { method: "POST", token, body: JSON.stringify(payload) }
     ),
+
+  activateTrial: (login: string) =>
+    request<{ success: boolean; trial_active: boolean; trial_until: string; trial_ai_calls_today: number; trial_ai_limit: number }>(
+      "activate-trial",
+      { method: "POST", body: JSON.stringify({ login }) }
+    ),
+
+  checkAiLimit: (login: string) =>
+    request<{ allowed: boolean; is_trial?: boolean; trial_ai_calls_today?: number; trial_ai_limit?: number; error?: string }>(
+      "check-ai-limit",
+      { method: "POST", body: JSON.stringify({ login }) }
+    ),
 };
 
 const SYNOPSIS_URL = "https://functions.poehali.dev/c757a5f9-12cd-499d-a66f-79b9f9aeb8d1";
@@ -151,6 +168,7 @@ export const synopsisApi = {
       description?: string;
       teacher_name: string;
       teacher_school: string;
+      login?: string;
     },
     onRetry?: (attempt: number) => void,
   ): Promise<SynopsisResponse> => {
@@ -320,6 +338,7 @@ export const presentationApi = {
       audience?: string;
       teacherName: string;
       teacherSchool: string;
+      login?: string;
     },
     onRetry?: (attempt: number) => void,
   ): Promise<PresentationResponse> => {
@@ -345,6 +364,7 @@ export const presentationApi = {
             slidesCount: params.slidesCount ?? 8,
             teacherName: params.teacherName,
             teacherSchool: params.teacherSchool,
+            login: params.login ?? "",
           }),
           signal: controller.signal,
         });
@@ -425,6 +445,7 @@ export const testApi = {
     part2Count: number;
     teacherName: string;
     teacherSchool: string;
+    login?: string;
   }): Promise<TestResponse> => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 90000);

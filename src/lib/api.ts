@@ -505,12 +505,75 @@ export interface ExamResponse {
   size: number;
 }
 
+const BATCH_SIZE = 3;
+const BATCH_TIMEOUT_MS = 100_000;
+
+async function examFetch(body: object): Promise<unknown> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), BATCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(EXAM_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error((data as { error?: string }).error || `Ошибка ${res.status}`);
+    return data;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export const examApi = {
   getSubjects: async (examType: "ОГЭ" | "ЕГЭ"): Promise<string[]> => {
     const res = await fetch(`${EXAM_URL}?action=subjects&examType=${encodeURIComponent(examType)}`);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || "Ошибка загрузки предметов");
     return data.subjects as string[];
+  },
+
+  getStructure: async (examType: "ОГЭ" | "ЕГЭ", subject: string) => {
+    return await examFetch({ action: "get_structure", examType, subject }) as {
+      partsCount: number;
+      parts: { num: number; type: string; topic: string; points: number }[];
+    };
+  },
+
+  generateBatch: async (
+    examType: "ОГЭ" | "ЕГЭ",
+    subject: string,
+    batchIndices: number[],
+    login?: string,
+  ): Promise<ExamTask[]> => {
+    const data = await examFetch({ action: "generate_batch", examType, subject, batchIndices, login }) as { tasks: ExamTask[] };
+    return data.tasks;
+  },
+
+  buildDocx: async (
+    examType: "ОГЭ" | "ЕГЭ",
+    subject: string,
+    tasks: ExamTask[],
+    variantNum: number,
+    teacherName: string,
+    teacherSchool: string,
+  ): Promise<ExamResponse> => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 30_000);
+    try {
+      const res = await fetch(EXAM_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "build_docx", examType, subject, tasks, variantNum, teacherName, teacherSchool }),
+        signal: controller.signal,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Ошибка сборки документа (${res.status})`);
+      return data as ExamResponse;
+    } finally {
+      clearTimeout(timer);
+    }
   },
 
   generate: async (
@@ -521,48 +584,43 @@ export const examApi = {
       teacherSchool: string;
       login?: string;
     },
-    onRetry?: (attempt: number) => void,
+    onProgress?: (done: number, total: number, stage: string) => void,
   ): Promise<ExamResponse> => {
-    const MAX_ATTEMPTS = 2;
-    const TIMEOUT_MS = 600_000; // 10 минут — варианты большие
-    let lastError: Error = new Error("Не удалось создать вариант");
+    const { examType, subject, teacherName, teacherSchool, login } = params;
 
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-      if (attempt > 1 && onRetry) onRetry(attempt);
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-      try {
-        const res = await fetch(EXAM_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(params),
-          signal: controller.signal,
-        });
-        clearTimeout(timer);
-        const data = await res.json().catch(() => ({}));
-        if (res.status === 429 || res.status >= 500) {
-          lastError = new Error(data.error || `Ошибка сервера (${res.status})`);
-          if (attempt < MAX_ATTEMPTS) { await new Promise(r => setTimeout(r, 3000)); continue; }
-          throw lastError;
+    onProgress?.(0, 1, "Загружаем структуру экзамена…");
+    const structure = await examApi.getStructure(examType, subject);
+    const total = structure.partsCount;
+    const variantNum = Math.floor(Math.random() * 99) + 1;
+
+    const allTasks: ExamTask[] = [];
+    let done = 0;
+
+    for (let i = 0; i < total; i += BATCH_SIZE) {
+      const batchIndices = Array.from({ length: Math.min(BATCH_SIZE, total - i) }, (_, k) => i + k);
+      const batchNums = batchIndices.map(idx => structure.parts[idx]?.num).filter(Boolean);
+      onProgress?.(done, total, `Задания ${batchNums.join(", ")}…`);
+
+      let batchTasks: ExamTask[] = [];
+      let attempts = 0;
+      while (attempts < 3) {
+        try {
+          batchTasks = await examApi.generateBatch(examType, subject, batchIndices, login);
+          break;
+        } catch {
+          attempts++;
+          if (attempts >= 3) throw new Error("Не удалось сгенерировать задания после 3 попыток");
+          await new Promise(r => setTimeout(r, 2000));
         }
-        if (!res.ok) throw new Error(data.error || `Ошибка генерации (${res.status})`);
-        return data as ExamResponse;
-      } catch (e) {
-        clearTimeout(timer);
-        const err = e as Error;
-        if (err.name === "AbortError" || err.message.includes("Failed to fetch")) {
-          lastError = new Error("ИИ-сервис не успел ответить — пробуем ещё раз…");
-          if (attempt < MAX_ATTEMPTS) { await new Promise(r => setTimeout(r, 2000)); continue; }
-          throw new Error("ИИ-сервис не отвечает. Попробуйте ещё раз через несколько минут.");
-        }
-        throw err;
       }
-    }
-    throw lastError;
-  },
 
-  setUrl: (url: string) => {
-    (examApi as unknown as { _url: string })._url = url;
+      allTasks.push(...batchTasks);
+      done += batchIndices.length;
+      onProgress?.(done, total, `Готово: ${done} из ${total}`);
+    }
+
+    onProgress?.(done, total, "Собираем документы…");
+    return examApi.buildDocx(examType, subject, allTasks, variantNum, teacherName, teacherSchool);
   },
 };
 

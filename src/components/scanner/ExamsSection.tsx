@@ -41,6 +41,7 @@ export function ExamsSection() {
   const [subjects, setSubjects] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [stage, setStage] = useState("");
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [lastResult, setLastResult] = useState<ExamResponse | null>(null);
@@ -79,17 +80,18 @@ export function ExamsSection() {
     setSuccess(null);
     setBusy(true);
     setLastResult(null);
+    setProgress(null);
 
     try {
-      setStage("ИИ генерирует задания по структуре ФИПИ…");
       const result = await examApi.generate({
         examType,
         subject,
         teacherName: teacher.name,
         teacherSchool: teacher.school,
         login: teacher.login,
-      }, (attempt) => {
-        setStage(`Повторная попытка ${attempt}…`);
+      }, (done, total, stageText) => {
+        setStage(stageText);
+        setProgress({ done, total });
       });
 
       setLastResult(result);
@@ -142,6 +144,7 @@ export function ExamsSection() {
     } finally {
       setBusy(false);
       setStage("");
+      setProgress(null);
     }
   };
 
@@ -281,9 +284,30 @@ export function ExamsSection() {
           </button>
 
           {busy && (
-            <p className="text-xs text-muted-foreground text-center">
-              Генерация занимает 3–8 минут — ИИ создаёт каждое задание по теме кодификатора ФИПИ
-            </p>
+            <div className="space-y-2">
+              {progress && progress.total > 1 && (
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs text-muted-foreground">{stage}</span>
+                    <span className="text-xs font-semibold text-purple-700">
+                      {progress.done} / {progress.total}
+                    </span>
+                  </div>
+                  <div className="w-full h-2 bg-purple-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-2 rounded-full transition-all duration-500"
+                      style={{
+                        width: `${Math.round((progress.done / progress.total) * 100)}%`,
+                        background: "hsl(270 60% 45%)",
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground text-center">
+                ИИ генерирует каждое задание по теме кодификатора ФИПИ — это занимает несколько минут
+              </p>
+            </div>
           )}
         </div>
       </div>

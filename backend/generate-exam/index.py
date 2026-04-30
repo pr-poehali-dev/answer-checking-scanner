@@ -1056,16 +1056,46 @@ def build_answers_docx(exam_type: str, subject: str, tasks: list,
 
 # ─── ХЭНДЛЕР ─────────────────────────────────────────────────────────────────
 
+def _check_limit(login: str) -> dict | None:
+    """Проверяет лимит AI. Возвращает ответ-ошибку или None если всё ок."""
+    try:
+        limit_req = urllib.request.Request(
+            f"{AUTH_URL}?action=check-ai-limit",
+            data=json.dumps({"login": login}).encode("utf-8"),
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(limit_req, timeout=10) as r:
+            limit_data = json.loads(r.read().decode())
+        if not limit_data.get("allowed"):
+            return _resp(429, {"error": limit_data.get("error", "Достигнут лимит ИИ-запросов")})
+    except urllib.error.HTTPError as e:
+        if e.code == 429:
+            err_body = json.loads(e.read().decode() or "{}")
+            return _resp(429, {"error": err_body.get("error", "Достигнут лимит ИИ-запросов")})
+    except Exception:
+        pass
+    return None
+
+
 def handler(event: dict, context) -> dict:
-    """Генерирует вариант ОГЭ/ЕГЭ по структуре ФИПИ через ИИ (GigaChat)."""
+    """
+    Генерирует вариант ОГЭ/ЕГЭ по структуре ФИПИ через ИИ (GigaChat).
+
+    Режимы (action в body):
+    - subjects (GET): список предметов
+    - get_structure: вернуть структуру (количество и типы заданий) без генерации
+    - generate_batch: сгенерировать N заданий (batch_indices — список индексов из structure.parts)
+    - build_docx: собрать docx из готовых заданий (tasks передаются в body)
+    """
 
     if event.get("httpMethod") == "OPTIONS":
         return {"statusCode": 200, "headers": {**CORS, "Content-Type": "application/json"}, "body": ""}
 
     if event.get("httpMethod") == "GET":
-        action = (event.get("queryStringParameters") or {}).get("action", "")
-        if action == "subjects":
-            exam_type = (event.get("queryStringParameters") or {}).get("examType", "ОГЭ")
+        qs = event.get("queryStringParameters") or {}
+        if qs.get("action") == "subjects":
+            exam_type = qs.get("examType", "ОГЭ")
             subjects = OGE_SUBJECTS if exam_type == "ОГЭ" else EGE_SUBJECTS
             return _resp(200, {"subjects": subjects})
         return _resp(200, {"oge_subjects": OGE_SUBJECTS, "ege_subjects": EGE_SUBJECTS})
@@ -1074,11 +1104,9 @@ def handler(event: dict, context) -> dict:
         return _resp(405, {"error": "Метод не поддерживается"})
 
     body = json.loads(event.get("body") or "{}")
+    action = (body.get("action") or "generate_batch").strip()
     exam_type = (body.get("examType") or "").strip()
     subject = (body.get("subject") or "").strip()
-    teacher_name = (body.get("teacherName") or "Учитель").strip()
-    teacher_school = (body.get("teacherSchool") or "").strip()
-    login = (body.get("login") or "").strip()
 
     if exam_type not in ("ОГЭ", "ЕГЭ"):
         return _resp(400, {"error": "Укажите тип экзамена: ОГЭ или ЕГЭ"})
@@ -1090,72 +1118,87 @@ def handler(event: dict, context) -> dict:
         available = OGE_SUBJECTS if exam_type == "ОГЭ" else EGE_SUBJECTS
         return _resp(400, {"error": f"Предмет «{subject}» недоступен для {exam_type}. Доступны: {', '.join(available)}"})
 
-    # Проверка лимита AI
-    if login:
-        try:
-            limit_req = urllib.request.Request(
-                f"{AUTH_URL}?action=check-ai-limit",
-                data=json.dumps({"login": login}).encode("utf-8"),
-                method="POST",
-                headers={"Content-Type": "application/json"},
-            )
-            with urllib.request.urlopen(limit_req, timeout=10) as r:
-                limit_data = json.loads(r.read().decode())
-            if not limit_data.get("allowed"):
-                return _resp(429, {"error": limit_data.get("error", "Достигнут лимит ИИ-запросов")})
-        except urllib.error.HTTPError as e:
-            if e.code == 429:
-                err_body = json.loads(e.read().decode() or "{}")
-                return _resp(429, {"error": err_body.get("error", "Достигнут лимит ИИ-запросов")})
-        except Exception:
-            pass
+    # ── Получить структуру (без генерации ИИ, мгновенно) ──────────────────────
+    if action == "get_structure":
+        parts_info = [
+            {"num": p["num"], "type": p["type"], "topic": p["topic"], "points": p["points"]}
+            for p in structure["parts"]
+        ]
+        return _resp(200, {
+            "examType": exam_type,
+            "subject": subject,
+            "total": structure["total"],
+            "partsCount": len(structure["parts"]),
+            "parts": parts_info,
+        })
 
-    parts = structure["parts"]
-    variant_num = random.randint(1, 99)
+    # ── Генерация батча заданий ────────────────────────────────────────────────
+    if action == "generate_batch":
+        login = (body.get("login") or "").strip()
+        batch_indices = body.get("batchIndices")  # список индексов из structure.parts (0-based)
 
-    # Генерируем задания по очереди
-    tasks = []
-    for task_def in parts:
-        try:
-            task = generate_task(task_def, exam_type, subject)
+        if login:
+            err = _check_limit(login)
+            if err:
+                return err
+
+        parts = structure["parts"]
+        if batch_indices is None:
+            # Генерируем все (для обратной совместимости — не используется)
+            batch_indices = list(range(len(parts)))
+
+        tasks = []
+        for idx in batch_indices:
+            if idx < 0 or idx >= len(parts):
+                continue
+            task_def = parts[idx]
+            try:
+                task = generate_task(task_def, exam_type, subject)
+            except Exception as e:
+                task = {
+                    "num": task_def["num"],
+                    "type": task_def["type"],
+                    "topic": task_def["topic"],
+                    "points": task_def["points"],
+                    "instruction": task_def["instruction"],
+                    "question": f"[Задание по теме: {task_def['topic']}]",
+                    "options": [],
+                    "answer": "—",
+                    "explanation": f"Ошибка: {str(e)[:80]}",
+                }
             tasks.append(task)
-        except Exception as e:
-            # При ошибке генерации конкретного задания — добавляем заглушку
-            tasks.append({
-                "num": task_def["num"],
-                "type": task_def["type"],
-                "topic": task_def["topic"],
-                "points": task_def["points"],
-                "instruction": task_def["instruction"],
-                "question": f"[Задание по теме: {task_def['topic']}. Составьте самостоятельно.]",
-                "options": [],
-                "answer": "—",
-                "explanation": f"Ошибка генерации: {str(e)[:100]}",
-            })
 
-    # Строим документы
-    variant_bytes = build_variant_docx(exam_type, subject, tasks, teacher_name, teacher_school, variant_num)
-    answers_bytes = build_answers_docx(exam_type, subject, tasks, teacher_name, variant_num)
+        return _resp(200, {"tasks": tasks, "examType": exam_type, "subject": subject})
 
-    variant_b64 = base64.b64encode(variant_bytes).decode()
-    answers_b64 = base64.b64encode(answers_bytes).decode()
+    # ── Сборка docx из готовых заданий ────────────────────────────────────────
+    if action == "build_docx":
+        teacher_name = (body.get("teacherName") or "Учитель").strip()
+        teacher_school = (body.get("teacherSchool") or "").strip()
+        variant_num = int(body.get("variantNum") or random.randint(1, 99))
+        tasks = body.get("tasks") or []
 
-    safe_subject = re.sub(r"[^\w\-]", "_", subject)
-    filename = f"{exam_type}_{safe_subject}_вариант_{variant_num:02d}.docx"
-    answers_filename = f"{exam_type}_{safe_subject}_ответы_{variant_num:02d}.docx"
+        if not tasks:
+            return _resp(400, {"error": "Нет заданий для сборки документа"})
 
-    total_points = sum(t["points"] for t in tasks)
+        variant_bytes = build_variant_docx(exam_type, subject, tasks, teacher_name, teacher_school, variant_num)
+        answers_bytes = build_answers_docx(exam_type, subject, tasks, teacher_name, variant_num)
 
-    return _resp(200, {
-        "docx_b64": variant_b64,
-        "answers_docx_b64": answers_b64,
-        "filename": filename,
-        "answers_filename": answers_filename,
-        "examType": exam_type,
-        "subject": subject,
-        "variantNum": variant_num,
-        "totalTasks": len(tasks),
-        "totalPoints": total_points,
-        "tasks": tasks,
-        "size": len(variant_bytes),
-    })
+        safe_subject = re.sub(r"[^\w\-]", "_", subject)
+        filename = f"{exam_type}_{safe_subject}_вариант_{variant_num:02d}.docx"
+        answers_filename = f"{exam_type}_{safe_subject}_ответы_{variant_num:02d}.docx"
+        total_points = sum(t.get("points", 0) for t in tasks)
+
+        return _resp(200, {
+            "docx_b64": base64.b64encode(variant_bytes).decode(),
+            "answers_docx_b64": base64.b64encode(answers_bytes).decode(),
+            "filename": filename,
+            "answers_filename": answers_filename,
+            "examType": exam_type,
+            "subject": subject,
+            "variantNum": variant_num,
+            "totalTasks": len(tasks),
+            "totalPoints": total_points,
+            "size": len(variant_bytes),
+        })
+
+    return _resp(400, {"error": f"Неизвестный action: {action}"})

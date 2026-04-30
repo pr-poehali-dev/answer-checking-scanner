@@ -505,8 +505,8 @@ export interface ExamResponse {
   size: number;
 }
 
-const BATCH_SIZE = 3;
-const BATCH_TIMEOUT_MS = 100_000;
+const BATCH_SIZE = 1;
+const BATCH_TIMEOUT_MS = 90_000;
 
 async function examFetch(body: object): Promise<unknown> {
   const controller = new AbortController();

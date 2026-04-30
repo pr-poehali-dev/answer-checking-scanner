@@ -719,39 +719,23 @@ def _gigachat_call_once(messages: list, max_tokens: int, model: str, req_timeout
     return choices[0].get("message", {}).get("content", "").strip()
 
 
-def gigachat_chat(messages: list, max_tokens: int = 3000, req_timeout: int = 280) -> str:
+def gigachat_chat(messages: list, max_tokens: int = 3000, req_timeout: int = 65) -> str:
     last_err = None
     for model in ("GigaChat-2", "GigaChat", "GigaChat-Lite"):
-        for attempt in range(1, 3):
-            try:
-                return _gigachat_call_once(messages, max_tokens, model, req_timeout)
-            except urllib.error.HTTPError as e:
-                err_text = e.read().decode(errors="ignore")[:300]
-                if e.code in (401, 403):
-                    raise RuntimeError(f"GigaChat auth HTTP {e.code}: {err_text}")
-                if e.code == 404:
-                    last_err = RuntimeError(f"MODEL_NOT_FOUND: {err_text}")
-                    break
-                last_err = RuntimeError(f"GigaChat HTTP {e.code}: {err_text}")
-                if attempt < 2:
-                    time.sleep(3.0)
-                    continue
-                break
-            except Exception as e:
-                msg = str(e)
-                last_err = RuntimeError(f"GigaChat недоступен: {e}")
-                _TOKEN_CACHE["token"] = None
-                _TOKEN_CACHE["expires_at"] = None
-                is_conn = ("remote end closed" in msg.lower() or
-                           "remotedisconnected" in msg.lower() or
-                           "connection reset" in msg.lower())
-                if is_conn:
-                    time.sleep(2.0)
-                    break
-                if attempt < 2:
-                    time.sleep(3.0)
-                    continue
-                break
+        try:
+            return _gigachat_call_once(messages, max_tokens, model, req_timeout)
+        except urllib.error.HTTPError as e:
+            err_text = e.read().decode(errors="ignore")[:300]
+            if e.code in (401, 403):
+                raise RuntimeError(f"GigaChat auth HTTP {e.code}: {err_text}")
+            if e.code == 404:
+                last_err = RuntimeError(f"MODEL_NOT_FOUND: {err_text}")
+                continue
+            last_err = RuntimeError(f"GigaChat HTTP {e.code}: {err_text}")
+        except Exception as e:
+            last_err = RuntimeError(f"GigaChat недоступен: {e}")
+            _TOKEN_CACHE["token"] = None
+            _TOKEN_CACHE["expires_at"] = None
     raise last_err if last_err else RuntimeError("GigaChat: не удалось получить ответ")
 
 
@@ -835,8 +819,8 @@ def generate_task(task_def: dict, exam_type: str, subject: str) -> dict:
 
     raw = gigachat_chat(
         [{"role": "system", "content": system}, {"role": "user", "content": user}],
-        max_tokens=1500,
-        req_timeout=120,
+        max_tokens=1200,
+        req_timeout=65,
     )
     data = extract_json_obj(raw)
     return {

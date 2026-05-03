@@ -624,6 +624,56 @@ export const examApi = {
   },
 };
 
+// ── Экзамены ФИПИ (без ИИ) ─────────────────────────────────────────────────
+
+const EXAM_BUILDER_URL = "https://functions.poehali.dev/ca0544b0-8a6e-4b75-9bc6-597435d3d225";
+
+export interface ExamBuilderResponse {
+  docx_b64: string;
+  answers_docx_b64: string;
+  filename: string;
+  answers_filename: string;
+  examType: "ОГЭ" | "ЕГЭ";
+  subject: string;
+  variantNum: number;
+  totalTasks: number;
+  totalPoints: number;
+  size: number;
+}
+
+export const examBuilderApi = {
+  getSubjects: async (examType: "ОГЭ" | "ЕГЭ"): Promise<string[]> => {
+    const res = await fetch(`${EXAM_BUILDER_URL}?action=subjects&examType=${encodeURIComponent(examType)}`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Ошибка загрузки предметов");
+    return (data.subjects || []) as string[];
+  },
+
+  generate: async (params: {
+    examType: "ОГЭ" | "ЕГЭ";
+    subject: string;
+    teacherName: string;
+    teacherSchool: string;
+    variantNum?: number;
+  }): Promise<ExamBuilderResponse> => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 30_000);
+    try {
+      const res = await fetch(EXAM_BUILDER_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(params),
+        signal: controller.signal,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Ошибка генерации (${res.status})`);
+      return data as ExamBuilderResponse;
+    } finally {
+      clearTimeout(timer);
+    }
+  },
+};
+
 // ── Подписки АОУСПТ ────────────────────────────────────────────────────────
 
 export interface SubscriptionPlan {

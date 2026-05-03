@@ -9,6 +9,7 @@ import { PresentationsSection } from "@/components/scanner/PresentationsSection"
 import { TestsSection } from "@/components/scanner/TestsSection";
 import { SynopsisSection } from "@/components/scanner/SynopsisSection";
 import { ExamsSection } from "@/components/scanner/ExamsSection";
+import { FipiExamsSection } from "@/components/scanner/FipiExamsSection";
 import LoginPage from "@/pages/LoginPage";
 import LandingPage from "@/pages/LandingPage";
 import AdminPanel from "@/pages/AdminPanel";
@@ -26,6 +27,7 @@ const SECTION_COMPONENTS: Record<Section, React.FC> = {
   tests: TestsSection,
   synopsis: SynopsisSection,
   exams: ExamsSection,
+  fipiExams: FipiExamsSection,
   settings: SettingsSection,
 };
 

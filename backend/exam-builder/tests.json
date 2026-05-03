@@ -1,0 +1,49 @@
+{
+  "tests": [
+    {
+      "name": "OPTIONS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200,
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "GET список предметов ОГЭ",
+      "method": "GET",
+      "path": "/?action=subjects&examType=%D0%9E%D0%93%D0%AD",
+      "expectedStatus": 200,
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "GET список предметов ЕГЭ",
+      "method": "GET",
+      "path": "/?action=subjects&examType=%D0%95%D0%93%D0%AD",
+      "expectedStatus": 200,
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "POST без типа экзамена — 400",
+      "method": "POST",
+      "path": "/",
+      "body": {"subject": "Математика"},
+      "expectedStatus": 400,
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "POST неподдерживаемый предмет — 400",
+      "method": "POST",
+      "path": "/",
+      "body": {"examType": "ОГЭ", "subject": "Несуществующий"},
+      "expectedStatus": 400,
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "POST генерация варианта Математика ОГЭ",
+      "method": "POST",
+      "path": "/",
+      "body": {"examType": "ОГЭ", "subject": "Математика", "teacherName": "Иван Иванов", "teacherSchool": "Школа №1"},
+      "expectedStatus": 200,
+      "bodyMatcher": "partial"
+    }
+  ]
+}

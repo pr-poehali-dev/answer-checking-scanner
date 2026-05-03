@@ -174,77 +174,141 @@ def extract_json(text: str) -> dict:
 LETTERS = ["А", "Б", "В", "Г", "Д"]
 
 
-def generate_questions(work_type: str, subject: str, class_num: int, topic: str, description: str,
-                       part1_count: int, part2_count: int) -> dict:
-    """Запрашивает у GigaChat вопросы. Возвращает dict с part1, part2."""
+def _generate_part1(work_type: str, subject: str, class_num: int, topic: str, description: str, count: int) -> list:
+    """Часть 1: вопросы с 4 вариантами ответа. Генерируется отдельным запросом."""
+    if count <= 0:
+        return []
     system = (
-        "Ты учитель-методист, составляющий проверочные работы по школьной программе РФ. "
-        "Создавай корректные с точки зрения предмета вопросы, соответствующие уровню класса. "
-        "Возвращай СТРОГО JSON без markdown-обёртки."
+        "Ты учитель-методист РФ. Создаёшь школьные тестовые вопросы строго по теме. "
+        "Каждый вопрос имеет РОВНО 4 варианта ответа (А, Б, В, Г), из них 1 правильный. "
+        "Возвращай ТОЛЬКО валидный JSON без markdown."
     )
-
-    parts_desc = []
-    if part1_count > 0:
-        parts_desc.append(
-            f'"part1": [{{"question":"Текст вопроса","options":["вариант А","вариант Б","вариант В","вариант Г"],"answer":"А"}}] '
-            f'— РОВНО {part1_count} элементов, по 4 варианта ответа в каждом. answer — буква (А/Б/В/Г).'
-        )
-    if part2_count > 0:
-        parts_desc.append(
-            f'"part2": [{{"question":"Текст открытого вопроса","answer":"Краткий правильный ответ или решение"}}] '
-            f'— РОВНО {part2_count} элементов с открытым ответом (без вариантов).'
-        )
-
     user = (
-        f"Тип работы: {work_type}\n"
         f"Предмет: {subject}\n"
         f"Класс: {class_num}\n"
         f"Тема: {topic}\n"
-        f"Описание/контекст: {description or '—'}\n\n"
-        "Составь работу. Верни ТОЛЬКО JSON:\n"
-        "{\n  " + ",\n  ".join(parts_desc) + "\n}\n"
-        "Вопросы должны быть разнообразные, проверять понимание темы. "
-        "Не повторяй вопросы. Используй понятный школьнику язык."
+        f"Описание: {description or '—'}\n"
+        f"Тип работы: {work_type}\n\n"
+        f"Составь РОВНО {count} тестовых вопросов с 4 вариантами ответа.\n"
+        "Верни JSON строго в формате:\n"
+        '{"questions": [\n'
+        '  {"question": "Текст вопроса", "options": ["Вариант А", "Вариант Б", "Вариант В", "Вариант Г"], "answer": "А"},\n'
+        '  ...\n'
+        ']}\n'
+        f"Требования:\n"
+        f"- РОВНО {count} вопросов в массиве questions\n"
+        f"- В каждом вопросе РОВНО 4 элемента в options\n"
+        f"- answer — одна буква (А, Б, В или Г), указывающая правильный вариант\n"
+        f"- Только 1 правильный ответ в каждом вопросе\n"
+        f"- Вопросы разнообразные, проверяющие понимание темы"
     )
-
-    max_tok = min(140 * (part1_count + part2_count) + 400, 3200)
+    max_tok = min(180 * count + 500, 3200)
     raw = gigachat_chat(
         [{"role": "system", "content": system}, {"role": "user", "content": user}],
         max_tokens=max_tok,
-        temperature=0.4,
+        temperature=0.5,
     )
     try:
         data = extract_json(raw)
     except Exception as e:
-        raise RuntimeError(f"Не удалось разобрать ответ ИИ: {e}. Ответ: {raw[:300]}")
+        raise RuntimeError(f"Не удалось разобрать вопросы части 1: {e}. Ответ: {raw[:300]}")
 
-    # Нормализация
-    part1 = []
-    for q in (data.get("part1") or [])[:part1_count]:
+    items = data.get("questions") or data.get("part1") or []
+    if not isinstance(items, list):
+        items = []
+
+    result = []
+    for q in items[:count]:
+        if not isinstance(q, dict):
+            continue
         text = (q.get("question") or "").strip()
         opts = q.get("options") or []
-        ans = (q.get("answer") or "").strip().upper()[:1]
+        if not isinstance(opts, list):
+            continue
+        ans_raw = str(q.get("answer") or "").strip().upper()
+        # Принимаем буквы А/Б/В/Г, латинские A/B/C/D, цифры 1-4
+        lat_to_cyr = {"A": "А", "B": "Б", "C": "В", "D": "Г"}
+        num_to_cyr = {"1": "А", "2": "Б", "3": "В", "4": "Г"}
+        if ans_raw and ans_raw[0] in lat_to_cyr:
+            ans = lat_to_cyr[ans_raw[0]]
+        elif ans_raw and ans_raw[0] in num_to_cyr:
+            ans = num_to_cyr[ans_raw[0]]
+        elif ans_raw and ans_raw[0] in LETTERS:
+            ans = ans_raw[0]
+        else:
+            ans = ""
         if not text or len(opts) < 2 or ans not in LETTERS:
             continue
-        # Нормализуем опции до 4 (если меньше — добиваем, если больше — обрезаем)
         opts = [str(o).strip() for o in opts][:4]
         while len(opts) < 4:
             opts.append("—")
-        # Если ответ за пределами доступных опций
         if LETTERS.index(ans) >= len(opts):
             ans = "А"
-        part1.append({"question": text, "options": opts, "answer": ans})
+        result.append({"question": text, "options": opts, "answer": ans})
 
-    part2 = []
-    for q in (data.get("part2") or [])[:part2_count]:
+    return result
+
+
+def _generate_part2(work_type: str, subject: str, class_num: int, topic: str, description: str, count: int) -> list:
+    """Часть 2: открытые вопросы. Генерируется отдельным запросом."""
+    if count <= 0:
+        return []
+    system = (
+        "Ты учитель-методист РФ. Создаёшь открытые вопросы школьной программы. "
+        "Возвращай ТОЛЬКО валидный JSON без markdown."
+    )
+    user = (
+        f"Предмет: {subject}\n"
+        f"Класс: {class_num}\n"
+        f"Тема: {topic}\n"
+        f"Описание: {description or '—'}\n"
+        f"Тип работы: {work_type}\n\n"
+        f"Составь РОВНО {count} открытых вопросов (без вариантов ответа).\n"
+        "Верни JSON строго в формате:\n"
+        '{"questions": [\n'
+        '  {"question": "Текст вопроса", "answer": "Краткий правильный ответ или решение"},\n'
+        '  ...\n'
+        ']}\n'
+        f"РОВНО {count} элементов. Вопросы разнообразные."
+    )
+    max_tok = min(140 * count + 400, 3000)
+    raw = gigachat_chat(
+        [{"role": "system", "content": system}, {"role": "user", "content": user}],
+        max_tokens=max_tok,
+        temperature=0.5,
+    )
+    try:
+        data = extract_json(raw)
+    except Exception as e:
+        raise RuntimeError(f"Не удалось разобрать вопросы части 2: {e}. Ответ: {raw[:300]}")
+
+    items = data.get("questions") or data.get("part2") or []
+    if not isinstance(items, list):
+        items = []
+
+    result = []
+    for q in items[:count]:
+        if not isinstance(q, dict):
+            continue
         text = (q.get("question") or "").strip()
         ans = str(q.get("answer") or "").strip()
         if not text:
             continue
-        part2.append({"question": text, "answer": ans})
+        result.append({"question": text, "answer": ans})
 
-    if not part1 and not part2:
-        raise RuntimeError("ИИ не вернул ни одного валидного вопроса")
+    return result
+
+
+def generate_questions(work_type: str, subject: str, class_num: int, topic: str, description: str,
+                       part1_count: int, part2_count: int) -> dict:
+    """Запрашивает у GigaChat вопросы РАЗДЕЛЬНО для каждой части, чтобы гарантировать обе."""
+    part1 = _generate_part1(work_type, subject, class_num, topic, description, part1_count)
+    part2 = _generate_part2(work_type, subject, class_num, topic, description, part2_count)
+
+    if part1_count > 0 and not part1:
+        raise RuntimeError("ИИ не вернул валидных вопросов для части 1. Попробуйте ещё раз.")
+    if part2_count > 0 and not part2:
+        raise RuntimeError("ИИ не вернул валидных вопросов для части 2. Попробуйте ещё раз.")
 
     return {"part1": part1, "part2": part2}
 

@@ -1,12 +1,13 @@
 import { useState, useCallback } from "react";
 import Icon from "@/components/ui/icon";
-import { AnswerKeyPanel } from "./AnswerKeyPanel";
 import { ScanUploadZone } from "./ScanUploadZone";
 import { RecognitionResults } from "./RecognitionResults";
 import { BulkUpload } from "./BulkUpload";
 import { FlowStep, RecognitionResult } from "./upload-types";
 import { recognizeBlank } from "./ocrEngine";
 import { appStore, useAppStore } from "@/store/appStore";
+
+const OPT_LABELS = ["A", "B", "C", "D", "E", "F"];
 
 export function UploadSection() {
   const { works, students } = useAppStore();
@@ -15,8 +16,8 @@ export function UploadSection() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [selectedWorkId, setSelectedWorkId] = useState<string>("");
   const [answerKey, setAnswerKey] = useState("");
-  const [part1Count, setPart1Count] = useState(20);
-  const [part2Count, setPart2Count] = useState(0);
+  const [questionsCount, setQuestionsCount] = useState(20);
+  const [optionsCount, setOptionsCount] = useState(4);
   const [result, setResult] = useState<RecognitionResult | null>(null);
   const [savedStudent, setSavedStudent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -24,14 +25,12 @@ export function UploadSection() {
   const [ocrStatus, setOcrStatus] = useState("");
   const [ocrProgress, setOcrProgress] = useState(0);
 
-  // При выборе работы — автоматически подставляем ключ и параметры
   const handleSelectWork = (workId: string) => {
     setSelectedWorkId(workId);
     const work = works.find(w => w.id === workId);
     if (work) {
       setAnswerKey(work.answerKey);
-      setPart1Count(work.part1Count);
-      setPart2Count(work.part2Count);
+      setQuestionsCount(work.totalQuestions);
     }
   };
 
@@ -40,8 +39,7 @@ export function UploadSection() {
     setResult(null);
     setError(null);
     setStep("idle");
-    const url = URL.createObjectURL(f);
-    setPreviewUrl(url);
+    setPreviewUrl(URL.createObjectURL(f));
   }, []);
 
   const handleRecognize = async () => {
@@ -55,22 +53,16 @@ export function UploadSection() {
       const data = await recognizeBlank(
         file,
         answerKey,
-        part1Count,
-        part2Count,
-        (status, progress) => {
-          setOcrStatus(status);
-          setOcrProgress(progress);
-        }
+        questionsCount,
+        0,
+        (status, progress) => { setOcrStatus(status); setOcrProgress(progress); }
       );
       setResult(data);
       setStep("done");
 
-      // Сохраняем результат в store если выбрана работа
       if (selectedWorkId) {
         const work = works.find(w => w.id === selectedWorkId);
         const student = students.find(s => s.code === data.student_code);
-
-        // Вычисляем оценку по шкале работы
         let grade = "1";
         if (work) {
           const sc = data.analysis.correct;
@@ -79,9 +71,7 @@ export function UploadSection() {
           else if (sc >= gs.grade4) grade = "4";
           else if (sc >= gs.grade3) grade = "3";
           else if (sc >= gs.grade2) grade = "2";
-          else grade = "1";
         }
-
         appStore.addResult({
           workId: selectedWorkId,
           studentCode: data.student_code,
@@ -92,18 +82,10 @@ export function UploadSection() {
           grade,
           scannedAt: new Date().toISOString(),
         });
-
         setSavedStudent(student?.name ?? `Код: ${data.student_code}`);
       }
     } catch (e: unknown) {
-      let msg = "Ошибка распознавания";
-      if (e instanceof Error) {
-        msg = e.message;
-      } else if (typeof e === "string") {
-        msg = e;
-      }
-      console.error("OCR error:", e);
-      setError(msg);
+      setError(e instanceof Error ? e.message : "Ошибка распознавания");
       setStep("error");
     }
   };
@@ -117,30 +99,29 @@ export function UploadSection() {
     setSavedStudent(null);
   };
 
+  const opts = OPT_LABELS.slice(0, optionsCount);
+
   return (
-    <div className="animate-slide-up space-y-6">
+    <div className="animate-slide-up space-y-5">
 
-      <div className="flex items-center gap-3">
-        <div className="flex-1 h-px bg-border" />
-        <span className="text-xs text-muted-foreground uppercase tracking-wider">Загрузка заполненного бланка</span>
-        <div className="flex-1 h-px bg-border" />
-      </div>
-
-      {/* Выбор работы */}
-      <div className="border border-border rounded-sm bg-white">
-        <div className="px-5 py-3 border-b border-border bg-muted flex items-center gap-2">
-          <Icon name="ClipboardList" size={15} className="text-primary" />
+      {/* Привязка к работе */}
+      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+        <div className="px-5 py-3 border-b bg-gray-50 flex items-center gap-2">
+          <Icon name="ClipboardList" size={15} className="text-blue-600" />
           <p className="text-sm font-semibold">Привязать к работе</p>
         </div>
-        <div className="p-5">
+        <div className="p-5 space-y-3">
           {works.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Сначала создайте работу в разделе «Работы»</p>
+            <p className="text-sm text-gray-500">Сначала создайте работу в разделе «Работы»</p>
           ) : (
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="text-xs text-muted-foreground block mb-1">Выберите работу</label>
-                <select value={selectedWorkId} onChange={e => handleSelectWork(e.target.value)}
-                  className="w-full border border-border rounded-sm px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring">
+                <label className="text-xs text-gray-500 block mb-1">Выберите работу</label>
+                <select
+                  value={selectedWorkId}
+                  onChange={e => handleSelectWork(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
                   <option value="">— без привязки —</option>
                   {works.map(w => (
                     <option key={w.id} value={w.id}>
@@ -149,44 +130,112 @@ export function UploadSection() {
                   ))}
                 </select>
               </div>
-              {selectedWorkId && (
-                <div className="flex items-end">
-                  <div className="text-xs text-muted-foreground space-y-0.5">
-                    {(() => {
-                      const w = works.find(wk => wk.id === selectedWorkId);
-                      return w ? (
-                        <>
-                          <p>Заданий: <span className="font-semibold text-foreground">{w.totalQuestions}</span></p>
-                          <p>Ключ: <span className="mono font-semibold text-foreground">{w.answerKey ? `${w.answerKey.slice(0,12)}...` : "не задан"}</span></p>
-                          <p className="text-green-600 font-medium">Результат сохранится в работу автоматически</p>
-                        </>
-                      ) : null;
-                    })()}
+              {selectedWorkId && (() => {
+                const w = works.find(wk => wk.id === selectedWorkId);
+                return w ? (
+                  <div className="text-xs text-gray-500 space-y-1 flex flex-col justify-center">
+                    <p>Вопросов: <span className="font-semibold text-gray-800">{w.totalQuestions}</span></p>
+                    <p>Ключ: <span className="font-mono font-semibold text-gray-800">{w.answerKey ? `${w.answerKey.slice(0,12)}…` : "не задан"}</span></p>
+                    <p className="text-green-600 font-medium">Результат сохранится автоматически</p>
                   </div>
-                </div>
-              )}
+                ) : null;
+              })()}
             </div>
           )}
           {savedStudent && (
-            <div className="mt-3 flex items-center gap-2 p-2 rounded-sm" style={{ background: "hsl(142 71% 45% / 0.08)", border: "1px solid hsl(142 71% 45% / 0.3)" }}>
-              <Icon name="CheckCircle" size={14} style={{ color: "#22c55e" }} />
-              <p className="text-xs font-medium" style={{ color: "#16a34a" }}>
-                Результат сохранён: {savedStudent}
-              </p>
+            <div className="flex items-center gap-2 p-2.5 rounded-lg bg-green-50 border border-green-200">
+              <Icon name="CheckCircle" size={14} className="text-green-600" />
+              <p className="text-xs font-medium text-green-700">Результат сохранён: {savedStudent}</p>
             </div>
           )}
         </div>
       </div>
 
-      <AnswerKeyPanel
-        answerKey={answerKey}
-        setAnswerKey={setAnswerKey}
-        part1Count={part1Count}
-        setPart1Count={setPart1Count}
-        part2Count={part2Count}
-        setPart2Count={setPart2Count}
-      />
+      {/* Настройки бланка */}
+      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+        <div className="px-5 py-3 border-b bg-gray-50 flex items-center gap-2">
+          <Icon name="Settings2" size={15} className="text-blue-600" />
+          <p className="text-sm font-semibold">Параметры бланка</p>
+        </div>
+        <div className="p-5 space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* Количество вопросов */}
+            <div>
+              <label className="text-xs text-gray-500 block mb-1.5">
+                Количество вопросов — <span className="font-bold text-gray-800">{questionsCount}</span>
+              </label>
+              <input
+                type="range" min={1} max={80} step={1}
+                value={questionsCount}
+                onChange={e => setQuestionsCount(Number(e.target.value))}
+                className="w-full accent-blue-600"
+              />
+            </div>
 
+            {/* Варианты ответа */}
+            <div>
+              <label className="text-xs text-gray-500 block mb-1.5">Варианты ответа</label>
+              <div className="flex gap-1.5">
+                {[2, 3, 4, 5].map(n => (
+                  <button
+                    key={n}
+                    onClick={() => setOptionsCount(n)}
+                    className={`flex-1 py-1.5 rounded-lg border text-xs font-semibold transition-colors ${
+                      optionsCount === n
+                        ? "bg-blue-600 text-white border-blue-600"
+                        : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"
+                    }`}
+                  >
+                    {OPT_LABELS.slice(0, n).join("/")}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Ключ ответов */}
+          <div>
+            <label className="text-xs text-gray-500 block mb-1.5">
+              Ключ ответов
+              <span className="ml-1 text-gray-400">
+                ({questionsCount} символов: {opts.join(", ")})
+              </span>
+            </label>
+            <div className="relative">
+              <input
+                value={answerKey}
+                onChange={e => setAnswerKey(e.target.value.toUpperCase())}
+                placeholder={`Пример: ${opts.slice(0, Math.min(6, questionsCount)).join("")}…`}
+                maxLength={questionsCount}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500 pr-16"
+              />
+              <span className="absolute right-3 top-2 text-xs text-gray-400">
+                {answerKey.length}/{questionsCount}
+              </span>
+            </div>
+            {/* Визуальный ключ */}
+            {answerKey.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1">
+                {answerKey.split("").map((ch, i) => (
+                  <span
+                    key={i}
+                    className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold border ${
+                      opts.includes(ch)
+                        ? "bg-blue-50 border-blue-200 text-blue-700"
+                        : "bg-red-50 border-red-200 text-red-600"
+                    }`}
+                    title={`Вопрос ${i + 1}`}
+                  >
+                    {ch}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Зона загрузки */}
       <ScanUploadZone
         file={file}
         previewUrl={previewUrl}
@@ -203,35 +252,24 @@ export function UploadSection() {
         ocrProgress={ocrProgress}
       />
 
+      {/* Результат */}
       {step === "done" && result && (
-        <RecognitionResults result={result} onReset={reset} />
+        <RecognitionResults
+          result={result}
+          answerKey={answerKey}
+          optionsCount={optionsCount}
+          onReset={reset}
+        />
       )}
 
-      <div className="flex items-center gap-3">
-        <div className="flex-1 h-px bg-border" />
-        <span className="text-xs text-muted-foreground uppercase tracking-wider">Массовая обработка</span>
-        <div className="flex-1 h-px bg-border" />
+      {/* Массовая обработка */}
+      <div className="flex items-center gap-3 my-2">
+        <div className="flex-1 h-px bg-gray-200" />
+        <span className="text-xs text-gray-400 uppercase tracking-wider">Массовая обработка</span>
+        <div className="flex-1 h-px bg-gray-200" />
       </div>
 
       <BulkUpload />
-
-      {step !== "done" && (
-        <div className="grid grid-cols-3 gap-4">
-          {[
-            { label: "Обработано сегодня", value: "247", icon: "FileCheck" },
-            { label: "Среднее время бланка", value: "1.3 сек", icon: "Timer" },
-            { label: "Точность распознавания", value: "98.7%", icon: "Target" },
-          ].map((s, i) => (
-            <div key={i} className="stat-card">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs text-muted-foreground">{s.label}</span>
-                <Icon name={s.icon} size={15} className="text-muted-foreground" fallback="Activity" />
-              </div>
-              <p className="text-2xl font-bold mono">{s.value}</p>
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

@@ -3,127 +3,168 @@ import { RecognitionResult } from "./upload-types";
 
 interface Props {
   result: RecognitionResult;
+  answerKey: string;
+  optionsCount?: number;
   onReset: () => void;
 }
 
-export function RecognitionResults({ result, onReset }: Props) {
-  const scoreColor = (s: number) =>
-    s >= 80 ? "#22c55e" : s >= 52 ? "#3b82f6" : s >= 36 ? "#f59e0b" : "#ef4444";
+const OPT_LABELS = ["A", "B", "C", "D", "E", "F"];
+
+function scoreColor(pct: number) {
+  if (pct >= 80) return "text-green-700 bg-green-50 border-green-200";
+  if (pct >= 60) return "text-blue-700 bg-blue-50 border-blue-200";
+  if (pct >= 40) return "text-yellow-700 bg-yellow-50 border-yellow-200";
+  return "text-red-700 bg-red-50 border-red-200";
+}
+
+function gradeLabel(pct: number) {
+  if (pct >= 85) return "5";
+  if (pct >= 70) return "4";
+  if (pct >= 50) return "3";
+  return "2";
+}
+
+export function RecognitionResults({ result, answerKey, optionsCount = 4, onReset }: Props) {
+  const { analysis, student_code, all_answers } = result;
+  const pct   = analysis.percent ?? 0;
+  const grade = gradeLabel(pct);
+  const opts  = OPT_LABELS.slice(0, optionsCount);
+  const key   = answerKey.toUpperCase().split("");
 
   return (
-    <div className="animate-fade-in space-y-5">
-
-      {/* Summary cards */}
-      <div className="grid grid-cols-4 gap-4">
-        {[
-          { label: "Код ученика", value: result.student_code, icon: "Hash" },
-          { label: "Верных ответов", value: `${result.analysis.correct}/${result.analysis.total}`, icon: "CheckSquare" },
-          { label: "Первичный балл", value: result.analysis.score_raw, icon: "Award" },
-          { label: "Тестовый балл ЕГЭ", value: result.analysis.score_scaled, icon: "TrendingUp" },
-        ].map((s, i) => (
-          <div key={i} className="stat-card">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs text-muted-foreground">{s.label}</span>
-              <Icon name={s.icon} size={15} className="text-muted-foreground" fallback="Info" />
-            </div>
-            <p
-              className="text-2xl font-bold mono"
-              style={s.label === "Тестовый балл ЕГЭ" ? { color: scoreColor(result.analysis.score_scaled) } : {}}
-            >{s.value}</p>
+    <div className="space-y-4">
+      {/* Сводка */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="bg-white border border-gray-200 rounded-xl p-3 text-center">
+          <div className="text-xs text-gray-500 mb-1">Код ученика</div>
+          <div className="text-lg font-mono font-bold text-gray-900 tracking-widest">
+            {student_code || "?????"}
           </div>
-        ))}
-      </div>
-
-      {/* Answers grid part 1 */}
-      <div className="border border-border rounded-sm bg-white">
-        <div className="px-5 py-3 border-b border-border bg-muted flex items-center justify-between">
-          <p className="text-sm font-semibold">Часть 1 — распознанные ответы ({result.answers_part1.length} заданий)</p>
-          <span className="text-xs text-muted-foreground mono">
-            {result.analysis.details.filter(d => d.part === 1 && d.correct).length}/{result.answers_part1.length} верных
-          </span>
         </div>
-        <div className="p-4">
-          <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(13, minmax(0, 1fr))` }}>
-            {result.analysis.details.filter(d => d.part === 1).map((d) => (
-              <div
-                key={d.question}
-                title={`№${d.question}: ответ — «${d.student}», ключ — «${d.key}»`}
-                className="rounded-sm border flex flex-col items-center justify-center py-1 cursor-default"
-                style={{
-                  background: d.correct ? "hsl(142 71% 45% / 0.1)" : "hsl(0 72% 51% / 0.1)",
-                  borderColor: d.correct ? "hsl(142 71% 45% / 0.35)" : "hsl(0 72% 51% / 0.35)",
-                }}
-              >
-                <span className="text-[9px] text-muted-foreground">{d.question}</span>
-                <span className="mono font-bold text-xs leading-tight" style={{ color: d.correct ? "hsl(142 71% 35%)" : "hsl(0 72% 45%)" }}>
-                  {d.student || "·"}
-                </span>
-              </div>
-            ))}
+        <div className="bg-white border border-gray-200 rounded-xl p-3 text-center">
+          <div className="text-xs text-gray-500 mb-1">Правильных</div>
+          <div className="text-lg font-bold text-gray-900">
+            {analysis.correct}
+            <span className="text-sm text-gray-400 font-normal"> / {analysis.total}</span>
           </div>
+        </div>
+        <div className={`border rounded-xl p-3 text-center ${scoreColor(pct)}`}>
+          <div className="text-xs mb-1 opacity-70">Процент</div>
+          <div className="text-lg font-bold">{pct.toFixed(1)}%</div>
+        </div>
+        <div className={`border rounded-xl p-3 text-center ${scoreColor(pct)}`}>
+          <div className="text-xs mb-1 opacity-70">Оценка</div>
+          <div className="text-2xl font-bold leading-none mt-1">{grade}</div>
         </div>
       </div>
 
-      {/* Answers part 2 */}
-      {result.answers_part2.length > 0 && (
-        <div className="border border-border rounded-sm bg-white">
-          <div className="px-5 py-3 border-b border-border bg-muted">
-            <p className="text-sm font-semibold">Часть 2 — распознанные ответы ({result.answers_part2.length} заданий)</p>
-          </div>
-          <div className="divide-y divide-border">
-            {result.analysis.details.filter(d => d.part === 2).map((d) => (
-              <div key={d.question} className="flex items-center gap-4 px-5 py-3 table-row-hover">
-                <div
-                  className="w-6 h-6 rounded-sm flex items-center justify-center text-[10px] font-bold flex-shrink-0"
-                  style={{ background: "hsl(215 60% 22% / 0.1)", color: "hsl(215 60% 22%)" }}
-                >
-                  {d.question}
-                </div>
-                <span className="flex-1 text-sm mono">{d.student || "—"}</span>
-                {d.key && (
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground">Ключ: <span className="mono">{d.key}</span></span>
-                    <span className={d.correct ? "badge-success" : "badge-danger"}>
-                      {d.correct ? "Верно" : "Неверно"}
-                    </span>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
+      {/* Прогрессбар */}
+      <div className="bg-white border border-gray-200 rounded-xl p-4">
+        <div className="flex justify-between text-xs text-gray-500 mb-2">
+          <span>0%</span>
+          <span className="font-semibold text-gray-700">{pct.toFixed(1)}%</span>
+          <span>100%</span>
         </div>
-      )}
-
-      {/* Progress bar */}
-      <div className="border border-border rounded-sm bg-white p-5">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-sm font-semibold">Результат</span>
-          <span className="mono text-sm font-bold" style={{ color: scoreColor(result.analysis.score_scaled) }}>
-            {result.analysis.score_scaled} баллов ЕГЭ
-          </span>
-        </div>
-        <div className="h-3 bg-muted rounded-full overflow-hidden mb-2">
+        <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
           <div
-            className="h-full rounded-full transition-all duration-700"
-            style={{
-              width: `${result.analysis.score_scaled}%`,
-              background: scoreColor(result.analysis.score_scaled),
-            }}
+            className={`h-full rounded-full transition-all ${
+              pct >= 80 ? "bg-green-500" : pct >= 60 ? "bg-blue-500" : pct >= 40 ? "bg-yellow-500" : "bg-red-500"
+            }`}
+            style={{ width: `${pct}%` }}
           />
         </div>
-        <div className="flex justify-between text-xs text-muted-foreground">
-          <span>0</span>
-          <span className="text-destructive">Порог: 36</span>
-          <span>100</span>
+        <div className="flex justify-between text-xs mt-1.5 text-gray-400">
+          <span>«2» &lt;50%</span>
+          <span>«3» 50%</span>
+          <span>«4» 70%</span>
+          <span>«5» 85%</span>
         </div>
       </div>
 
-      <div className="flex gap-3">
-        <button onClick={onReset} className="inline-flex items-center gap-2 px-4 py-2 border border-border text-sm font-medium rounded-sm hover:bg-muted transition-colors">
-          <Icon name="RotateCcw" size={14} />
-          Загрузить другой бланк
-        </button>
+      {/* Таблица ответов A/B/C/D */}
+      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+        <div className="px-4 py-3 border-b bg-gray-50 flex items-center justify-between">
+          <span className="text-sm font-semibold text-gray-900">Детальные ответы</span>
+          <span className="text-xs text-gray-500">{analysis.correct} верно · {analysis.wrong} неверно</span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b bg-gray-50">
+                <th className="text-left px-4 py-2 text-xs text-gray-500 font-medium w-12">№</th>
+                {opts.map(lbl => (
+                  <th key={lbl} className="text-center px-2 py-2 text-xs text-gray-500 font-medium w-10">{lbl}</th>
+                ))}
+                <th className="text-center px-3 py-2 text-xs text-gray-500 font-medium">Ключ</th>
+                <th className="text-center px-3 py-2 text-xs text-gray-500 font-medium">Итог</th>
+              </tr>
+            </thead>
+            <tbody>
+              {all_answers.map((ans, i) => {
+                const keyAns = key[i] || "";
+                const isCorrect = keyAns && ans.toUpperCase() === keyAns;
+                const isWrong   = keyAns && ans && !isCorrect;
+
+                return (
+                  <tr
+                    key={i}
+                    className={`border-b last:border-0 transition-colors ${
+                      isCorrect ? "bg-green-50" : isWrong ? "bg-red-50" : ""
+                    }`}
+                  >
+                    <td className="px-4 py-2 text-xs font-bold text-gray-600">{i + 1}</td>
+                    {opts.map(lbl => {
+                      const selected = ans.toUpperCase() === lbl;
+                      const correct  = keyAns === lbl;
+                      return (
+                        <td key={lbl} className="px-2 py-2 text-center">
+                          <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold border transition-all ${
+                            selected && isCorrect
+                              ? "bg-green-500 border-green-500 text-white"
+                              : selected && isWrong
+                              ? "bg-red-500 border-red-500 text-white"
+                              : correct && !selected && keyAns
+                              ? "bg-green-100 border-green-400 text-green-700"
+                              : selected
+                              ? "bg-gray-700 border-gray-700 text-white"
+                              : "border-gray-200 text-gray-300 bg-white"
+                          }`}>
+                            {selected ? lbl : <span className="opacity-40">{lbl}</span>}
+                          </span>
+                        </td>
+                      );
+                    })}
+                    <td className="px-3 py-2 text-center">
+                      {keyAns
+                        ? <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 text-blue-700 text-xs font-bold">{keyAns}</span>
+                        : <span className="text-gray-300 text-xs">—</span>
+                      }
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      {!keyAns
+                        ? <span className="text-gray-400 text-xs">—</span>
+                        : isCorrect
+                        ? <Icon name="CheckCircle2" size={16} className="text-green-500 mx-auto" />
+                        : <Icon name="XCircle" size={16} className="text-red-500 mx-auto" />
+                      }
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
+
+      <button
+        onClick={onReset}
+        className="w-full border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 py-2.5 rounded-xl text-sm font-medium flex items-center justify-center gap-2"
+      >
+        <Icon name="RefreshCw" size={15} />
+        Загрузить другой бланк
+      </button>
     </div>
   );
 }
+
+export default RecognitionResults;

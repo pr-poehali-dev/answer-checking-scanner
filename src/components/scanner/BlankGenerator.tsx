@@ -1,310 +1,358 @@
 import { useState } from "react";
 import Icon from "@/components/ui/icon";
 import { WORK_TYPES, SUBJECTS } from "./types";
-import { GradeScale } from "@/store/appStore";
+import { blankApi } from "@/lib/api";
 
-interface BlankConfig {
-  workType: string;
-  subject: string;
-  classNum: number;
-  classLetter: string;
-  year: string;
+export interface BlankConfig {
   workId: string;
-  part1Count: number;
-  part2Count: number;
-  blanksPerPage: number;
-  gradeScale: GradeScale;
-  maxScore: number;
+  workTitle: string;
+  questionsCount: number;
+  optionsCount: number;   // 2–6
+  perPage: 1 | 2 | 4;
+  subject: string;
+  classLabel: string;
+  date: string;
 }
 
-function buildBlankHTML(config: BlankConfig, index: number): string {
-  const total = config.part1Count + config.part2Count;
+const OPTION_LABELS = ["A", "B", "C", "D", "E", "F"];
 
-  // Клетки части 1 — 2 колонки
-  const perCol = Math.ceil(config.part1Count / 2);
-  const col1 = [];
-  const col2 = [];
-  for (let i = 1; i <= config.part1Count; i++) {
-    const cell = `
-      <div style="display:flex;align-items:center;gap:4px;margin-bottom:4px;">
-        <div style="min-width:22px;text-align:right;font-size:10px;font-weight:bold;">${i}.</div>
-        <div style="width:28px;height:28px;border:1.5px solid #000;flex-shrink:0;"></div>
-      </div>`;
-    if (i <= perCol) col1.push(cell);
-    else col2.push(cell);
-  }
+/** Предпросмотр бланка прямо в браузере (SVG) */
+function BlankPreview({ config }: { config: BlankConfig }) {
+  const { questionsCount, optionsCount } = config;
+  const opts = OPTION_LABELS.slice(0, optionsCount);
+  const nCols = questionsCount <= 20 ? 1 : questionsCount <= 40 ? 2 : 3;
+  const rows = Math.ceil(questionsCount / nCols);
 
-  // Строки части 2
-  let part2Lines = "";
-  for (let i = config.part1Count + 1; i <= total; i++) {
-    part2Lines += `
-      <div style="display:flex;align-items:flex-end;gap:6px;margin-bottom:8px;">
-        <div style="font-size:10px;font-weight:bold;min-width:22px;text-align:right;">${i}.</div>
-        <div style="flex:1;border-bottom:1.5px solid #000;height:18px;"></div>
-      </div>`;
-  }
-
-  const blankNum = index + 1;
-
-  return `
-    <div class="blank" style="
-      font-family: Arial, Helvetica, sans-serif;
-      font-size: 10px;
-      border: 1.5px solid #000;
-      padding: 10px 12px;
-      box-sizing: border-box;
-      page-break-inside: avoid;
-      color: #000;
-      background: #fff;
-    ">
-      <!-- Заголовок -->
-      <div style="text-align:center;font-weight:bold;font-size:13px;margin-bottom:3px;letter-spacing:0.5px;">
-        АОУСПТ — БЛАНК ОТВЕТОВ
-      </div>
-      <div style="text-align:center;font-size:10px;margin-bottom:3px;">
-        ${config.workType.toUpperCase()}&nbsp;&nbsp;${config.subject}&nbsp;&nbsp;${config.classNum}${config.classLetter} класс&nbsp;&nbsp;${config.year} год
-      </div>
-      <div style="font-size:9px;text-align:center;margin-bottom:5px;color:#333;">
-        Номер работы:&nbsp;<b>${config.workId}</b>
-        ${config.blanksPerPage === 2 ? `&nbsp;&nbsp;&nbsp;Бланк:&nbsp;<b>${blankNum}</b>` : ""}
-      </div>
-
-      <div style="border-top:1.5px solid #000;margin-bottom:6px;"></div>
-
-      <!-- Код ученика -->
-      <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
-        <span style="font-weight:bold;font-size:10px;white-space:nowrap;">Код ученика (5 цифр):</span>
-        <div style="display:flex;gap:4px;">
-          ${[1, 2, 3, 4, 5].map(() => `
-            <div style="width:26px;height:26px;border:1.5px solid #000;"></div>
-          `).join("")}
-        </div>
-      </div>
-
-      <!-- ФИО -->
-      <div style="display:flex;align-items:flex-end;gap:6px;margin-bottom:5px;">
-        <span style="font-weight:bold;font-size:10px;white-space:nowrap;">Фамилия, имя, отчество:</span>
-        <div style="flex:1;border-bottom:1.5px solid #000;height:16px;"></div>
-      </div>
-
-      <!-- Класс / Дата -->
-      <div style="display:flex;gap:20px;margin-bottom:6px;">
-        <div style="display:flex;align-items:flex-end;gap:4px;">
-          <span style="font-weight:bold;font-size:10px;">Класс:</span>
-          <div style="width:60px;border-bottom:1.5px solid #000;height:16px;"></div>
-        </div>
-        <div style="display:flex;align-items:flex-end;gap:4px;">
-          <span style="font-weight:bold;font-size:10px;">Дата:</span>
-          <div style="width:90px;border-bottom:1.5px solid #000;height:16px;"></div>
-        </div>
-      </div>
-
-      <div style="border-top:1.5px solid #000;margin-bottom:6px;"></div>
-
-      <!-- Часть 1 -->
-      <div style="font-weight:bold;font-size:11px;margin-bottom:2px;">
-        Часть 1 — краткий ответ&nbsp;&nbsp;
-        <span style="font-size:9px;font-weight:normal;">(задания 1 – ${config.part1Count}, всего ${config.part1Count} заданий)</span>
-      </div>
-      <div style="font-size:9px;color:#333;margin-bottom:5px;">
-        Запишите букву или цифру в клетку. Исправление: зачеркнуть и написать рядом.
-      </div>
-
-      <div style="display:flex;gap:16px;margin-bottom:6px;">
-        <div style="flex:1;">${col1.join("")}</div>
-        <div style="flex:1;">${col2.join("")}</div>
-      </div>
-
-      ${config.part2Count > 0 ? `
-        <div style="border-top:1.5px solid #000;margin-bottom:6px;"></div>
-        <div style="font-weight:bold;font-size:11px;margin-bottom:2px;">
-          Часть 2 — развёрнутый ответ&nbsp;&nbsp;
-          <span style="font-size:9px;font-weight:normal;">(задания ${config.part1Count + 1} – ${total}, всего ${config.part2Count} заданий)</span>
-        </div>
-        <div style="font-size:9px;color:#333;margin-bottom:5px;">
-          Записывайте ответ на строке. Каждое задание — отдельная строка.
-        </div>
-        ${part2Lines}
-      ` : ""}
-
-      <div style="border-top:1.5px solid #000;margin-top:4px;padding-top:4px;">
-        <div style="font-size:9px;margin-bottom:2px;">
-          <b>Допустимые буквы:</b>&nbsp;А Б В Г Д Е Ж З И К Л М Н О П Р С Т У Ф Х Ц Ч Ш Щ Э Ю Я
-        </div>
-        <div style="font-size:9px;margin-bottom:3px;">
-          <b>Допустимые цифры:</b>&nbsp;1&nbsp;&nbsp;2&nbsp;&nbsp;3&nbsp;&nbsp;4&nbsp;&nbsp;5&nbsp;&nbsp;6&nbsp;&nbsp;7&nbsp;&nbsp;8&nbsp;&nbsp;9&nbsp;&nbsp;0
-        </div>
-        <div style="font-size:8px;color:#333;">
-          Всего заданий: <b>${total}</b>&nbsp;&nbsp;|&nbsp;&nbsp;
-          Не сгибать бланк&nbsp;&nbsp;|&nbsp;&nbsp;
-          Писать синей или чёрной ручкой
-        </div>
-      </div>
-    </div>
-  `;
-}
-
-function printBlanks(config: BlankConfig) {
-  const count = config.blanksPerPage;
-  let blanksHTML = "";
-  for (let i = 0; i < count; i++) {
-    blanksHTML += buildBlankHTML(config, i);
-    if (i < count - 1) {
-      blanksHTML += `
-        <div style="text-align:center;font-size:9px;color:#666;margin:4px 0;border-top:1px dashed #bbb;padding-top:3px;">
-          линия разреза
-        </div>`;
-    }
-  }
-
-  const html = `<!DOCTYPE html>
-<html lang="ru">
-<head>
-  <meta charset="UTF-8">
-  <title>Бланк ответов — ${config.workType} — ${config.workId}</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: Arial, Helvetica, sans-serif;
-      background: #fff;
-      padding: 10mm;
-      color: #000;
-    }
-    @media print {
-      body { padding: 6mm; }
-      @page { size: A4; margin: 6mm; }
-    }
-  </style>
-</head>
-<body>
-  ${blanksHTML}
-  <script>
-    window.onload = function() { window.print(); };
-  </script>
-</body>
-</html>`;
-
-  const win = window.open("", "_blank");
-  if (win) {
-    win.document.write(html);
-    win.document.close();
-  }
-}
-
-export function BlankGenerator() {
-  const [config, setConfig] = useState<BlankConfig>({
-    workType: "Проверочная работа",
-    subject: "Русский язык",
-    classNum: 9,
-    classLetter: "А",
-    year: "2026",
-    workId: "000000",
-    part1Count: 15,
-    part2Count: 5,
-    blanksPerPage: 2,
-    gradeScale: { grade1: 0, grade2: 4, grade3: 8, grade4: 13, grade5: 17 },
-    maxScore: 20,
-  });
-
-  const total = config.part1Count + config.part2Count;
+  const ROW_H    = 26;
+  const NUM_W    = 26;
+  const OPT_W    = 32;
+  const COL_W    = NUM_W + opts.length * OPT_W + 12;
+  const PAD      = 12;
+  const HEAD_H   = 48;
+  const META_H   = 52;
+  const FOOT_H   = 36;
+  const svgW     = PAD * 2 + COL_W * nCols;
+  const svgH     = HEAD_H + META_H + rows * ROW_H + FOOT_H + PAD;
 
   return (
-    <div className="border border-border rounded-sm bg-white">
-      <div className="px-5 py-4 border-b border-border bg-muted flex items-center gap-2">
-        <Icon name="Printer" size={16} className="text-primary" />
-        <p className="text-sm font-semibold">Печать бланка ответов</p>
-      </div>
-      <div className="p-5 space-y-5">
+    <svg
+      viewBox={`0 0 ${svgW} ${svgH}`}
+      className="w-full border border-gray-200 rounded-lg bg-white shadow-sm"
+      style={{ fontFamily: "Arial, sans-serif" }}
+    >
+      {/* Шапка */}
+      <rect x={0} y={0} width={svgW} height={HEAD_H} fill="#1e40af" />
+      <text x={svgW / 2} y={22} textAnchor="middle" fill="white" fontSize={11} fontWeight="bold">
+        БЛАНК ОТВЕТОВ
+      </text>
+      <text x={svgW / 2} y={38} textAnchor="middle" fill="#bfdbfe" fontSize={8}>
+        {config.workTitle || "Работа"} · {config.questionsCount} вопросов · {opts.join(" / ")}
+      </text>
 
-        <div className="grid grid-cols-3 gap-4">
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">Тип работы</label>
-            <select value={config.workType} onChange={e => setConfig(c => ({ ...c, workType: e.target.value }))}
-              className="w-full border border-border rounded-sm px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring">
-              {WORK_TYPES.map(t => <option key={t}>{t}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">Предмет</label>
-            <select value={config.subject} onChange={e => setConfig(c => ({ ...c, subject: e.target.value }))}
-              className="w-full border border-border rounded-sm px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring">
-              {SUBJECTS.map(s => <option key={s}>{s}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">Класс</label>
-            <div className="flex gap-2">
-              <select value={config.classNum} onChange={e => setConfig(c => ({ ...c, classNum: Number(e.target.value) }))}
-                className="flex-1 border border-border rounded-sm px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring">
-                {Array.from({ length: 11 }, (_, i) => i + 1).map(n => <option key={n} value={n}>{n}</option>)}
-              </select>
-              <select value={config.classLetter} onChange={e => setConfig(c => ({ ...c, classLetter: e.target.value }))}
-                className="w-20 border border-border rounded-sm px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring">
-                {["А", "Б", "В", "Г", "Д"].map(l => <option key={l}>{l}</option>)}
-              </select>
+      {/* Мета-поля */}
+      <rect x={0} y={HEAD_H} width={svgW} height={META_H} fill="#f1f5f9" />
+      <text x={PAD} y={HEAD_H + 18} fill="#334155" fontSize={8} fontWeight="bold">ФИО:</text>
+      <line x1={PAD + 28} y1={HEAD_H + 18} x2={svgW * 0.65} y2={HEAD_H + 18} stroke="#94a3b8" strokeWidth={0.8} />
+      <text x={svgW * 0.67} y={HEAD_H + 18} fill="#334155" fontSize={8} fontWeight="bold">Класс:</text>
+      <line x1={svgW * 0.67 + 36} y1={HEAD_H + 18} x2={svgW - PAD} y2={HEAD_H + 18} stroke="#94a3b8" strokeWidth={0.8} />
+
+      <text x={PAD} y={HEAD_H + 38} fill="#334155" fontSize={8} fontWeight="bold">Предмет:</text>
+      <line x1={PAD + 52} y1={HEAD_H + 38} x2={svgW * 0.5} y2={HEAD_H + 38} stroke="#94a3b8" strokeWidth={0.8} />
+      <text x={svgW * 0.52} y={HEAD_H + 38} fill="#334155" fontSize={8} fontWeight="bold">Дата:</text>
+      <line x1={svgW * 0.52 + 32} y1={HEAD_H + 38} x2={svgW - PAD} y2={HEAD_H + 38} stroke="#94a3b8" strokeWidth={0.8} />
+
+      {/* Заголовки колонок */}
+      {Array.from({ length: nCols }).map((_, ci) => {
+        const cx = PAD + ci * COL_W;
+        return opts.map((lbl, oi) => (
+          <text
+            key={`${ci}-${oi}`}
+            x={cx + NUM_W + oi * OPT_W + OPT_W / 2}
+            y={HEAD_H + META_H + 2}
+            textAnchor="middle"
+            fill="#64748b"
+            fontSize={7}
+            fontWeight="bold"
+          >{lbl}</text>
+        ));
+      })}
+
+      {/* Сетка вопросов */}
+      {Array.from({ length: questionsCount }).map((_, qi) => {
+        const colI = Math.floor(qi / rows);
+        const rowI = qi % rows;
+        const rx = PAD + colI * COL_W;
+        const ry = HEAD_H + META_H + 8 + rowI * ROW_H;
+
+        return (
+          <g key={qi}>
+            {rowI % 2 === 0 && (
+              <rect x={rx} y={ry} width={COL_W - 6} height={ROW_H} fill="#f8fafc" rx={2} />
+            )}
+            <text x={rx + NUM_W - 4} y={ry + ROW_H * 0.65} textAnchor="end" fill="#334155" fontSize={8} fontWeight="bold">
+              {qi + 1}.
+            </text>
+            {opts.map((lbl, oi) => {
+              const cx = rx + NUM_W + oi * OPT_W + OPT_W / 2;
+              const cy = ry + ROW_H / 2;
+              const r = 8;
+              return (
+                <g key={oi}>
+                  <circle cx={cx} cy={cy} r={r} fill="white" stroke="#cbd5e1" strokeWidth={0.8} />
+                  <text x={cx} y={cy + 3.5} textAnchor="middle" fill="#64748b" fontSize={7.5} fontWeight="bold">
+                    {lbl}
+                  </text>
+                </g>
+              );
+            })}
+          </g>
+        );
+      })}
+
+      {/* Нижний блок: код ученика */}
+      <rect x={0} y={svgH - FOOT_H} width={svgW} height={FOOT_H} fill="#f1f5f9" />
+      <text x={PAD} y={svgH - FOOT_H + 18} fill="#334155" fontSize={8} fontWeight="bold">КОД УЧЕНИКА:</text>
+      {[0, 1, 2, 3, 4].map(i => (
+        <rect key={i} x={PAD + 76 + i * 20} y={svgH - FOOT_H + 8} width={17} height={17} fill="white" stroke="#1e40af" strokeWidth={0.8} rx={2} />
+      ))}
+      <text x={PAD} y={svgH - FOOT_H + 33} fill="#94a3b8" fontSize={6.5}>
+        ○ пусто  ● ваш ответ  ✕ исправление  |  Писать чёрной ручкой
+      </text>
+    </svg>
+  );
+}
+
+
+export function BlankGenerator({ workId, workTitle, questionsCount: initQ, onClose }: {
+  workId?: string;
+  workTitle?: string;
+  questionsCount?: number;
+  onClose?: () => void;
+}) {
+  const [config, setConfig] = useState<BlankConfig>({
+    workId:         workId     || "000001",
+    workTitle:      workTitle  || "Контрольная работа",
+    questionsCount: initQ      || 20,
+    optionsCount:   4,
+    perPage:        2,
+    subject:        "",
+    classLabel:     "",
+    date:           "",
+  });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const upd = (k: keyof BlankConfig, v: unknown) =>
+    setConfig(c => ({ ...c, [k]: v }));
+
+  const handleDownload = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await blankApi.download({
+        workId:         config.workId,
+        workTitle:      config.workTitle,
+        questionsCount: config.questionsCount,
+        optionsCount:   config.optionsCount,
+        perPage:        config.perPage,
+        subject:        config.subject,
+        classLabel:     config.classLabel,
+        date:           config.date,
+      });
+      const link = document.createElement("a");
+      link.href = `data:application/pdf;base64,${res.pdf_b64}`;
+      link.download = res.filename;
+      link.click();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const opts = OPTION_LABELS.slice(0, config.optionsCount);
+
+  return (
+    <div className="flex flex-col gap-0 h-full">
+      {/* Шапка */}
+      <div className="flex items-center justify-between px-5 py-3.5 border-b bg-white">
+        <div className="flex items-center gap-2">
+          <Icon name="FileSpreadsheet" size={20} className="text-blue-600" />
+          <span className="font-semibold text-gray-900">Генератор бланков</span>
+        </div>
+        {onClose && (
+          <button onClick={onClose} className="p-1.5 rounded hover:bg-gray-100 text-gray-500">
+            <Icon name="X" size={16} />
+          </button>
+        )}
+      </div>
+
+      <div className="flex flex-col lg:flex-row gap-0 flex-1 overflow-auto">
+        {/* Настройки */}
+        <div className="lg:w-72 shrink-0 border-r bg-gray-50 p-4 space-y-4 overflow-y-auto">
+
+          {/* Работа */}
+          <section>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Работа</p>
+            <div className="space-y-2">
+              <div>
+                <label className="text-xs text-gray-600 mb-1 block">Название</label>
+                <input
+                  value={config.workTitle}
+                  onChange={e => upd("workTitle", e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Контрольная работа"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs text-gray-600 mb-1 block">Предмет</label>
+                  <select
+                    value={config.subject}
+                    onChange={e => upd("subject", e.target.value)}
+                    className="w-full border border-gray-200 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">—</option>
+                    {SUBJECTS.map(s => <option key={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-600 mb-1 block">Класс</label>
+                  <input
+                    value={config.classLabel}
+                    onChange={e => upd("classLabel", e.target.value)}
+                    className="w-full border border-gray-200 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="9А"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-gray-600 mb-1 block">Дата</label>
+                <input
+                  type="date"
+                  value={config.date}
+                  onChange={e => upd("date", e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
             </div>
-          </div>
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">Год</label>
-            <input type="text" value={config.year} maxLength={4}
-              onChange={e => setConfig(c => ({ ...c, year: e.target.value }))}
-              className="w-full border border-border rounded-sm px-3 py-2 text-sm mono focus:outline-none focus:ring-1 focus:ring-ring" />
-          </div>
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">Номер работы</label>
-            <input type="text" value={config.workId} maxLength={6}
-              onChange={e => setConfig(c => ({ ...c, workId: e.target.value }))}
-              className="w-full border border-border rounded-sm px-3 py-2 text-sm mono focus:outline-none focus:ring-1 focus:ring-ring" />
-          </div>
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">Бланков на листе А4</label>
-            <div className="flex gap-2">
-              {[1, 2].map(n => (
-                <button key={n} onClick={() => setConfig(c => ({ ...c, blanksPerPage: n }))}
-                  className={`flex-1 py-2 text-sm font-semibold rounded-sm border transition-colors ${config.blanksPerPage === n ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-muted"}`}>
-                  {n} {n === 1 ? "бланк" : "бланка"}
+          </section>
+
+          {/* Структура */}
+          <section>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Структура</p>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-gray-600 mb-1 block">Количество вопросов</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="range" min={5} max={80} step={1}
+                    value={config.questionsCount}
+                    onChange={e => upd("questionsCount", Number(e.target.value))}
+                    className="flex-1 accent-blue-600"
+                  />
+                  <span className="w-8 text-center text-sm font-semibold text-blue-700">
+                    {config.questionsCount}
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs text-gray-600 mb-2 block">Варианты ответа</label>
+                <div className="flex gap-1.5">
+                  {[2, 3, 4, 5].map(n => (
+                    <button
+                      key={n}
+                      onClick={() => upd("optionsCount", n)}
+                      className={`flex-1 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                        config.optionsCount === n
+                          ? "bg-blue-600 text-white border-blue-600"
+                          : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"
+                      }`}
+                    >
+                      {OPTION_LABELS.slice(0, n).join("/")}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* Печать */}
+          <section>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Печать</p>
+            <div className="grid grid-cols-3 gap-1.5">
+              {([1, 2, 4] as const).map(n => (
+                <button
+                  key={n}
+                  onClick={() => upd("perPage", n)}
+                  className={`py-2.5 rounded-lg border text-xs font-medium transition-colors flex flex-col items-center gap-1 ${
+                    config.perPage === n
+                      ? "bg-blue-600 text-white border-blue-600"
+                      : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"
+                  }`}
+                >
+                  <Icon name={n === 1 ? "Square" : n === 2 ? "RectangleVertical" : "Grid2x2"} size={16} />
+                  {n === 1 ? "1 на A4" : n === 2 ? "2 на A4" : "4 на A4"}
                 </button>
               ))}
             </div>
-          </div>
-        </div>
+          </section>
 
-        <div className="grid grid-cols-3 gap-4">
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">Заданий в части 1</label>
-            <input type="number" min={1} max={30} value={config.part1Count}
-              onChange={e => { const v = Math.max(1, parseInt(e.target.value) || 1); setConfig(c => ({ ...c, part1Count: v, maxScore: v + c.part2Count })); }}
-              className="w-full border border-border rounded-sm px-3 py-2 text-sm mono focus:outline-none focus:ring-1 focus:ring-ring" />
-          </div>
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">Заданий в части 2</label>
-            <input type="number" min={0} max={20} value={config.part2Count}
-              onChange={e => { const v = Math.max(0, parseInt(e.target.value) || 0); setConfig(c => ({ ...c, part2Count: v, maxScore: c.part1Count + v })); }}
-              className="w-full border border-border rounded-sm px-3 py-2 text-sm mono focus:outline-none focus:ring-1 focus:ring-ring" />
-          </div>
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">Итого заданий</label>
-            <div className="w-full border border-border rounded-sm px-3 py-2 text-sm mono font-bold bg-muted text-muted-foreground">{total}</div>
-          </div>
-        </div>
+          {/* Ошибка */}
+          {error && (
+            <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg p-2.5 flex gap-2">
+              <Icon name="AlertCircle" size={14} className="shrink-0 mt-0.5" />
+              <span>{error}</span>
+            </div>
+          )}
 
-        <div className="flex items-center gap-4">
-          <div className="flex-1 text-xs text-muted-foreground space-y-1 border border-border rounded-sm p-3 bg-muted/30">
-            <p className="font-semibold text-foreground">Состав бланка:</p>
-            <p>• Заголовок: АОУСПТ, {config.workType}, № {config.workId}</p>
-            <p>• Код ученика — 5 пустых клеток</p>
-            <p>• Строки: Фамилия Имя Отчество, Класс, Дата</p>
-            <p>• <b>Часть 1:</b> {config.part1Count} клеток с номерами заданий (2 колонки)</p>
-            {config.part2Count > 0 && <p>• <b>Часть 2:</b> {config.part2Count} строк с номерами заданий</p>}
-            <p>• Допустимые буквы и цифры</p>
-          </div>
-          <button onClick={() => printBlanks(config)}
-            className="inline-flex items-center gap-2 px-5 py-3 bg-primary text-primary-foreground text-sm font-semibold rounded-sm hover:opacity-90 transition-opacity flex-shrink-0">
-            <Icon name="Printer" size={16} />
-            Открыть для печати
+          {/* Кнопка */}
+          <button
+            onClick={handleDownload}
+            disabled={loading}
+            className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white py-3 rounded-xl font-semibold flex items-center justify-center gap-2 text-sm transition-colors"
+          >
+            {loading
+              ? <><Icon name="Loader2" size={16} className="animate-spin" /> Генерируем PDF…</>
+              : <><Icon name="Download" size={16} /> Скачать PDF</>
+            }
           </button>
+
+          {/* Инфо */}
+          <div className="text-xs text-gray-500 bg-blue-50 border border-blue-100 rounded-lg p-3 space-y-1">
+            <div className="font-semibold text-blue-700 mb-1">Как заполнять</div>
+            <div>● — закрасить кружок выбранного ответа</div>
+            <div>✕ — зачеркнуть ошибочный, закрасить верный</div>
+            <div>Код ученика — 5 цифр для автоматической привязки</div>
+          </div>
+        </div>
+
+        {/* Предпросмотр */}
+        <div className="flex-1 bg-gray-100 p-5 overflow-auto flex flex-col gap-4">
+          <div className="flex items-center justify-between mb-1">
+            <p className="text-sm font-semibold text-gray-700">Предпросмотр</p>
+            <div className="flex gap-1.5">
+              {opts.map(lbl => (
+                <span key={lbl} className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold">
+                  {lbl}
+                </span>
+              ))}
+              <span className="text-xs text-gray-500 ml-2 self-center">{config.questionsCount} вопр.</span>
+            </div>
+          </div>
+
+          <div className="max-w-xl mx-auto w-full">
+            <BlankPreview config={config} />
+          </div>
+
+          <p className="text-center text-xs text-gray-400">
+            Предпросмотр приблизительный. Итоговый PDF формируется точно под A4.
+          </p>
         </div>
       </div>
     </div>
   );
 }
+
+export default BlankGenerator;

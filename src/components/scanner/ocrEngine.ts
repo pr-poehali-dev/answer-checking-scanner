@@ -12,7 +12,7 @@ export async function recognizeBlank(
   part2Count: number,
   onProgress?: OcrProgressCallback
 ): Promise<RecognitionResult> {
-  const total = (part1Count || 0) + (part2Count || 0) || 40;
+  const total = (part1Count || 0) + (part2Count || 0) || 20;
 
   onProgress?.("Загружаю изображение на сервер...", 10);
 
@@ -20,7 +20,7 @@ export async function recognizeBlank(
   let p = 10;
   const tick = setInterval(() => {
     p = Math.min(85, p + 5);
-    onProgress?.("Распознаю реперы и клетки...", p);
+    onProgress?.("Распознаю кружки A/B/C/D...", p);
   }, 350);
 
   let resp;

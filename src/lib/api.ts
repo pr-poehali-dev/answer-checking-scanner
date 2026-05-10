@@ -217,21 +217,56 @@ export const synopsisApi = {
   },
 };
 
+export interface BlankParams {
+  workId: string;
+  workTitle: string;
+  perPage: 1 | 2 | 4;
+  questionsCount?: number;
+  optionsCount?: number;
+  subject?: string;
+  classLabel?: string;
+  date?: string;
+  /** @deprecated use questionsCount */
+  part1Count?: number;
+  /** @deprecated use questionsCount */
+  part2Count?: number;
+}
+
+export interface BlankResponse {
+  pdf_b64: string;
+  filename: string;
+  questionsCount: number;
+  optionsCount: number;
+  options: string[];
+}
+
 export const blankApi = {
-  generate: async (params: { workId: string; workTitle: string; perPage: 1 | 2 | 4; part1Count?: number; part2Count?: number }) => {
+  generate: async (params: BlankParams): Promise<BlankResponse> => {
+    const body = {
+      workId:         params.workId,
+      workTitle:      params.workTitle,
+      perPage:        params.perPage,
+      questionsCount: params.questionsCount ?? params.part1Count ?? 20,
+      optionsCount:   params.optionsCount   ?? 4,
+      subject:        params.subject        ?? "",
+      classLabel:     params.classLabel     ?? "",
+      date:           params.date           ?? "",
+    };
     const res = await fetch(BLANK_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(params),
+      body: JSON.stringify(body),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Ошибка генерации");
-    return data as { pdf: string; filename: string; size: number };
+    // Поддержка старого поля pdf и нового pdf_b64
+    if (!data.pdf_b64 && data.pdf) data.pdf_b64 = data.pdf;
+    return data as BlankResponse;
   },
 
-  download: async (params: { workId: string; workTitle: string; perPage: 1 | 2 | 4; part1Count?: number; part2Count?: number }) => {
-    const { pdf, filename } = await blankApi.generate(params);
-    const bin = atob(pdf);
+  download: async (params: BlankParams) => {
+    const { pdf_b64, filename } = await blankApi.generate(params);
+    const bin = atob(pdf_b64);
     const arr = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
     const blob = new Blob([arr], { type: "application/pdf" });

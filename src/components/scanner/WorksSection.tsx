@@ -2,7 +2,6 @@ import { useState } from "react";
 import Icon from "@/components/ui/icon";
 import { appStore, useAppStore, Work, WorkType, GradeScale } from "@/store/appStore";
 import { WORK_TYPES, SUBJECTS } from "./types";
-import { blankApi } from "@/lib/api";
 import { BlankGenerator } from "./BlankGenerator";
 
 interface BlankModalProps {
@@ -11,82 +10,18 @@ interface BlankModalProps {
 }
 
 function BlankDownloadModal({ work, onClose }: BlankModalProps) {
-  const [perPage, setPerPage] = useState<1 | 2 | 4>(1);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
-
-  const handleDownload = async () => {
-    setBusy(true);
-    setErr("");
-    try {
-      await blankApi.download({
-        workId: work.id,
-        workTitle: `${work.type}: ${work.subject} · ${work.classNum}${work.classLetter}`,
-        perPage,
-        part1Count: work.part1Count,
-        part2Count: work.part2Count,
-      });
-      onClose();
-    } catch (e) {
-      setErr((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-white rounded-sm border border-border max-w-md w-full p-5" onClick={e => e.stopPropagation()}>
-        <div className="flex items-start justify-between mb-4">
-          <div>
-            <h3 className="text-sm font-bold">Скачать бланк ответов</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">Работа № {work.id} · {work.subject}</p>
-          </div>
-          <button onClick={onClose} className="p-1 hover:bg-muted rounded-sm"><Icon name="X" size={14} /></button>
-        </div>
-
-        <div className="space-y-4">
-          <div>
-            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-2">Бланков на одном листе A4</label>
-            <div className="grid grid-cols-3 gap-2">
-              {([1, 2, 4] as const).map(n => (
-                <button
-                  key={n}
-                  onClick={() => setPerPage(n)}
-                  className={`py-3 border rounded-sm text-sm font-semibold transition-colors ${perPage === n ? "border-primary bg-primary/5 text-primary" : "border-border hover:bg-muted"}`}
-                >
-                  {n} {n === 1 ? "бланк" : "бланка"}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="bg-muted/40 border border-border rounded-sm p-3 text-xs space-y-1">
-            <p className="font-semibold">Что в бланке:</p>
-            <p className="text-muted-foreground">• Код ученика (5 клеток), Фамилия, Класс, Дата</p>
-            <p className="text-muted-foreground">• Часть 1: {work.part1Count} клеток с номерами заданий</p>
-            {work.part2Count > 0 && (
-              <p className="text-muted-foreground">• Часть 2: {work.part2Count} строк с номерами заданий</p>
-            )}
-            <p className="text-muted-foreground">• Допустимые буквы и цифры</p>
-          </div>
-
-          {err && (
-            <div className="flex items-center gap-2 p-3 rounded-sm bg-destructive/5 border border-destructive/20">
-              <Icon name="AlertCircle" size={14} className="text-destructive flex-shrink-0" />
-              <p className="text-xs text-destructive">{err}</p>
-            </div>
-          )}
-
-          <div className="flex justify-end gap-2 pt-1">
-            <button onClick={onClose} className="px-4 py-2 border border-border text-xs rounded-sm hover:bg-muted">Отмена</button>
-            <button onClick={handleDownload} disabled={busy}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground text-xs font-semibold rounded-sm hover:opacity-90 disabled:opacity-50">
-              {busy ? <Icon name="Loader2" size={13} className="animate-spin" /> : <Icon name="Download" size={13} />}
-              {busy ? "Готовим PDF..." : "Скачать PDF"}
-            </button>
-          </div>
-        </div>
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-3" onClick={onClose}>
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[92vh] overflow-hidden flex flex-col"
+        onClick={e => e.stopPropagation()}
+      >
+        <BlankGenerator
+          workId={work.id}
+          workTitle={`${work.type}: ${work.subject} · ${work.classNum}${work.classLetter}`}
+          questionsCount={work.totalQuestions}
+          onClose={onClose}
+        />
       </div>
     </div>
   );

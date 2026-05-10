@@ -253,17 +253,20 @@ def gigachat_chat(messages: list, max_tokens: int = 3000, temperature: float = 0
 
 
 def gigachat_with_fallback(messages: list, max_tokens: int = 3000) -> str:
-    """Пробует модели по очереди: GigaChat-2 → GigaChat → GigaChat-Lite."""
+    """Пробует модели по очереди: GigaChat → GigaChat-2 → GigaChat-Lite.
+    GigaChat быстрее (20-40 сек), GigaChat-2 умнее но медленнее (60-90 сек)."""
     last_err = None
-    for model in ("GigaChat-2", "GigaChat", "GigaChat-Lite"):
+    for model in ("GigaChat", "GigaChat-2", "GigaChat-Lite"):
         try:
-            return gigachat_chat(messages, max_tokens=max_tokens, model=model, req_timeout=300)
+            timeout = 90 if model == "GigaChat" else 300
+            return gigachat_chat(messages, max_tokens=max_tokens, model=model, req_timeout=timeout)
         except RuntimeError as e:
             last_err = e
             msg = str(e)
             if "MODEL_NOT_FOUND" in msg or "404" in msg or "401" in msg or "403" in msg:
                 continue
             if "timed out" in msg.lower() or "timeout" in msg.lower():
+                # При таймауте пробуем следующую модель
                 continue
             # RemoteDisconnected / connection reset — пробуем следующую модель
             if "remote end closed" in msg.lower() or "remotedisconnected" in msg.lower() \
@@ -291,57 +294,61 @@ def extract_json(text: str) -> dict:
 
 # ─── ПОИСК ИЗОБРАЖЕНИЙ ───────────────────────────────────────────────────────
 
-def fetch_image_bytes(query: str) -> bytes | None:
-    """Ищет релевантное изображение через Wikimedia Commons REST API (без ключа)."""
+def fetch_image_bytes(query: str, timeout: int = 5) -> bytes | None:
+    """Ищет изображение через Wikimedia Commons. Жёсткий таймаут 5 сек."""
     try:
-        # Используем Wikimedia Commons — общедоступные учебные изображения
         search_q = urllib.parse.quote(query)
         url = (
             f"https://commons.wikimedia.org/w/api.php"
             f"?action=query&generator=search&gsrnamespace=6"
-            f"&gsrsearch={search_q}&gsrlimit=5"
+            f"&gsrsearch={search_q}&gsrlimit=3"
             f"&prop=imageinfo&iiprop=url|mime|size"
-            f"&iiurlwidth=800&format=json&origin=*"
+            f"&iiurlwidth=600&format=json&origin=*"
         )
         req = urllib.request.Request(url, headers={"User-Agent": "AOUSPT-Edu-Bot/1.0"})
-        with urllib.request.urlopen(req, timeout=10) as r:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
             data = json.loads(r.read().decode())
 
         pages = (data.get("query") or {}).get("pages") or {}
-        candidates = []
         for page in pages.values():
             ii = (page.get("imageinfo") or [{}])[0]
             mime = ii.get("mime", "")
             thumb_url = ii.get("thumburl") or ii.get("url", "")
             size = ii.get("size", 0)
-            if mime in ("image/jpeg", "image/png") and thumb_url and size < 5_000_000:
-                candidates.append(thumb_url)
-
-        if not candidates:
-            return None
-
-        img_url = candidates[0]
-        req2 = urllib.request.Request(img_url, headers={"User-Agent": "AOUSPT-Edu-Bot/1.0"})
-        with urllib.request.urlopen(req2, timeout=12) as r:
-            img_bytes = r.read()
-
-        if len(img_bytes) < 5000:
-            return None
-        return img_bytes
-
+            if mime in ("image/jpeg", "image/png") and thumb_url and 5000 < size < 3_000_000:
+                req2 = urllib.request.Request(thumb_url, headers={"User-Agent": "AOUSPT-Edu-Bot/1.0"})
+                with urllib.request.urlopen(req2, timeout=timeout) as r2:
+                    return r2.read()
+        return None
     except Exception:
         return None
 
 
+def fetch_images_parallel(slides: list, topic: str) -> list:
+    """Параллельно загружает изображения для всех слайдов.
+    Каждый запрос ограничен 5 сек, все вместе — не более 15 сек."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def get_img(idx_slide):
+        idx, slide = idx_slide
+        query = slide.get("image_query") or slide.get("title", "")
+        return idx, fetch_image_bytes(f"{query} {topic}", timeout=5)
+
+    results = [None] * len(slides)
+    with ThreadPoolExecutor(max_workers=min(len(slides), 4)) as ex:
+        futures = {ex.submit(get_img, (i, s)): i for i, s in enumerate(slides)}
+        for future in as_completed(futures, timeout=15):
+            try:
+                idx, img = future.result()
+                results[idx] = img
+            except Exception:
+                pass
+    return results
+
+
 def fetch_image_for_slide(slide_title: str, topic: str) -> bytes | None:
-    """Пробует найти фото по заголовку слайда, затем по теме урока."""
-    img = fetch_image_bytes(f"{slide_title} {topic} учебник")
-    if img:
-        return img
-    img = fetch_image_bytes(slide_title)
-    if img:
-        return img
-    return fetch_image_bytes(topic)
+    """Совместимость со старым кодом."""
+    return fetch_image_bytes(f"{slide_title} {topic}", timeout=5)
 
 
 # ─── ГЕНЕРАЦИЯ СТРУКТУРЫ ─────────────────────────────────────────────────────
@@ -828,13 +835,15 @@ def handler(event: dict, context) -> dict:
             return _resp(429, {"error": "Слишком много запросов к ИИ-сервису — подождите 30 секунд."})
         return _resp(500, {"error": f"Ошибка генерации структуры: {msg}"})
 
-    # Шаг 2: загружаем фотографии для каждого слайда параллельно (последовательно)
+    # Шаг 2: загружаем фотографии ПАРАЛЛЕЛЬНО, все вместе ≤15 сек
     images = {}
-    for idx, slide_data in enumerate(outline["slides"], start=1):
-        query = slide_data.get("image_query") or slide_data["title"]
-        img = fetch_image_for_slide(query, topic)
-        if img:
-            images[idx] = img
+    try:
+        img_list = fetch_images_parallel(outline["slides"], topic)
+        for idx, img in enumerate(img_list, start=1):
+            if img:
+                images[idx] = img
+    except Exception:
+        pass  # Без фото лучше, чем без презентации
 
     # Шаг 3: собираем PPTX
     try:

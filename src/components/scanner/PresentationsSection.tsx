@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import Icon from "@/components/ui/icon";
 import { appStore, useAppStore, type PresentationItem } from "@/store/appStore";
 import { presentationApi } from "@/lib/api";
@@ -53,8 +53,45 @@ export function PresentationsSection() {
   const [slidesCount, setSlidesCount] = useState(8);
   const [busy, setBusy] = useState(false);
   const [stage, setStage] = useState("");
+  const [elapsed, setElapsed] = useState(0);
+  const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Живой таймер и псевдо-прогресс пока идёт генерация
+  useEffect(() => {
+    if (busy) {
+      setElapsed(0);
+      setProgress(0);
+      timerRef.current = setInterval(() => {
+        setElapsed(s => s + 1);
+        // Прогресс растёт быстро до 80% за ~60 сек, потом медленнее
+        setProgress(p => {
+          if (p < 40) return p + 2.2;
+          if (p < 70) return p + 0.9;
+          if (p < 88) return p + 0.3;
+          return p;
+        });
+      }, 1000);
+    } else {
+      if (timerRef.current) clearInterval(timerRef.current);
+      setElapsed(0);
+      setProgress(0);
+    }
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+  }, [busy]);
+
+  const STAGE_HINTS = [
+    [0,  "Подключаемся к ИИ…"],
+    [5,  "ИИ изучает тему урока…"],
+    [20, "Формируем структуру слайдов…"],
+    [45, "Генерируем содержание…"],
+    [70, "Собираем PPTX-файл…"],
+    [85, "Финальная обработка…"],
+  ];
+  const autoStage = STAGE_HINTS.slice().reverse().find(([p]) => progress >= p)?.[1] ?? "";
+  const displayStage = stage || autoStage;
 
   const generate = async () => {
     if (!topic.trim()) {
@@ -264,13 +301,39 @@ export function PresentationsSection() {
             </div>
           )}
 
+          {/* Прогресс-блок */}
+          {busy && (
+            <div className="border border-blue-200 bg-blue-50 rounded-sm p-4 space-y-3">
+              <div className="flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2 text-blue-700 font-medium">
+                  <Icon name="Loader2" size={13} className="animate-spin" />
+                  {displayStage}
+                </div>
+                <span className="text-blue-500 font-mono tabular-nums">
+                  {Math.floor(elapsed / 60) > 0
+                    ? `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, "0")}`
+                    : `${elapsed} сек`}
+                </span>
+              </div>
+              <div className="h-1.5 bg-blue-100 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-blue-500 rounded-full transition-all duration-1000"
+                  style={{ width: `${Math.min(progress, 95)}%` }}
+                />
+              </div>
+              <p className="text-[11px] text-blue-500">
+                ИИ-сервис GigaChat генерирует содержание. Обычно занимает 40–80 секунд — не закрывайте страницу.
+              </p>
+            </div>
+          )}
+
           <button
             onClick={generate}
             disabled={busy || !topic.trim()}
             className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 bg-primary text-primary-foreground text-sm font-semibold rounded-sm hover:opacity-90 transition-opacity disabled:opacity-50"
           >
             <Icon name={busy ? "Loader2" : "Sparkles"} size={15} className={busy ? "animate-spin" : ""} />
-            {busy ? (stage || "Генерация…") : "Создать презентацию"}
+            {busy ? "Генерация идёт…" : "Создать презентацию"}
           </button>
         </div>
       </div>

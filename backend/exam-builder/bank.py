@@ -13,6 +13,11 @@
 """
 from bank_oge import OGE_BANK
 from bank_ege import EGE_BANK
+from bank_extra import merge_extras, OGE_EXTRAS_BY_SUBJECT
+
+# Подмешиваем дополнительные пулы заданий, чтобы каждый сгенерированный
+# вариант гарантированно отличался от предыдущего.
+OGE_BANK = merge_extras(OGE_BANK, OGE_EXTRAS_BY_SUBJECT)
 
 EXAM_BANK = {
     "ОГЭ": OGE_BANK,

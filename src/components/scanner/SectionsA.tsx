@@ -7,7 +7,7 @@ import { FlowStep, RecognitionResult } from "./upload-types";
 import { recognizeBlank } from "./ocrEngine";
 import { appStore, useAppStore } from "@/store/appStore";
 
-const OPT_LABELS = ["A", "B", "C", "D", "E", "F"];
+const OPT_LABELS = ["А", "Б", "В", "Г", "Д", "Е"];
 
 export function UploadSection() {
   const { works, students } = useAppStore();

@@ -8,7 +8,7 @@ interface Props {
   onReset: () => void;
 }
 
-const OPT_LABELS = ["A", "B", "C", "D", "E", "F"];
+const OPT_LABELS = ["А", "Б", "В", "Г", "Д", "Е"];
 
 function scoreColor(pct: number) {
   if (pct >= 80) return "text-green-700 bg-green-50 border-green-200";

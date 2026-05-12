@@ -29,7 +29,13 @@ export function RecognitionResults({ result, answerKey, optionsCount = 4, onRese
   const pct   = analysis.percent ?? 0;
   const grade = gradeLabel(pct);
   const opts  = OPT_LABELS.slice(0, optionsCount);
-  const key   = answerKey.toUpperCase().split("");
+  // Нормализуем ключ: латинские A/B/C/D → кириллические А/Б/В/Г
+  const LAT_TO_CYR: Record<string, string> = {
+    "A":"А","B":"Б","C":"В","D":"Г","E":"Д","F":"Е",
+    "a":"А","b":"Б","c":"В","d":"Г","e":"Д","f":"Е",
+  };
+  const normalizeChar = (ch: string) => LAT_TO_CYR[ch] ?? ch.toUpperCase();
+  const key = answerKey.split("").map(normalizeChar);
 
   return (
     <div className="space-y-4">

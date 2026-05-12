@@ -309,10 +309,20 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
 
 
 # ── Анализ ────────────────────────────────────────────────────────────────────
+# v3: нормализация ключа лат→кир
+_LAT_TO_CYR = {"A":"А","B":"Б","C":"В","D":"Г","E":"Д","F":"Е"}
+
+def _normalize_key(answer_key: str) -> list:
+    """Нормализует ключ: латинские A/B/C/D → кириллические А/Б/В/Г."""
+    result = []
+    for ch in answer_key.strip().upper():
+        result.append(_LAT_TO_CYR.get(ch, ch))
+    return result
+
 def _analyze(answers: list, answer_key: str) -> dict:
     if not answer_key:
         return {"total": len(answers), "correct": 0, "wrong": 0, "percent": 0, "details": []}
-    key = list(answer_key.strip().upper())
+    key = _normalize_key(answer_key)
     details, correct = [], 0
     for i, a in enumerate(answers):
         ka = key[i] if i < len(key) else ""

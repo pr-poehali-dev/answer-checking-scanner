@@ -88,10 +88,10 @@ function BlankPreview({ config }: { config: BlankConfig }) {
       )}
       <line x1={PAD} y1={gridTop} x2={svgW-PAD} y2={gridTop} stroke="#c8d6e5" strokeWidth={0.4}/>
 
-      {/* Вопросы */}
+      {/* Вопросы — вертикальный порядок: 1-й столбец сверху вниз, затем 2-й */}
       {Array.from({length: questionsCount}).map((_, qi) => {
-        const ci = qi % nCols;
-        const ri = Math.floor(qi / nCols);
+        const ci = Math.floor(qi / nRows);   // столбец
+        const ri = qi % nRows;               // строка внутри столбца
         const rx = PAD + ci * COL_W;
         const ry = gridTop + ri * ROW_H;
         const my = ry + ROW_H / 2;

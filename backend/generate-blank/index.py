@@ -138,17 +138,17 @@ def draw_blank(c, x0, y0, bw, bh, cfg):
     cur_y -= S(0.5*mm)
 
     # ── Сетка вопросов: квадраты с буквой ────────────────────────────────────
+    # Порядок: вертикальный — 1-й столбец сверху вниз, затем 2-й и т.д.
     n_cols = 1 if n_q <= 15 else (2 if n_q <= 40 else 3)
+    n_rows = math.ceil(n_q / n_cols)   # строк в одном столбце
     col_w  = (bw - 2*P) / n_cols
     num_w  = S(7.5*mm)
-    # Размер квадрата: вписываем n_opts в ширину колонки
     cell_w = min((col_w - num_w) / n_opts, S(8.5*mm))
-    sq     = min(cell_w * 0.78, S(5.5*mm))   # сторона квадрата
-    fs     = max(S(4), sq * 0.52)            # шрифт буквы
+    sq     = min(cell_w * 0.78, S(5.5*mm))
+    fs     = max(S(4), sq * 0.52)
     row_h  = sq + S(2.0*mm)
-    n_rows = math.ceil(n_q / n_cols)
 
-    # Заголовок А Б В Г
+    # Заголовок А Б В Г — для каждого столбца
     HDR_G = S(4.5*mm)
     for ci in range(n_cols):
         for oi, lbl in enumerate(opts):
@@ -158,9 +158,10 @@ def draw_blank(c, x0, y0, bw, bh, cfg):
     HL(c, x0+P, cur_y, x0+bw-P, lw=0.35)
     cur_y -= S(0.2*mm)
 
+    # Вертикальный порядок: qi=0..n_rows-1 → столбец 0, qi=n_rows..2*n_rows-1 → столбец 1
     for qi in range(n_q):
-        ci = qi % n_cols
-        ri = qi // n_cols
+        ci = qi // n_rows        # номер столбца
+        ri = qi % n_rows         # строка внутри столбца
         rx = x0 + P + ci * col_w
         ry = cur_y - ri * row_h - row_h/2
 
@@ -174,8 +175,8 @@ def draw_blank(c, x0, y0, bw, bh, cfg):
 
         for oi in range(n_opts):
             ox = rx + num_w + oi*cell_w + cell_w/2
-            SQ(c, ox, ry, sq)                           # квадрат
-            T(c, ox, ry-sq*0.32, opts[oi], BOLD, fs, C_GRAY, "center")  # буква
+            SQ(c, ox, ry, sq)
+            T(c, ox, ry-sq*0.32, opts[oi], BOLD, fs, C_GRAY, "center")
 
     cur_y -= n_rows * row_h + S(0.5*mm)
     HL(c, x0, cur_y, x0+bw, lw=0.5, color=C_BLUE)

@@ -34,16 +34,16 @@ function BlankPreview({ config }: { config: BlankConfig }) {
   const COL_W   = NUM_W + CELL_W * optionsCount + 6;
   const R       = Math.min(CELL_W * 0.32, 7);
 
-  // Блок кода ученика — 5 столбцов × 10 цифр (0-9)
-  const CR      = 7;   // радиус кружка кода
-  const C_GAP_X = CR * 2 + 4;
-  const C_GAP_Y = CR * 2 + 2;
-  const CODE_COLS = 5;
-  const CODE_ROWS = 10;
-  const CODE_HDR_H = 24;  // «КОД УЧЕНИКА» + номера столбцов
-  const CODE_BLOCK_H = CODE_HDR_H + CODE_ROWS * C_GAP_Y + 8;
+  // Блок кода ученика — ГОРИЗОНТАЛЬНЫЙ: 5 строк (разряды) × 10 цифр (0-9)
+  const CR      = 6;    // радиус кружка кода
+  const C_GAP_X = CR * 2 + 3;   // шаг по горизонтали (цифры)
+  const C_GAP_Y = CR * 2 + 2;   // шаг по вертикали (разряды)
+  const CODE_ROWS = 5;   // разрядов
+  const CODE_COLS = 10;  // цифры 0-9
+  const CODE_HDR_H = 22; // «КОД УЧЕНИКА» + заголовок цифр
+  const CODE_BLOCK_H = CODE_HDR_H + CODE_ROWS * C_GAP_Y + 6;
 
-  const FOOT_H  = 20;  // строка снизу с инфо
+  const FOOT_H  = 20;
   const svgW    = PAD * 2 + COL_W * nCols;
   const svgH    = HDR_H + META_H + HDR_OPT + nRows * ROW_H + CODE_BLOCK_H + FOOT_H + 10;
 
@@ -127,31 +127,31 @@ function BlankPreview({ config }: { config: BlankConfig }) {
       {/* Разделитель перед кодом */}
       <line x1={0} y1={codeTop - 2} x2={svgW} y2={codeTop - 2} stroke="#1e3a5f" strokeWidth={0.6} />
 
-      {/* Блок КОД УЧЕНИКА — 5 × 10 кружков */}
+      {/* Блок КОД УЧЕНИКА — горизонтальный: 5 строк (разряды) × 10 цифр */}
       <text x={PAD} y={codeTop + 12} fill="#1a1a2e" fontSize={7.5} fontWeight="bold">КОД УЧЕНИКА</text>
-      <text x={PAD + CODE_COLS * C_GAP_X + 8} y={codeTop + 12} fill="#8898aa" fontSize={6}>
-        (закрасьте одну цифру в каждом столбце)
+      <text x={PAD + 68} y={codeTop + 12} fill="#8898aa" fontSize={5.5}>
+        (закрасьте одну цифру в каждой строке)
       </text>
 
-      {/* Номера столбцов */}
+      {/* Заголовок цифр 0-9 */}
       {Array.from({ length: CODE_COLS }).map((_, col) => (
         <text key={`cn-${col}`}
           x={PAD + col * C_GAP_X + CR}
           y={codeTop + CODE_HDR_H - 2}
-          textAnchor="middle" fill="#1e3a5f" fontSize={7} fontWeight="bold"
-        >{col + 1}</text>
+          textAnchor="middle" fill="#1e3a5f" fontSize={6} fontWeight="bold"
+        >{col}</text>
       ))}
 
-      {/* Кружки 0-9 */}
+      {/* Кружки: строка = разряд, столбец = цифра 0-9 */}
       {Array.from({ length: CODE_ROWS }).map((_, row) =>
         Array.from({ length: CODE_COLS }).map((_, col) => {
           const cx = PAD + col * C_GAP_X + CR;
           const cy = codeTop + CODE_HDR_H + row * C_GAP_Y + CR;
           return (
-            <g key={`c-${col}-${row}`}>
+            <g key={`c-${row}-${col}`}>
               <circle cx={cx} cy={cy} r={CR} fill="white" stroke="#1e3a5f" strokeWidth={0.8} />
-              <text x={cx} y={cy + CR * 0.42} textAnchor="middle" fill="#8898aa" fontSize={CR * 1.1} fontWeight="bold">
-                {row}
+              <text x={cx} y={cy + CR * 0.42} textAnchor="middle" fill="#8898aa" fontSize={CR * 1.0} fontWeight="bold">
+                {col}
               </text>
             </g>
           );

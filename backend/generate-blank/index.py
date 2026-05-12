@@ -200,36 +200,36 @@ def draw_blank(c, x0, y0, bw, bh, cfg):
     _hline(c, x0, cur_y, x0 + bw, lw=0.6, color=ACCENT)
     cur_y -= 3 * mm
 
-    # ── Код ученика — сетка 5 × 10 кружков ──────────────────────────────────
-    # 5 разрядов, в каждом 10 кружков (цифры 0-9)
-    CODE_COLS = 5
-    CODE_ROWS = 10   # цифры 0-9
-    cr = 2.5 * mm   # радиус кружка кода
-    c_gap_x = cr * 2 + 1.2 * mm  # шаг по горизонтали
-    c_gap_y = cr * 2 + 0.8 * mm  # шаг по вертикали
-    code_block_w = CODE_COLS * c_gap_x
-    code_block_h = CODE_ROWS * c_gap_y + 5 * mm  # +5 мм под заголовок
+    # ── Код ученика — горизонтальная сетка: 5 строк (разряды) × 10 цифр ────
+    # Строка = один разряд кода; в строке 10 кружков (цифры 0-9)
+    CODE_ROWS = 5    # разрядов
+    CODE_COLS = 10   # цифры 0-9
+    cr = 2.2 * mm   # радиус кружка
+    c_gap_x = cr * 2 + 1.0 * mm   # шаг по горизонтали (цифры)
+    c_gap_y = cr * 2 + 1.0 * mm   # шаг по вертикали (разряды)
 
-    _txt(c, x0 + P, cur_y, "КОД УЧЕНИКА", BOLD, 7.5, DARK)
-    _txt(c, x0 + P + code_block_w + 4*mm, cur_y, "(закрасьте одну цифру в каждом столбце)", REG, 6, GRAY)
-    cur_y -= 4.5 * mm
+    # Заголовок + подсказка
+    _txt(c, x0 + P, cur_y, "КОД УЧЕНИКА", BOLD, 7, DARK)
+    _txt(c, x0 + P + 28*mm, cur_y, "(закрасьте одну цифру в каждой строке)", REG, 5.5, GRAY)
+    cur_y -= 4 * mm
 
-    # Заголовок столбцов — номер разряда (1-5)
-    for col in range(CODE_COLS):
-        cx = x0 + P + col * c_gap_x + cr
-        _txt(c, cx, cur_y, str(col + 1), BOLD, 6.5, ACCENT, "center")
-    cur_y -= 3.5 * mm
+    # Заголовок цифр сверху (0-9)
+    for dig_i in range(CODE_COLS):
+        dx = x0 + P + dig_i * c_gap_x + cr
+        _txt(c, dx, cur_y, str(dig_i), BOLD, 5.5, ACCENT, "center")
+    cur_y -= 3 * mm
 
-    # Кружки 0-9 по каждому столбцу
+    # Кружки: каждая строка — один разряд, каждый столбец — цифра 0-9
     for row in range(CODE_ROWS):
-        dig = str(row)   # "0".."9"
-        for col in range(CODE_COLS):
-            cx = x0 + P + col * c_gap_x + cr
-            cy = cur_y - row * c_gap_y - cr
-            _circle(c, cx, cy, cr)
-            _txt(c, cx, cy - cr * 0.42, dig, BOLD, 6, GRAY, "center")
+        label_x = x0 + P - 0.5*mm
+        ry = cur_y - row * c_gap_y - cr
+        # Метка разряда слева (необязательно, можно убрать)
+        for dig_i in range(CODE_COLS):
+            cx = x0 + P + dig_i * c_gap_x + cr
+            _circle(c, cx, ry, cr)
+            _txt(c, cx, ry - cr * 0.42, str(dig_i), BOLD, 5.5, GRAY, "center")
 
-    cur_y -= CODE_ROWS * c_gap_y + 3 * mm
+    cur_y -= CODE_ROWS * c_gap_y + 2 * mm
 
     # ── Подпись ──────────────────────────────────────────────────────────────
     _hline(c, x0, cur_y, x0 + bw, lw=0.4, color=LINE)

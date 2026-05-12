@@ -1,5 +1,5 @@
 """
-Генерация PDF-бланка ответов. Компактный формат.
+Генерация PDF-бланка ответов. Адаптивный масштаб под perPage.
 Варианты: А/Б/В/Г (кириллица). Код ученика: 5 строк × цифры 0-9.
 POST / — { workId, workTitle, questionsCount, optionsCount(2-6), perPage(1|2|4),
            subject?, classLabel?, date? }
@@ -20,7 +20,6 @@ CORS = {
     "Access-Control-Allow-Headers": "Content-Type, X-Authorization",
 }
 
-# ── Шрифт ────────────────────────────────────────────────────────────────────
 def _reg():
     pairs = [
         ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -42,48 +41,31 @@ def _reg():
 
 REG, BOLD = _reg()
 
-# ── Цвета ────────────────────────────────────────────────────────────────────
 C_DARK  = HexColor("#1a1a2e")
 C_BLUE  = HexColor("#1e3a5f")
 C_LIGHT = HexColor("#f0f4f8")
 C_GRAY  = HexColor("#8898aa")
 C_LINE  = HexColor("#c8d6e5")
-
 RU_OPTS = ["А", "Б", "В", "Г", "Д", "Е"]
 
 
-# ── Утилиты ──────────────────────────────────────────────────────────────────
-def T(c, x, y, s, font, size, color=C_DARK, align="left"):
-    c.setFont(font, size)
-    c.setFillColor(color)
-    if align == "center":
-        c.drawCentredString(x, y, s)
-    elif align == "right":
-        c.drawRightString(x, y, s)
-    else:
-        c.drawString(x, y, s)
-
+def T(c, x, y, s, font, sz, color=C_DARK, align="left"):
+    c.setFont(font, sz); c.setFillColor(color)
+    if align == "center": c.drawCentredString(x, y, s)
+    elif align == "right": c.drawRightString(x, y, s)
+    else: c.drawString(x, y, s)
 
 def HL(c, x1, y, x2, lw=0.4, color=C_LINE):
-    c.setStrokeColor(color)
-    c.setLineWidth(lw)
-    c.line(x1, y, x2, y)
-
+    c.setStrokeColor(color); c.setLineWidth(lw); c.line(x1, y, x2, y)
 
 def VL(c, x, y1, y2, lw=0.3, color=C_LINE):
-    c.setStrokeColor(color)
-    c.setLineWidth(lw)
-    c.line(x, y1, x, y2)
+    c.setStrokeColor(color); c.setLineWidth(lw); c.line(x, y1, x, y2)
+
+def CR(c, cx, cy, r, stroke=C_BLUE, fill=white, lw=0.5):
+    c.setStrokeColor(stroke); c.setFillColor(fill)
+    c.setLineWidth(lw); c.circle(cx, cy, r, stroke=1, fill=1)
 
 
-def CR(c, cx, cy, r, stroke=C_BLUE, fill=white, lw=0.6):
-    c.setStrokeColor(stroke)
-    c.setFillColor(fill)
-    c.setLineWidth(lw)
-    c.circle(cx, cy, r, stroke=1, fill=1)
-
-
-# ── Рисование бланка ─────────────────────────────────────────────────────────
 def draw_blank(c, x0, y0, bw, bh, cfg):
     n_q     = cfg["n_q"]
     opts    = cfg["opts"]
@@ -93,183 +75,162 @@ def draw_blank(c, x0, y0, bw, bh, cfg):
     subject = cfg.get("subject", "")
     cls_lbl = cfg.get("class_label", "")
     date_s  = cfg.get("date", "")
+    sc      = cfg.get("scale", 1.0)
 
-    P = 4 * mm   # боковые отступы
+    def S(v): return v * sc
 
-    # ── Рамка ────────────────────────────────────────────────────────────────
-    c.setStrokeColor(C_BLUE)
-    c.setLineWidth(0.7)
+    P = S(4 * mm)
+
+    # Рамка
+    c.setStrokeColor(C_BLUE); c.setLineWidth(0.7)
     c.rect(x0, y0, bw, bh, stroke=1, fill=0)
-
     cur_y = y0 + bh
 
-    # ── Шапка ────────────────────────────────────────────────────────────────
-    HDR = 7 * mm
+    # Шапка
+    HDR = S(6.5 * mm)
     c.setFillColor(C_DARK)
     c.rect(x0, cur_y - HDR, bw, HDR, stroke=0, fill=1)
-    T(c, x0 + bw/2, cur_y - HDR + 2.2*mm, "БЛАНК ОТВЕТОВ", BOLD, 8.5, white, "center")
-    T(c, x0 + bw - P, cur_y - HDR + 2.2*mm, f"№ {work_id}", REG, 6, C_GRAY, "right")
+    T(c, x0+bw/2, cur_y-HDR+S(2*mm), "БЛАНК ОТВЕТОВ", BOLD, S(8.5), white, "center")
+    T(c, x0+bw-P, cur_y-HDR+S(2*mm), f"№ {work_id}", REG, S(5.5), C_GRAY, "right")
     cur_y -= HDR
 
-    # ── Поля ученика ─────────────────────────────────────────────────────────
-    META = 12 * mm
+    # Поля ученика
+    META = S(10.5 * mm)
     c.setFillColor(C_LIGHT)
-    c.rect(x0, cur_y - META, bw, META, stroke=0, fill=1)
+    c.rect(x0, cur_y-META, bw, META, stroke=0, fill=1)
+    fy1 = cur_y - S(3.2*mm)
+    fy2 = cur_y - S(7.5*mm)
 
-    fy1 = cur_y - 4 * mm
-    fy2 = cur_y - 8.5 * mm
-
-    T(c, x0 + P, fy1, "ФИО:", BOLD, 6.5, C_DARK)
+    T(c, x0+P, fy1, "ФИО:", BOLD, S(6.5), C_DARK)
     c.setStrokeColor(C_LINE); c.setLineWidth(0.5)
-    c.line(x0 + P + 10*mm, fy1 - 0.3, x0 + bw*0.61, fy1 - 0.3)
-    T(c, x0 + bw*0.63, fy1, "Класс:", BOLD, 6.5, C_DARK)
-    c.line(x0 + bw*0.63 + 12*mm, fy1 - 0.3, x0 + bw - P, fy1 - 0.3)
-    if cls_lbl:
-        T(c, x0 + bw*0.63 + 13*mm, fy1, cls_lbl, REG, 6.5, C_DARK)
+    c.line(x0+P+S(10*mm), fy1-0.3, x0+bw*0.61, fy1-0.3)
+    T(c, x0+bw*0.63, fy1, "Класс:", BOLD, S(6.5), C_DARK)
+    c.line(x0+bw*0.63+S(12*mm), fy1-0.3, x0+bw-P, fy1-0.3)
+    if cls_lbl: T(c, x0+bw*0.63+S(13*mm), fy1, cls_lbl, REG, S(6.5), C_DARK)
 
-    T(c, x0 + P, fy2, "Предмет:", BOLD, 6.5, C_DARK)
-    c.line(x0 + P + 17*mm, fy2 - 0.3, x0 + bw*0.55, fy2 - 0.3)
-    T(c, x0 + bw*0.57, fy2, "Дата:", BOLD, 6.5, C_DARK)
-    c.line(x0 + bw*0.57 + 10*mm, fy2 - 0.3, x0 + bw - P, fy2 - 0.3)
-    if subject:
-        T(c, x0 + P + 18*mm, fy2, subject, REG, 6.5, C_DARK)
-    if date_s:
-        T(c, x0 + bw*0.57 + 11*mm, fy2, date_s, REG, 6.5, C_DARK)
+    T(c, x0+P, fy2, "Предмет:", BOLD, S(6.5), C_DARK)
+    c.line(x0+P+S(17*mm), fy2-0.3, x0+bw*0.55, fy2-0.3)
+    T(c, x0+bw*0.57, fy2, "Дата:", BOLD, S(6.5), C_DARK)
+    c.line(x0+bw*0.57+S(10*mm), fy2-0.3, x0+bw-P, fy2-0.3)
+    if subject: T(c, x0+P+S(18*mm), fy2, subject, REG, S(6.5), C_DARK)
+    if date_s:  T(c, x0+bw*0.57+S(11*mm), fy2, date_s, REG, S(6.5), C_DARK)
 
     cur_y -= META
-    HL(c, x0, cur_y, x0 + bw, lw=0.5, color=C_BLUE)
-    cur_y -= 0.5 * mm
+    HL(c, x0, cur_y, x0+bw, lw=0.5, color=C_BLUE)
+    cur_y -= S(0.5*mm)
 
-    # ── Сетка вопросов ───────────────────────────────────────────────────────
+    # Сетка вопросов
     n_cols = 1 if n_q <= 15 else (2 if n_q <= 40 else 3)
     col_w  = (bw - 2*P) / n_cols
-
-    # Подбираем радиус кружка: чтобы все умещалось компактно
-    num_w  = 8 * mm
-    cell_w = min((col_w - num_w) / n_opts, 8 * mm)
-    r      = min(cell_w * 0.40, 2.8 * mm)   # компактнее
-    font_s = max(4.5, r * 1.55)
-    row_h  = r * 2 + 1.8 * mm               # меньше межстрочный
+    num_w  = S(7.5*mm)
+    cell_w = min((col_w - num_w) / n_opts, S(8*mm))
+    r      = min(cell_w * 0.42, S(2.8*mm))
+    fs     = max(S(4), r * 1.5)
+    row_h  = r * 2 + S(1.4*mm)
     n_rows = math.ceil(n_q / n_cols)
 
     # Заголовок А Б В Г
-    HDR_G = 4.5 * mm
+    HDR_G = S(4.5*mm)
     for ci in range(n_cols):
-        cx0 = x0 + P + ci * col_w
         for oi, lbl in enumerate(opts):
-            ox = cx0 + num_w + oi * cell_w + cell_w / 2
-            T(c, ox, cur_y - HDR_G + 1.5*mm, lbl, BOLD, 6.5, C_BLUE, "center")
+            ox = x0 + P + ci*col_w + num_w + oi*cell_w + cell_w/2
+            T(c, ox, cur_y-HDR_G+S(1.5*mm), lbl, BOLD, S(6.5), C_BLUE, "center")
     cur_y -= HDR_G
-    HL(c, x0 + P, cur_y, x0 + bw - P, lw=0.35)
-    cur_y -= 0.2 * mm
+    HL(c, x0+P, cur_y, x0+bw-P, lw=0.35)
+    cur_y -= S(0.2*mm)
 
-    # Вопросы: qi % n_cols = колонка, qi // n_cols = строка
     for qi in range(n_q):
         ci = qi % n_cols
         ri = qi // n_cols
         rx = x0 + P + ci * col_w
-        ry = cur_y - ri * row_h - row_h / 2
+        ry = cur_y - ri * row_h - row_h/2
 
         if ri % 2 == 0:
             c.setFillColor(C_LIGHT)
-            c.rect(rx, ry - row_h/2, col_w, row_h, stroke=0, fill=1)
-
+            c.rect(rx, ry-row_h/2, col_w, row_h, stroke=0, fill=1)
         if ci > 0:
-            VL(c, rx, ry - row_h/2, ry + row_h/2)
+            VL(c, rx, ry-row_h/2, ry+row_h/2)
 
-        T(c, rx + num_w - 1*mm, ry - 2.0, f"{qi+1}.", BOLD, 6.5, C_DARK, "right")
-
+        T(c, rx+num_w-S(0.8*mm), ry-S(2), f"{qi+1}.", BOLD, S(6.5), C_DARK, "right")
         for oi in range(n_opts):
-            ox = rx + num_w + oi * cell_w + cell_w / 2
+            ox = rx + num_w + oi*cell_w + cell_w/2
             CR(c, ox, ry, r)
-            T(c, ox, ry - r*0.38, opts[oi], BOLD, font_s, C_GRAY, "center")
+            T(c, ox, ry-r*0.38, opts[oi], BOLD, fs, C_GRAY, "center")
 
-    cur_y -= n_rows * row_h + 0.5 * mm
-    HL(c, x0, cur_y, x0 + bw, lw=0.5, color=C_BLUE)
-    cur_y -= 2.5 * mm
+    cur_y -= n_rows * row_h + S(0.5*mm)
+    HL(c, x0, cur_y, x0+bw, lw=0.5, color=C_BLUE)
+    cur_y -= S(2*mm)
 
-    # ── Код ученика ───────────────────────────────────────────────────────────
-    # Формат: 5 строк (разряды 1-5), каждая строка — номер разряда + 10 кружков (0-9)
-    # Компактно: кружок 1.6мм радиус, шаг 3.8мм → 10 кружков = 38мм ширина
-    CODE_ROWS = 5
-    CODE_COLS = 10
-    cr2   = 1.6 * mm
-    gap_x = cr2 * 2 + 0.6 * mm   # 3.8 мм на кружок
-    gap_y = cr2 * 2 + 1.0 * mm   # 4.2 мм на строку
-    num_w2 = 5 * mm               # ширина под номер разряда
+    # Код ученика — компактно: заголовок 0-9 + 5 строк
+    cr2   = S(1.45*mm)
+    gap_x = cr2*2 + S(0.4*mm)
+    gap_y = cr2*2 + S(0.7*mm)
+    nw2   = S(4.5*mm)
 
-    T(c, x0 + P, cur_y, "КОД УЧЕНИКА", BOLD, 6, C_DARK)
-    # Заголовок цифр 0-9 (один раз сверху)
-    for di in range(CODE_COLS):
-        dx = x0 + P + num_w2 + di * gap_x + cr2
-        T(c, dx, cur_y, str(di), BOLD, 5, C_BLUE, "center")
-    cur_y -= 3 * mm
+    T(c, x0+P, cur_y, "КОД УЧЕНИКА", BOLD, S(5.5), C_DARK)
+    for di in range(10):
+        T(c, x0+P+nw2+di*gap_x+cr2, cur_y, str(di), BOLD, S(4.5), C_BLUE, "center")
+    cur_y -= S(2.5*mm)
 
-    # Строки: разряд 1-5
-    for row in range(CODE_ROWS):
-        ry = cur_y - row * gap_y - cr2
-        # Номер разряда слева
-        T(c, x0 + P + num_w2 - 1*mm, ry - cr2*0.35, str(row + 1), BOLD, 5, C_GRAY, "right")
-        # 10 кружков
-        for col in range(CODE_COLS):
-            cx = x0 + P + num_w2 + col * gap_x + cr2
+    for row in range(5):
+        ry = cur_y - row*gap_y - cr2
+        T(c, x0+P+nw2-S(0.8*mm), ry-cr2*0.35, str(row+1), BOLD, S(4.5), C_GRAY, "right")
+        for col in range(10):
+            cx = x0+P+nw2+col*gap_x+cr2
             CR(c, cx, ry, cr2, lw=0.5)
-            T(c, cx, ry - cr2*0.4, str(col), BOLD, 4.5, C_GRAY, "center")
+            T(c, cx, ry-cr2*0.4, str(col), BOLD, S(4), C_GRAY, "center")
 
-    cur_y -= CODE_ROWS * gap_y + 1.5 * mm
+    cur_y -= 5*gap_y + S(1.5*mm)
 
-    # ── Подпись ──────────────────────────────────────────────────────────────
-    HL(c, x0, cur_y, x0 + bw, lw=0.3, color=C_LINE)
-    cur_y -= 3 * mm
-    info = f"Вопросов: {n_q}  |  Вариантов: {n_opts} ({', '.join(opts)})  |  Заполнять чёрной ручкой"
-    T(c, x0 + P, cur_y, info, REG, 5, C_GRAY)
-    T(c, x0 + bw - P, cur_y, title, REG, 5, C_GRAY, "right")
+    # Подпись
+    HL(c, x0, cur_y, x0+bw, lw=0.3, color=C_LINE)
+    cur_y -= S(3*mm)
+    T(c, x0+P, cur_y,
+      f"Вопросов: {n_q}  |  Вариантов: {n_opts} ({', '.join(opts)})  |  Заполнять чёрной ручкой",
+      REG, S(4.5), C_GRAY)
+    T(c, x0+bw-P, cur_y, title, REG, S(4.5), C_GRAY, "right")
 
 
-# ── PDF ──────────────────────────────────────────────────────────────────────
 def render_pdf(cfg: dict, per_page: int) -> bytes:
     buf = io.BytesIO()
     pw, ph = A4
     c = canvas.Canvas(buf, pagesize=A4)
-    M = 6 * mm
+    M   = 6 * mm
+    GAP = 5 * mm
 
     if per_page == 1:
-        layouts = [(M, M, pw - 2*M, ph - 2*M)]
+        layouts = [(M, M, pw-2*M, ph-2*M, 1.0)]
     elif per_page == 2:
-        gap = 5 * mm
-        bh  = (ph - 2*M - gap) / 2
+        bh = (ph - 2*M - GAP) / 2
         layouts = [
-            (M, M + bh + gap, pw - 2*M, bh),
-            (M, M,            pw - 2*M, bh),
+            (M, M+bh+GAP, pw-2*M, bh, 1.0),
+            (M, M,        pw-2*M, bh, 1.0),
         ]
     else:
-        gap  = 5 * mm
-        bw2  = (pw - 2*M - gap) / 2
-        bh2  = (ph - 2*M - gap) / 2
+        bw2 = (pw - 2*M - GAP) / 2
+        bh2 = (ph - 2*M - GAP) / 2
+        sc  = 0.78   # масштаб: контент ~113мм → ~88мм, бланк 141мм — умещается
         layouts = [
-            (M,           M + bh2 + gap, bw2, bh2),
-            (M + bw2 + gap, M + bh2 + gap, bw2, bh2),
-            (M,           M,              bw2, bh2),
-            (M + bw2 + gap, M,            bw2, bh2),
+            (M,         M+bh2+GAP, bw2, bh2, sc),
+            (M+bw2+GAP, M+bh2+GAP, bw2, bh2, sc),
+            (M,         M,         bw2, bh2, sc),
+            (M+bw2+GAP, M,         bw2, bh2, sc),
         ]
 
-    for (x, y, bw, bh) in layouts:
-        draw_blank(c, x, y, bw, bh, cfg)
+    for (x, y, bw, bh, sc) in layouts:
+        draw_blank(c, x, y, bw, bh, dict(cfg, scale=sc))
 
     # Линии разреза
-    c.setStrokeColor(C_GRAY)
-    c.setLineWidth(0.3)
-    c.setDash(3, 5)
+    c.setStrokeColor(C_GRAY); c.setLineWidth(0.3); c.setDash(3, 5)
     if per_page == 2:
-        mid_y = M + (ph - 2*M - 5*mm) / 2 + 5*mm / 2
-        c.line(2*mm, mid_y, pw - 2*mm, mid_y)
+        my = M + (ph-2*M-GAP)/2 + GAP/2
+        c.line(2*mm, my, pw-2*mm, my)
     elif per_page == 4:
-        c.line(pw/2, 2*mm, pw/2, ph - 2*mm)
-        c.line(2*mm, ph/2, pw - 2*mm, ph/2)
+        c.line(pw/2, 2*mm, pw/2, ph-2*mm)
+        c.line(2*mm, ph/2, pw-2*mm, ph/2)
     c.setDash()
 
-    c.showPage()
-    c.save()
+    c.showPage(); c.save()
     return buf.getvalue()
 
 
@@ -283,7 +244,7 @@ def _resp(status, body):
 
 def handler(event: dict, context) -> dict:
     """
-    Компактный PDF-бланк: А/Б/В/Г + код ученика 5×10.
+    PDF-бланк с адаптивным масштабом: 1/2/4 на A4, всё умещается.
     POST { workId, workTitle, questionsCount, optionsCount(2-6), perPage(1|2|4),
            subject?, classLabel?, date? }
     -> { pdf_b64, filename }
@@ -303,21 +264,15 @@ def handler(event: dict, context) -> dict:
     n_q      = max(1, min(int(body.get("questionsCount", 20)), 80))
     n_opts   = max(2, min(int(body.get("optionsCount",   4)),  6))
     per_page = int(body.get("perPage", 1))
-    if per_page not in (1, 2, 4):
-        per_page = 1
+    if per_page not in (1, 2, 4): per_page = 1
     subject  = str(body.get("subject",    ""))[:40]
     cls_lbl  = str(body.get("classLabel", ""))[:10]
     date_s   = str(body.get("date",       ""))[:12]
 
     opts = RU_OPTS[:n_opts]
     cfg  = {
-        "n_q":         n_q,
-        "opts":        opts,
-        "work_id":     work_id,
-        "title":       title,
-        "subject":     subject,
-        "class_label": cls_lbl,
-        "date":        date_s,
+        "n_q": n_q, "opts": opts, "work_id": work_id, "title": title,
+        "subject": subject, "class_label": cls_lbl, "date": date_s,
     }
 
     pdf_bytes = render_pdf(cfg, per_page)

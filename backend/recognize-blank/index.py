@@ -85,13 +85,9 @@ def _get_gigachat_token() -> str:
 
 def _prepare_image(image_b64: str) -> str:
     """
-    Возвращает изображение как есть (оригинал без потерь).
-    Только если base64 слишком большой (>13MB) — масштабируем с качеством 97%.
+    Всегда сжимаем до 1400px по длинной стороне и JPEG 82%.
+    Это резко сокращает время передачи в GigaChat и уменьшает таймауты.
     """
-    if len(image_b64) <= MAX_B64_BYTES:
-        return image_b64  # оригинал — без пережатия
-
-    # Только если файл действительно огромный
     img_bytes = base64.b64decode(image_b64)
     arr = np.frombuffer(img_bytes, dtype=np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
@@ -99,11 +95,19 @@ def _prepare_image(image_b64: str) -> str:
         return image_b64
 
     h, w = img.shape[:2]
-    scale = 4000 / max(h, w)
+    MAX_SIDE = 1400
+    scale = MAX_SIDE / max(h, w)
     if scale < 1.0:
-        img = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_LANCZOS4)
+        img = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
 
-    success, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 97])
+    # Повышаем контрастность для лучшего распознавания кружков
+    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    l = clahe.apply(l)
+    img = cv2.cvtColor(cv2.merge([l, a, b]), cv2.COLOR_LAB2BGR)
+
+    success, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 82])
     if not success:
         return image_b64
     return base64.b64encode(buf.tobytes()).decode()
@@ -162,9 +166,14 @@ def _gigachat_vision(image_b64: str, questions_count: int) -> dict:
             "Connection": "close",
         },
     )
-    # Таймаут 24 сек — функция живёт 30 сек, успеем вернуть ошибку
-    with urllib.request.urlopen(req, timeout=24, context=_ssl_ctx()) as r:
-        body = json.loads(r.read().decode())
+    try:
+        with urllib.request.urlopen(req, timeout=25, context=_ssl_ctx()) as r:
+            body = json.loads(r.read().decode())
+    except Exception as e:
+        raise RuntimeError(
+            "Сервис распознавания временно недоступен. "
+            "Попробуйте ещё раз через 10-15 секунд."
+        ) from e
 
     choices = body.get("choices") or []
     if not choices:
@@ -283,7 +292,12 @@ def handler(event: dict, context) -> dict:
     # Распознавание через GigaChat Vision
     try:
         result = _gigachat_vision(ready_b64, questions)
+    except RuntimeError as e:
+        return _resp(422, {"error": str(e)})
     except Exception as e:
+        err_str = str(e).lower()
+        if "timed out" in err_str or "timeout" in err_str:
+            return _resp(422, {"error": "Сервис распознавания не ответил вовремя. Попробуйте ещё раз через несколько секунд."})
         return _resp(422, {"error": f"Ошибка распознавания: {e}"})
 
     code = result["code"]

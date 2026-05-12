@@ -126,9 +126,18 @@ export function ScanUploadZone({ file, previewUrl, step, error, result, dragOver
                   )}
 
                   {step === "error" && (
-                    <div className="p-3 border border-destructive/30 rounded-sm bg-destructive/5">
-                      <p className="text-sm text-destructive font-medium">{error}</p>
-                      <button onClick={onRetry} className="mt-2 text-xs text-muted-foreground underline">Попробовать снова</button>
+                    <div className="p-3 border border-destructive/30 rounded-sm bg-destructive/5 space-y-3">
+                      <div className="flex items-start gap-2">
+                        <Icon name="AlertCircle" size={16} className="text-destructive flex-shrink-0 mt-0.5" />
+                        <p className="text-sm text-destructive font-medium">{error}</p>
+                      </div>
+                      <button
+                        onClick={onRetry}
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground text-sm font-semibold rounded-sm hover:opacity-90 transition-opacity"
+                      >
+                        <Icon name="RefreshCw" size={14} />
+                        Повторить распознавание
+                      </button>
                     </div>
                   )}
 

@@ -14,14 +14,23 @@ export async function recognizeBlank(
 ): Promise<RecognitionResult> {
   const total = (part1Count || 0) + (part2Count || 0) || 20;
 
-  onProgress?.("Загружаю изображение на сервер...", 10);
+  onProgress?.("Подготавливаю изображение...", 10);
 
-  // Имитация прогресса пока ждём ответа сервера
+  // Имитация прогресса пока ждём ответа сервера (GigaChat до 25с)
   let p = 10;
+  const messages = [
+    "Отправляю бланк на сервер...",
+    "Анализирую кружки А/Б/В/Г...",
+    "Распознаю ответы...",
+    "Читаю код ученика...",
+    "Почти готово, ещё немного...",
+  ];
+  let msgIdx = 0;
   const tick = setInterval(() => {
-    p = Math.min(85, p + 5);
-    onProgress?.("Распознаю кружки A/B/C/D...", p);
-  }, 350);
+    p = Math.min(88, p + 3);
+    if (p % 15 === 0 && msgIdx < messages.length - 1) msgIdx++;
+    onProgress?.(messages[msgIdx], p);
+  }, 600);
 
   let resp;
   try {

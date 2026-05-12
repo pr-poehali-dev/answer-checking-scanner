@@ -1,12 +1,12 @@
 """
 Генерация PDF-бланка ответов.
-Сетка: номер вопроса × варианты А / Б / В / Г (русские буквы) с кружками.
-Шрифт DejaVu — гарантированная кириллица.
+Сетка: номер × варианты А/Б/В/Г (кириллица, кружки).
+Код ученика: 5 разрядов × цифры 0-9 (кружки, как в ЕГЭ-бланке).
 POST / — { workId, workTitle, questionsCount, optionsCount(2-6), perPage(1|2|4),
            subject?, classLabel?, date? }
-Возвращает { pdf_b64, filename }
+-> { pdf_b64, filename }
 """
-import json, base64, io, math
+import json, base64, io, math, os, urllib.request
 
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
@@ -21,47 +21,60 @@ CORS = {
     "Access-Control-Allow-Headers": "Content-Type, X-Authorization",
 }
 
-# ── Шрифты ──────────────────────────────────────────────────────────────────
-_fonts_registered = False
+# ── Шрифт с кириллицей ──────────────────────────────────────────────────────
+_FONT_PATHS = [
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+    "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+    "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
+]
 
-def _register():
-    global _fonts_registered, REG, BOLD
-    if _fonts_registered:
-        return
-    for name, path in [
-        ("DJ",  "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
-        ("DJB", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
-    ]:
+def _find_font(bold=False):
+    keys = ["Bold", "bold", "-Bold", "-bold"] if bold else []
+    for p in _FONT_PATHS:
+        if not os.path.exists(p):
+            continue
+        b = bold and any(k in p for k in keys)
+        if bold == b or not bold:
+            return p
+    return None
+
+def _register_fonts():
+    reg_path  = _find_font(False)
+    bold_path = _find_font(True)
+    if reg_path:
         try:
-            pdfmetrics.registerFont(TTFont(name, path))
+            pdfmetrics.registerFont(TTFont("CyrReg",  reg_path))
         except Exception:
-            pass
-    if "DJ" in pdfmetrics.getRegisteredFontNames():
-        REG, BOLD = "DJ", "DJB"
-    else:
-        REG, BOLD = "Helvetica", "Helvetica-Bold"
-    _fonts_registered = True
+            reg_path = None
+    if bold_path:
+        try:
+            pdfmetrics.registerFont(TTFont("CyrBold", bold_path))
+        except Exception:
+            bold_path = None
+    if reg_path:
+        return "CyrReg", "CyrBold" if bold_path else "CyrReg"
+    return "Helvetica", "Helvetica-Bold"
 
-_register()
-REG  = "DJ"  if "DJ"  in pdfmetrics.getRegisteredFontNames() else "Helvetica"
-BOLD = "DJB" if "DJB" in pdfmetrics.getRegisteredFontNames() else "Helvetica-Bold"
+REG, BOLD = _register_fonts()
 
 # ── Цвета ────────────────────────────────────────────────────────────────────
-BLACK  = black
-WHITE  = white
-DARK   = HexColor("#1a1a2e")   # тёмно-синий — заголовок
-ACCENT = HexColor("#1e3a5f")   # синий — рамки
-LIGHT  = HexColor("#f0f4f8")   # светло-серый — чередование строк
-GRAY   = HexColor("#8898aa")   # серый — подписи
-LINE   = HexColor("#c8d6e5")   # линии
+DARK   = HexColor("#1a1a2e")
+ACCENT = HexColor("#1e3a5f")
+LIGHT  = HexColor("#f0f4f8")
+GRAY   = HexColor("#8898aa")
+LINE   = HexColor("#c8d6e5")
 
-# Русские метки вариантов ответа
-RU_OPTS = ["А", "Б", "В", "Г", "Д", "Е"]
+RU_OPTS   = ["А", "Б", "В", "Г", "Д", "Е"]
+CODE_DIGS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
 
 
-def _txt(c, x, y, text, font, size, color=None, align="left"):
+# ── Утилиты ──────────────────────────────────────────────────────────────────
+def _txt(c, x, y, text, font, size, color=DARK, align="left"):
     c.setFont(font, size)
-    c.setFillColor(color or BLACK)
+    c.setFillColor(color)
     if align == "center":
         c.drawCentredString(x, y, text)
     elif align == "right":
@@ -70,23 +83,23 @@ def _txt(c, x, y, text, font, size, color=None, align="left"):
         c.drawString(x, y, text)
 
 
-def _hline(c, x1, y, x2, lw=0.4, color=None):
-    c.setStrokeColor(color or LINE)
+def _hline(c, x1, y, x2, lw=0.4, color=LINE):
+    c.setStrokeColor(color)
     c.setLineWidth(lw)
     c.line(x1, y, x2, y)
 
 
-def _circle(c, cx, cy, r):
-    """Пустой кружок для закрашивания."""
-    c.setStrokeColor(ACCENT)
-    c.setFillColor(WHITE)
-    c.setLineWidth(0.8)
+def _circle(c, cx, cy, r, stroke_color=ACCENT, fill_color=white, lw=0.8):
+    c.setStrokeColor(stroke_color)
+    c.setFillColor(fill_color)
+    c.setLineWidth(lw)
     c.circle(cx, cy, r, stroke=1, fill=1)
 
 
+# ── Основной бланк ───────────────────────────────────────────────────────────
 def draw_blank(c, x0, y0, bw, bh, cfg):
     n_q     = cfg["n_q"]
-    opts    = cfg["opts"]          # ["А","Б","В","Г"]
+    opts    = cfg["opts"]
     n_opts  = len(opts)
     title   = cfg["title"]
     work_id = cfg["work_id"]
@@ -94,24 +107,24 @@ def draw_blank(c, x0, y0, bw, bh, cfg):
     cls_lbl = cfg.get("class_label", "")
     date_s  = cfg.get("date", "")
 
-    P = 6 * mm   # горизонтальные отступы
+    P = 6 * mm
 
-    # ── Внешняя рамка ────────────────────────────────────────────────────
+    # ── Внешняя рамка ────────────────────────────────────────────────────────
     c.setStrokeColor(ACCENT)
     c.setLineWidth(1.0)
     c.rect(x0, y0, bw, bh, stroke=1, fill=0)
 
-    cur_y = y0 + bh   # идём сверху вниз
+    cur_y = y0 + bh
 
-    # ── Шапка ────────────────────────────────────────────────────────────
+    # ── Шапка ────────────────────────────────────────────────────────────────
     HDR = 9 * mm
     c.setFillColor(DARK)
     c.rect(x0, cur_y - HDR, bw, HDR, stroke=0, fill=1)
-    _txt(c, x0 + bw/2, cur_y - HDR + 3*mm, "БЛАНК ОТВЕТОВ", BOLD, 10, WHITE, "center")
-    _txt(c, x0 + bw - P, cur_y - HDR + 3*mm, f"№ {work_id}", REG, 7.5, GRAY, "right")
+    _txt(c, x0 + bw/2, cur_y - HDR + 3*mm, "БЛАНК ОТВЕТОВ", BOLD, 10, white, "center")
+    _txt(c, x0 + bw - P, cur_y - HDR + 3*mm, f"№ {work_id}", REG, 7, GRAY, "right")
     cur_y -= HDR
 
-    # ── Поля ученика ─────────────────────────────────────────────────────
+    # ── Поля ученика ─────────────────────────────────────────────────────────
     META = 16 * mm
     c.setFillColor(LIGHT)
     c.rect(x0, cur_y - META, bw, META, stroke=0, fill=1)
@@ -119,7 +132,6 @@ def draw_blank(c, x0, y0, bw, bh, cfg):
     fy1 = cur_y - 5.5 * mm
     fy2 = cur_y - 11.5 * mm
 
-    # Строка 1: ФИО  ────────────────────   Класс ───────
     _txt(c, x0 + P, fy1, "ФИО:", BOLD, 7.5, DARK)
     c.setStrokeColor(LINE); c.setLineWidth(0.6)
     c.line(x0 + P + 14*mm, fy1 - 0.5, x0 + bw*0.60, fy1 - 0.5)
@@ -128,7 +140,6 @@ def draw_blank(c, x0, y0, bw, bh, cfg):
     if cls_lbl:
         _txt(c, x0 + bw*0.62 + 16*mm, fy1, cls_lbl, REG, 7.5, DARK)
 
-    # Строка 2: Предмет ─────────────  Дата ──────────
     _txt(c, x0 + P, fy2, "Предмет:", BOLD, 7.5, DARK)
     c.line(x0 + P + 21*mm, fy2 - 0.5, x0 + bw*0.55, fy2 - 0.5)
     _txt(c, x0 + bw*0.57, fy2, "Дата:", BOLD, 7.5, DARK)
@@ -140,89 +151,87 @@ def draw_blank(c, x0, y0, bw, bh, cfg):
 
     cur_y -= META
 
-    # ── Горизонтальная черта ─────────────────────────────────────────────
     _hline(c, x0, cur_y, x0 + bw, lw=0.6, color=ACCENT)
     cur_y -= 1 * mm
 
-    # ── Расчёт сетки ─────────────────────────────────────────────────────
-    # Количество колонок: подбираем чтобы строки умещались по высоте
+    # ── Сетка вопросов ───────────────────────────────────────────────────────
     n_cols = 1 if n_q <= 15 else (2 if n_q <= 40 else 3)
-
-    # Ширина одной колонки
-    col_w = (bw - 2*P) / n_cols
-
-    # Ширина ячейки варианта: номер (8мм) + n_opts кружков
-    num_w  = 8 * mm
-    avail  = col_w - num_w - 2*mm          # место под кружки
-    cell_w = min(avail / n_opts, 8 * mm)   # ширина на 1 вариант
-    r      = min(cell_w * 0.35, 3.2 * mm) # радиус кружка
-
+    col_w  = (bw - 2*P) / n_cols
+    num_w  = 9 * mm
+    avail  = col_w - num_w - 2*mm
+    cell_w = min(avail / n_opts, 9 * mm)
+    r      = min(cell_w * 0.36, 3.5 * mm)
+    font_s = max(5.5, r * 1.55)
     row_h  = max(r * 2 + 2.5*mm, 6.5 * mm)
-
     n_rows = math.ceil(n_q / n_cols)
     grid_h = n_rows * row_h + 3*mm
 
-    # ── Шапка колонок (А Б В Г) ──────────────────────────────────────────
-    hdr_h = 5 * mm
+    # Заголовки вариантов
+    hdr_h = 5.5 * mm
     for ci in range(n_cols):
         cx0 = x0 + P + ci * col_w
         for oi, lbl in enumerate(opts):
             ox = cx0 + num_w + oi * cell_w + cell_w / 2
-            _txt(c, ox, cur_y - hdr_h + 1.5*mm, lbl, BOLD, 7, ACCENT, "center")
+            _txt(c, ox, cur_y - hdr_h + 1.5*mm, lbl, BOLD, 7.5, ACCENT, "center")
     cur_y -= hdr_h
-
-    # Тонкая черта под шапкой
     _hline(c, x0 + P, cur_y, x0 + bw - P, lw=0.4)
-    cur_y -= 0.5*mm
+    cur_y -= 0.5 * mm
 
-    # ── Строки вопросов ───────────────────────────────────────────────────
+    # Строки вопросов
     for qi in range(n_q):
-        ci = qi % n_cols          # колонка
-        ri = qi // n_cols         # строка внутри колонки
-
+        ci = qi % n_cols
+        ri = qi // n_cols
         rx = x0 + P + ci * col_w
         ry = cur_y - ri * row_h - row_h / 2
 
-        # Чередование строк
         if ri % 2 == 0:
             c.setFillColor(LIGHT)
             c.rect(rx, ry - row_h/2, col_w, row_h, stroke=0, fill=1)
 
-        # Вертикальный разделитель колонок (кроме последней)
-        if ci < n_cols - 1:
-            c.setStrokeColor(LINE)
-            c.setLineWidth(0.3)
-            c.line(rx + col_w, ry - row_h/2, rx + col_w, ry + row_h/2)
+        _txt(c, rx + num_w - 2*mm, ry - 2.5, f"{qi+1}.", BOLD, 7.5, DARK, "right")
 
-        # Номер вопроса
-        _txt(c, rx + num_w - 2*mm, ry - 2.2, f"{qi+1}.", BOLD, 7, DARK, "right")
-
-        # Кружки
         for oi in range(n_opts):
             ox = rx + num_w + oi * cell_w + cell_w / 2
             _circle(c, ox, ry, r)
-            # Буква внутри кружка
-            _txt(c, ox, ry - r*0.42, opts[oi], BOLD, max(5, r * 1.5), GRAY, "center")
+            _txt(c, ox, ry - r * 0.4, opts[oi], BOLD, font_s, GRAY, "center")
 
     cur_y -= grid_h
 
-    # ── Разделитель ───────────────────────────────────────────────────────
     _hline(c, x0, cur_y, x0 + bw, lw=0.6, color=ACCENT)
-    cur_y -= 4 * mm
+    cur_y -= 3 * mm
 
-    # ── Код ученика ───────────────────────────────────────────────────────
-    _txt(c, x0 + P, cur_y, "Код ученика:", BOLD, 7, DARK)
-    code_x = x0 + P + 28*mm
-    csz    = 6.5 * mm
-    c.setStrokeColor(ACCENT)
-    c.setLineWidth(0.8)
-    for i in range(5):
-        cx = code_x + i * (csz + 1.5*mm)
-        c.rect(cx, cur_y - 1.5*mm, csz, csz, stroke=1, fill=0)
+    # ── Код ученика — сетка 5 × 10 кружков ──────────────────────────────────
+    # 5 разрядов, в каждом 10 кружков (цифры 0-9)
+    CODE_COLS = 5
+    CODE_ROWS = 10   # цифры 0-9
+    cr = 2.5 * mm   # радиус кружка кода
+    c_gap_x = cr * 2 + 1.2 * mm  # шаг по горизонтали
+    c_gap_y = cr * 2 + 0.8 * mm  # шаг по вертикали
+    code_block_w = CODE_COLS * c_gap_x
+    code_block_h = CODE_ROWS * c_gap_y + 5 * mm  # +5 мм под заголовок
 
-    cur_y -= csz + 3*mm
+    _txt(c, x0 + P, cur_y, "КОД УЧЕНИКА", BOLD, 7.5, DARK)
+    _txt(c, x0 + P + code_block_w + 4*mm, cur_y, "(закрасьте одну цифру в каждом столбце)", REG, 6, GRAY)
+    cur_y -= 4.5 * mm
 
-    # ── Подпись ───────────────────────────────────────────────────────────
+    # Заголовок столбцов — номер разряда (1-5)
+    for col in range(CODE_COLS):
+        cx = x0 + P + col * c_gap_x + cr
+        _txt(c, cx, cur_y, str(col + 1), BOLD, 6.5, ACCENT, "center")
+    cur_y -= 3.5 * mm
+
+    # Кружки 0-9 по каждому столбцу
+    for row in range(CODE_ROWS):
+        dig = str(row)   # "0".."9"
+        for col in range(CODE_COLS):
+            cx = x0 + P + col * c_gap_x + cr
+            cy = cur_y - row * c_gap_y - cr
+            _circle(c, cx, cy, cr)
+            _txt(c, cx, cy - cr * 0.42, dig, BOLD, 6, GRAY, "center")
+
+    cur_y -= CODE_ROWS * c_gap_y + 3 * mm
+
+    # ── Подпись ──────────────────────────────────────────────────────────────
     _hline(c, x0, cur_y, x0 + bw, lw=0.4, color=LINE)
     cur_y -= 3.5 * mm
     info = f"Вопросов: {n_q}   |   Вариантов: {n_opts} ({', '.join(opts)})   |   Писать чёрной ручкой"
@@ -230,6 +239,7 @@ def draw_blank(c, x0, y0, bw, bh, cfg):
     _txt(c, x0 + bw - P, cur_y, title, REG, 6, GRAY, "right")
 
 
+# ── Рендер PDF ───────────────────────────────────────────────────────────────
 def render_pdf(cfg: dict, per_page: int) -> bytes:
     buf = io.BytesIO()
     pw, ph = A4
@@ -257,7 +267,6 @@ def render_pdf(cfg: dict, per_page: int) -> bytes:
     for (x, y, bw, bh) in layouts:
         draw_blank(c, x, y, bw, bh, cfg)
 
-    # Линии разреза
     c.setStrokeColor(GRAY)
     c.setLineWidth(0.35)
     c.setDash(4, 5)
@@ -284,7 +293,7 @@ def _resp(status, body):
 
 def handler(event: dict, context) -> dict:
     """
-    PDF-бланк ответов: сетка вопрос × варианты А/Б/В/Г (кириллица).
+    PDF-бланк: кружки А/Б/В/Г + код ученика 5×10 кружков (цифры 0-9).
     POST { workId, workTitle, questionsCount, optionsCount(2-6), perPage(1|2|4),
            subject?, classLabel?, date? }
     -> { pdf_b64, filename, questionsCount, optionsCount, options }
@@ -310,7 +319,7 @@ def handler(event: dict, context) -> dict:
     cls_lbl  = str(body.get("classLabel", ""))[:10]
     date_s   = str(body.get("date",       ""))[:12]
 
-    opts = RU_OPTS[:n_opts]   # ["А","Б","В","Г",...]
+    opts = RU_OPTS[:n_opts]
 
     cfg = {
         "n_q":         n_q,
@@ -324,8 +333,8 @@ def handler(event: dict, context) -> dict:
 
     pdf_bytes = render_pdf(cfg, per_page)
     return _resp(200, {
-        "pdf_b64":       base64.b64encode(pdf_bytes).decode(),
-        "filename":      f"blank_{work_id}_{n_q}q.pdf",
+        "pdf_b64":        base64.b64encode(pdf_bytes).decode(),
+        "filename":       f"blank_{work_id}_{n_q}q.pdf",
         "questionsCount": n_q,
         "optionsCount":   n_opts,
         "options":        opts,

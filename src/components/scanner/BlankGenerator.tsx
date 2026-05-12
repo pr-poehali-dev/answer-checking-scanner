@@ -21,21 +21,34 @@ function BlankPreview({ config }: { config: BlankConfig }) {
   const { questionsCount, optionsCount } = config;
   const opts = OPTION_LABELS.slice(0, optionsCount);
 
-  const nCols  = questionsCount <= 15 ? 1 : questionsCount <= 40 ? 2 : 3;
-  const nRows  = Math.ceil(questionsCount / nCols);
+  const nCols   = questionsCount <= 15 ? 1 : questionsCount <= 40 ? 2 : 3;
+  const nRows   = Math.ceil(questionsCount / nCols);
 
-  const PAD    = 10;
-  const HDR_H  = 36;
-  const META_H = 46;
-  const HDR_OPT = 18;  // высота строки с метками А Б В Г
-  const ROW_H  = 22;
-  const FOOT_H = 38;
-  const NUM_W  = 22;
-  const CELL_W = Math.min(28, Math.floor((220 - NUM_W) / optionsCount));
-  const COL_W  = NUM_W + CELL_W * optionsCount + 6;
-  const svgW   = PAD * 2 + COL_W * nCols;
-  const svgH   = HDR_H + META_H + HDR_OPT + nRows * ROW_H + FOOT_H;
-  const R      = Math.min(CELL_W * 0.32, 7);
+  const PAD     = 10;
+  const HDR_H   = 36;
+  const META_H  = 46;
+  const HDR_OPT = 18;
+  const ROW_H   = 22;
+  const NUM_W   = 22;
+  const CELL_W  = Math.min(28, Math.floor((220 - NUM_W) / optionsCount));
+  const COL_W   = NUM_W + CELL_W * optionsCount + 6;
+  const R       = Math.min(CELL_W * 0.32, 7);
+
+  // Блок кода ученика — 5 столбцов × 10 цифр (0-9)
+  const CR      = 7;   // радиус кружка кода
+  const C_GAP_X = CR * 2 + 4;
+  const C_GAP_Y = CR * 2 + 2;
+  const CODE_COLS = 5;
+  const CODE_ROWS = 10;
+  const CODE_HDR_H = 24;  // «КОД УЧЕНИКА» + номера столбцов
+  const CODE_BLOCK_H = CODE_HDR_H + CODE_ROWS * C_GAP_Y + 8;
+
+  const FOOT_H  = 20;  // строка снизу с инфо
+  const svgW    = PAD * 2 + COL_W * nCols;
+  const svgH    = HDR_H + META_H + HDR_OPT + nRows * ROW_H + CODE_BLOCK_H + FOOT_H + 10;
+
+  const gridTop = HDR_H + META_H + HDR_OPT;
+  const codeTop = gridTop + nRows * ROW_H + 6;
 
   return (
     <svg
@@ -48,21 +61,19 @@ function BlankPreview({ config }: { config: BlankConfig }) {
 
       {/* Шапка */}
       <rect x={0} y={0} width={svgW} height={HDR_H} fill="#1a1a2e" />
-      <text x={svgW / 2} y={HDR_H * 0.58} textAnchor="middle" fill="white" fontSize={10} fontWeight="bold">
+      <text x={svgW / 2} y={HDR_H * 0.6} textAnchor="middle" fill="white" fontSize={10} fontWeight="bold">
         БЛАНК ОТВЕТОВ
       </text>
-      <text x={svgW - PAD} y={HDR_H * 0.58} textAnchor="end" fill="#8898aa" fontSize={7}>
+      <text x={svgW - PAD} y={HDR_H * 0.6} textAnchor="end" fill="#8898aa" fontSize={7}>
         № {config.workId}
       </text>
 
       {/* Поля ученика */}
       <rect x={0} y={HDR_H} width={svgW} height={META_H} fill="#f0f4f8" />
-      {/* Строка 1: ФИО + Класс */}
       <text x={PAD} y={HDR_H + 16} fill="#1a1a2e" fontSize={7.5} fontWeight="bold">ФИО:</text>
       <line x1={PAD + 26} y1={HDR_H + 16} x2={svgW * 0.62} y2={HDR_H + 16} stroke="#c8d6e5" strokeWidth={0.7} />
       <text x={svgW * 0.64} y={HDR_H + 16} fill="#1a1a2e" fontSize={7.5} fontWeight="bold">Класс:</text>
       <line x1={svgW * 0.64 + 30} y1={HDR_H + 16} x2={svgW - PAD} y2={HDR_H + 16} stroke="#c8d6e5" strokeWidth={0.7} />
-      {/* Строка 2: Предмет + Дата */}
       <text x={PAD} y={HDR_H + 35} fill="#1a1a2e" fontSize={7.5} fontWeight="bold">Предмет:</text>
       <line x1={PAD + 46} y1={HDR_H + 35} x2={svgW * 0.52} y2={HDR_H + 35} stroke="#c8d6e5" strokeWidth={0.7} />
       <text x={svgW * 0.54} y={HDR_H + 35} fill="#1a1a2e" fontSize={7.5} fontWeight="bold">Дата:</text>
@@ -71,45 +82,33 @@ function BlankPreview({ config }: { config: BlankConfig }) {
       {/* Черта под полями */}
       <line x1={0} y1={HDR_H + META_H} x2={svgW} y2={HDR_H + META_H} stroke="#1e3a5f" strokeWidth={0.6} />
 
-      {/* Заголовки вариантов (А Б В Г) */}
+      {/* Заголовки вариантов А Б В Г */}
       {Array.from({ length: nCols }).map((_, ci) => {
         const colX = PAD + ci * COL_W;
         return opts.map((lbl, oi) => (
-          <text
-            key={`hdr-${ci}-${oi}`}
+          <text key={`hdr-${ci}-${oi}`}
             x={colX + NUM_W + oi * CELL_W + CELL_W / 2}
             y={HDR_H + META_H + HDR_OPT - 4}
-            textAnchor="middle"
-            fill="#1e3a5f"
-            fontSize={8}
-            fontWeight="bold"
+            textAnchor="middle" fill="#1e3a5f" fontSize={8} fontWeight="bold"
           >{lbl}</text>
         ));
       })}
-      <line x1={0} y1={HDR_H + META_H + HDR_OPT} x2={svgW} y2={HDR_H + META_H + HDR_OPT} stroke="#c8d6e5" strokeWidth={0.5} />
+      <line x1={0} y1={gridTop} x2={svgW} y2={gridTop} stroke="#c8d6e5" strokeWidth={0.5} />
 
       {/* Строки вопросов */}
       {Array.from({ length: questionsCount }).map((_, qi) => {
         const ci   = qi % nCols;
         const ri   = Math.floor(qi / nCols);
         const rx   = PAD + ci * COL_W;
-        const gridTop = HDR_H + META_H + HDR_OPT;
         const ry   = gridTop + ri * ROW_H;
         const midY = ry + ROW_H / 2;
-
         return (
           <g key={qi}>
-            {/* Чередование */}
-            {ri % 2 === 0 && (
-              <rect x={rx} y={ry} width={COL_W} height={ROW_H} fill="#f0f4f8" />
-            )}
-            {/* Разделитель строки */}
+            {ri % 2 === 0 && <rect x={rx} y={ry} width={COL_W} height={ROW_H} fill="#f0f4f8" />}
             <line x1={rx} y1={ry + ROW_H} x2={rx + COL_W} y2={ry + ROW_H} stroke="#c8d6e5" strokeWidth={0.3} />
-            {/* Номер */}
             <text x={rx + NUM_W - 3} y={midY + 3} textAnchor="end" fill="#1a1a2e" fontSize={7.5} fontWeight="bold">
               {qi + 1}.
             </text>
-            {/* Кружки */}
             {opts.map((lbl, oi) => {
               const cx = rx + NUM_W + oi * CELL_W + CELL_W / 2;
               return (
@@ -125,19 +124,47 @@ function BlankPreview({ config }: { config: BlankConfig }) {
         );
       })}
 
-      {/* Нижний блок */}
+      {/* Разделитель перед кодом */}
+      <line x1={0} y1={codeTop - 2} x2={svgW} y2={codeTop - 2} stroke="#1e3a5f" strokeWidth={0.6} />
+
+      {/* Блок КОД УЧЕНИКА — 5 × 10 кружков */}
+      <text x={PAD} y={codeTop + 12} fill="#1a1a2e" fontSize={7.5} fontWeight="bold">КОД УЧЕНИКА</text>
+      <text x={PAD + CODE_COLS * C_GAP_X + 8} y={codeTop + 12} fill="#8898aa" fontSize={6}>
+        (закрасьте одну цифру в каждом столбце)
+      </text>
+
+      {/* Номера столбцов */}
+      {Array.from({ length: CODE_COLS }).map((_, col) => (
+        <text key={`cn-${col}`}
+          x={PAD + col * C_GAP_X + CR}
+          y={codeTop + CODE_HDR_H - 2}
+          textAnchor="middle" fill="#1e3a5f" fontSize={7} fontWeight="bold"
+        >{col + 1}</text>
+      ))}
+
+      {/* Кружки 0-9 */}
+      {Array.from({ length: CODE_ROWS }).map((_, row) =>
+        Array.from({ length: CODE_COLS }).map((_, col) => {
+          const cx = PAD + col * C_GAP_X + CR;
+          const cy = codeTop + CODE_HDR_H + row * C_GAP_Y + CR;
+          return (
+            <g key={`c-${col}-${row}`}>
+              <circle cx={cx} cy={cy} r={CR} fill="white" stroke="#1e3a5f" strokeWidth={0.8} />
+              <text x={cx} y={cy + CR * 0.42} textAnchor="middle" fill="#8898aa" fontSize={CR * 1.1} fontWeight="bold">
+                {row}
+              </text>
+            </g>
+          );
+        })
+      )}
+
+      {/* Нижняя строка */}
       {(() => {
-        const footY = HDR_H + META_H + HDR_OPT + nRows * ROW_H;
+        const footY = codeTop + CODE_BLOCK_H;
         return (
           <>
-            <line x1={0} y1={footY} x2={svgW} y2={footY} stroke="#1e3a5f" strokeWidth={0.6} />
-            <rect x={0} y={footY} width={svgW} height={FOOT_H} fill="#f0f4f8" />
-            <text x={PAD} y={footY + 14} fill="#1a1a2e" fontSize={7} fontWeight="bold">Код ученика:</text>
-            {[0,1,2,3,4].map(i => (
-              <rect key={i} x={PAD + 62 + i * 18} y={footY + 4} width={15} height={15}
-                fill="white" stroke="#1e3a5f" strokeWidth={0.8} rx={2} />
-            ))}
-            <text x={PAD} y={footY + 32} fill="#8898aa" fontSize={6}>
+            <line x1={0} y1={footY} x2={svgW} y2={footY} stroke="#c8d6e5" strokeWidth={0.4} />
+            <text x={PAD} y={footY + 13} fill="#8898aa" fontSize={6}>
               Вопросов: {questionsCount}  |  Варианты: {opts.join(", ")}  |  Писать чёрной ручкой
             </text>
           </>

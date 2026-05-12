@@ -1,6 +1,7 @@
 """
-Генерация PDF-бланка ответов. Адаптивный масштаб под perPage.
-Варианты: А/Б/В/Г (кириллица). Код ученика: 5 строк × цифры 0-9.
+Генерация PDF-бланка ответов.
+Ответы: квадраты с буквой (ставить крестик ✕, закрасить если исправляете).
+Код ученика: 5 строк × кружки 0-9 (закрашивать).
 POST / — { workId, workTitle, questionsCount, optionsCount(2-6), perPage(1|2|4),
            subject?, classLabel?, date? }
 -> { pdf_b64, filename }
@@ -62,8 +63,14 @@ def VL(c, x, y1, y2, lw=0.3, color=C_LINE):
     c.setStrokeColor(color); c.setLineWidth(lw); c.line(x, y1, x, y2)
 
 def CR(c, cx, cy, r, stroke=C_BLUE, fill=white, lw=0.5):
+    """Кружок (для кода ученика)."""
     c.setStrokeColor(stroke); c.setFillColor(fill)
     c.setLineWidth(lw); c.circle(cx, cy, r, stroke=1, fill=1)
+
+def SQ(c, cx, cy, side, stroke=C_BLUE, fill=white, lw=0.6):
+    """Квадрат с закруглёнными углами (для ответов)."""
+    c.setStrokeColor(stroke); c.setFillColor(fill); c.setLineWidth(lw)
+    c.roundRect(cx - side/2, cy - side/2, side, side, side*0.15, stroke=1, fill=1)
 
 
 def draw_blank(c, x0, y0, bw, bh, cfg):
@@ -81,12 +88,12 @@ def draw_blank(c, x0, y0, bw, bh, cfg):
 
     P = S(4 * mm)
 
-    # Рамка
+    # ── Рамка ────────────────────────────────────────────────────────────────
     c.setStrokeColor(C_BLUE); c.setLineWidth(0.7)
     c.rect(x0, y0, bw, bh, stroke=1, fill=0)
     cur_y = y0 + bh
 
-    # Шапка
+    # ── Шапка ────────────────────────────────────────────────────────────────
     HDR = S(6.5 * mm)
     c.setFillColor(C_DARK)
     c.rect(x0, cur_y - HDR, bw, HDR, stroke=0, fill=1)
@@ -94,7 +101,7 @@ def draw_blank(c, x0, y0, bw, bh, cfg):
     T(c, x0+bw-P, cur_y-HDR+S(2*mm), f"№ {work_id}", REG, S(5.5), C_GRAY, "right")
     cur_y -= HDR
 
-    # Поля ученика
+    # ── Поля ученика ─────────────────────────────────────────────────────────
     META = S(10.5 * mm)
     c.setFillColor(C_LIGHT)
     c.rect(x0, cur_y-META, bw, META, stroke=0, fill=1)
@@ -117,16 +124,28 @@ def draw_blank(c, x0, y0, bw, bh, cfg):
 
     cur_y -= META
     HL(c, x0, cur_y, x0+bw, lw=0.5, color=C_BLUE)
+
+    # ── Инструкция ───────────────────────────────────────────────────────────
+    INST = S(5.5 * mm)
+    c.setFillColor(HexColor("#fffbeb"))
+    c.rect(x0, cur_y - INST, bw, INST, stroke=0, fill=1)
+    T(c, x0+P, cur_y - S(2*mm),
+      "Инструкция: поставьте крестик  ✕  в нужном квадрате.  "
+      "Если исправляете — закрасьте неверный квадрат полностью и поставьте ✕ в правильном.",
+      REG, S(4.8), C_DARK)
+    cur_y -= INST
+    HL(c, x0, cur_y, x0+bw, lw=0.5, color=C_BLUE)
     cur_y -= S(0.5*mm)
 
-    # Сетка вопросов
+    # ── Сетка вопросов: квадраты с буквой ────────────────────────────────────
     n_cols = 1 if n_q <= 15 else (2 if n_q <= 40 else 3)
     col_w  = (bw - 2*P) / n_cols
     num_w  = S(7.5*mm)
-    cell_w = min((col_w - num_w) / n_opts, S(8*mm))
-    r      = min(cell_w * 0.42, S(2.8*mm))
-    fs     = max(S(4), r * 1.5)
-    row_h  = r * 2 + S(1.4*mm)
+    # Размер квадрата: вписываем n_opts в ширину колонки
+    cell_w = min((col_w - num_w) / n_opts, S(8.5*mm))
+    sq     = min(cell_w * 0.78, S(5.5*mm))   # сторона квадрата
+    fs     = max(S(4), sq * 0.52)            # шрифт буквы
+    row_h  = sq + S(2.0*mm)
     n_rows = math.ceil(n_q / n_cols)
 
     # Заголовок А Б В Г
@@ -152,37 +171,43 @@ def draw_blank(c, x0, y0, bw, bh, cfg):
             VL(c, rx, ry-row_h/2, ry+row_h/2)
 
         T(c, rx+num_w-S(0.8*mm), ry-S(2), f"{qi+1}.", BOLD, S(6.5), C_DARK, "right")
+
         for oi in range(n_opts):
             ox = rx + num_w + oi*cell_w + cell_w/2
-            CR(c, ox, ry, r)
-            T(c, ox, ry-r*0.38, opts[oi], BOLD, fs, C_GRAY, "center")
+            SQ(c, ox, ry, sq)                           # квадрат
+            T(c, ox, ry-sq*0.32, opts[oi], BOLD, fs, C_GRAY, "center")  # буква
 
     cur_y -= n_rows * row_h + S(0.5*mm)
     HL(c, x0, cur_y, x0+bw, lw=0.5, color=C_BLUE)
     cur_y -= S(2*mm)
 
-    # Код ученика — компактно: заголовок 0-9 + 5 строк
-    cr2   = S(1.45*mm)
-    gap_x = cr2*2 + S(0.4*mm)
-    gap_y = cr2*2 + S(0.7*mm)
-    nw2   = S(4.5*mm)
+    # ── Код ученика: 5 строк × кружки 0-9 (закрашивать) ────────────────────
+    cr2   = S(1.5*mm)
+    gap_x = cr2*2 + S(0.5*mm)
+    gap_y = cr2*2 + S(0.8*mm)
+    nw2   = S(5*mm)
 
     T(c, x0+P, cur_y, "КОД УЧЕНИКА", BOLD, S(5.5), C_DARK)
+    T(c, x0+P+nw2+10*gap_x+S(1*mm), cur_y,
+      "(закрасьте нужную цифру в каждой строке)", REG, S(4.5), C_GRAY)
+
+    # Заголовок 0-9
     for di in range(10):
         T(c, x0+P+nw2+di*gap_x+cr2, cur_y, str(di), BOLD, S(4.5), C_BLUE, "center")
-    cur_y -= S(2.5*mm)
+    cur_y -= S(2.8*mm)
 
+    # 5 строк
     for row in range(5):
         ry = cur_y - row*gap_y - cr2
         T(c, x0+P+nw2-S(0.8*mm), ry-cr2*0.35, str(row+1), BOLD, S(4.5), C_GRAY, "right")
         for col in range(10):
             cx = x0+P+nw2+col*gap_x+cr2
-            CR(c, cx, ry, cr2, lw=0.5)
+            CR(c, cx, ry, cr2, lw=0.6)
             T(c, cx, ry-cr2*0.4, str(col), BOLD, S(4), C_GRAY, "center")
 
     cur_y -= 5*gap_y + S(1.5*mm)
 
-    # Подпись
+    # ── Подпись ──────────────────────────────────────────────────────────────
     HL(c, x0, cur_y, x0+bw, lw=0.3, color=C_LINE)
     cur_y -= S(3*mm)
     T(c, x0+P, cur_y,
@@ -209,7 +234,7 @@ def render_pdf(cfg: dict, per_page: int) -> bytes:
     else:
         bw2 = (pw - 2*M - GAP) / 2
         bh2 = (ph - 2*M - GAP) / 2
-        sc  = 0.78   # масштаб: контент ~113мм → ~88мм, бланк 141мм — умещается
+        sc  = 0.78
         layouts = [
             (M,         M+bh2+GAP, bw2, bh2, sc),
             (M+bw2+GAP, M+bh2+GAP, bw2, bh2, sc),
@@ -220,7 +245,6 @@ def render_pdf(cfg: dict, per_page: int) -> bytes:
     for (x, y, bw, bh, sc) in layouts:
         draw_blank(c, x, y, bw, bh, dict(cfg, scale=sc))
 
-    # Линии разреза
     c.setStrokeColor(C_GRAY); c.setLineWidth(0.3); c.setDash(3, 5)
     if per_page == 2:
         my = M + (ph-2*M-GAP)/2 + GAP/2
@@ -244,9 +268,8 @@ def _resp(status, body):
 
 def handler(event: dict, context) -> dict:
     """
-    PDF-бланк с адаптивным масштабом: 1/2/4 на A4, всё умещается.
-    POST { workId, workTitle, questionsCount, optionsCount(2-6), perPage(1|2|4),
-           subject?, classLabel?, date? }
+    PDF-бланк: квадраты для крестиков + кружки кода ученика.
+    POST { workId, workTitle, questionsCount, optionsCount(2-6), perPage(1|2|4) }
     -> { pdf_b64, filename }
     """
     if event.get("httpMethod") == "OPTIONS":

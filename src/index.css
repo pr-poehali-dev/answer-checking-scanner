@@ -169,4 +169,40 @@
     color: hsl(var(--muted-foreground));
     letter-spacing: 0.1em;
   }
+
+  /* ── Мобильная адаптация ──────────────────────────────────────────────── */
+
+  /* Safe area для нижней навигации (iPhone notch) */
+  .safe-area-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  /* Таблицы — горизонтальный скролл на мобиле */
+  .mobile-table-wrap {
+    @apply overflow-x-auto -mx-3 px-3 md:mx-0 md:px-0;
+  }
+
+  /* Уменьшаем отступы зоны загрузки на мобиле */
+  @media (max-width: 767px) {
+    .upload-zone {
+      @apply p-6;
+    }
+
+    /* Таблицы не ломаются */
+    table {
+      min-width: 480px;
+    }
+
+    /* Карточки статистики — в 2 колонки */
+    .stat-card {
+      @apply p-3;
+    }
+
+    /* Инпуты — нормальный размер шрифта чтобы не зумилось */
+    input,
+    select,
+    textarea {
+      font-size: 16px !important;
+    }
+  }
 }

@@ -88,6 +88,7 @@ export function ResultsSection() {
         <div className="px-4 py-3 border-b border-border bg-muted">
           <p className="text-sm font-semibold">Результаты ({filtered.length})</p>
         </div>
+        <div className="overflow-x-auto">
         <table className="w-full">
           <thead>
             <tr className="border-b border-border bg-muted/40">
@@ -127,6 +128,7 @@ export function ResultsSection() {
             })}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );

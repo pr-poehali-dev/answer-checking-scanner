@@ -309,7 +309,7 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
 
 
 # ── Анализ ────────────────────────────────────────────────────────────────────
-# v4: debug bytes
+# v5: clean
 _LAT_TO_CYR = {"A":"А","B":"Б","C":"В","D":"Г","E":"Д","F":"Е"}
 
 def _normalize_key(answer_key: str) -> list:
@@ -397,14 +397,6 @@ def handler(event: dict, context) -> dict:
     code        = result["code"]
     code_confs  = result["code_confs"]
     analysis    = _analyze(answers, answer_key)
-
-    # DEBUG: выводим первые 5 ответов и ключ для диагностики
-    key_norm = _normalize_key(answer_key)
-    for i in range(min(5, len(answers))):
-        a   = answers[i]
-        ka  = key_norm[i] if i < len(key_norm) else ""
-        print(f"DEBUG q{i+1}: ans={repr(a)} key={repr(ka)} match={a==ka} "
-              f"ans_bytes={a.encode('utf-8').hex()} key_bytes={ka.encode('utf-8').hex()}")
     avg_conf    = round(float(np.mean([c for c in confidences if c > 0] or [0])), 2)
 
     return _resp(200, {

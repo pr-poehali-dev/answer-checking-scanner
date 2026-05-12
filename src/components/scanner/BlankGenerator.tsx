@@ -201,7 +201,7 @@ export function BlankGenerator({ workId, workTitle, questionsCount: initQ, onClo
     setLoading(true);
     setError(null);
     try {
-      const res = await blankApi.download({
+      await blankApi.download({
         workId:         config.workId,
         workTitle:      config.workTitle,
         questionsCount: config.questionsCount,
@@ -211,10 +211,6 @@ export function BlankGenerator({ workId, workTitle, questionsCount: initQ, onClo
         classLabel:     config.classLabel,
         date:           config.date,
       });
-      const link = document.createElement("a");
-      link.href = `data:application/pdf;base64,${res.pdf_b64}`;
-      link.download = res.filename;
-      link.click();
     } catch (e) {
       setError((e as Error).message);
     } finally {

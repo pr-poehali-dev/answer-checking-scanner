@@ -1,28 +1,18 @@
 """
-Распознавание заполненного бланка ответов АОУСПТ через GigaChat Vision.
-POST / — { image: base64, questionsCount?: 20, answerKey?: "АБВГ123..." }
-Возвращает: { studentCode, answers[], confidence[], analysis }
-
+Распознавание бланка ответов через OpenCV (без ИИ).
 Алгоритм:
-1. Декод изображения
-2. Сжатие до 1000px по длинной стороне + нормализация контраста (не искажаем геометрию!)
-3. Один запрос к GigaChat-Pro Vision с base64 data URI (без Files API)
-4. Парсинг JSON из ответа
+1. Выравнивание и нормализация изображения
+2. Поиск сетки кружков через HoughCircles
+3. Кластеризация кружков по строкам и столбцам
+4. Определение закрашенных по яркости внутри кружка
+5. Сборка ответов А/Б/В/Г и кода ученика
+
+POST / — { image: base64, questionsCount?: 20, optionsCount?: 4, answerKey?: "АБВГ..." }
+-> { studentCode, answers[], confidence[], analysis }
 """
-import json
-import base64
-import os
-import re
-import io
-import ssl
-import uuid
-import time
+import json, base64, os, math
 import numpy as np
 import cv2
-import urllib.request
-import urllib.parse
-import urllib.error
-from datetime import datetime, timedelta
 
 CORS = {
     "Access-Control-Allow-Origin": "*",
@@ -30,202 +20,224 @@ CORS = {
     "Access-Control-Allow-Headers": "Content-Type, X-Authorization",
 }
 
-# Лимит размера base64 для GigaChat (примерно 10MB файл → ~13MB base64)
-MAX_B64_BYTES = 13 * 1024 * 1024
+RU_OPTS = ["А", "Б", "В", "Г", "Д", "Е"]
 
-# ── GigaChat токен (кэш в памяти) ──
-_TOKEN_CACHE: dict = {}
-
-
-def _ssl_ctx():
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    return ctx
-
-
-def _get_gigachat_token() -> str:
-    now = datetime.utcnow()
-    if _TOKEN_CACHE.get("token") and _TOKEN_CACHE.get("expires_at", now) > now:
-        return _TOKEN_CACHE["token"]
-
-    auth_key = os.environ.get("GIGACHAT_AUTH_KEY", "")
-    if not auth_key:
-        raise RuntimeError("GIGACHAT_AUTH_KEY не задан")
-
-    data = urllib.parse.urlencode({"scope": "GIGACHAT_API_PERS"}).encode()
-    req = urllib.request.Request(
-        "https://ngw.devices.sberbank.ru:9443/api/v2/oauth",
-        data=data,
-        method="POST",
-        headers={
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Accept": "application/json",
-            "RqUID": str(uuid.uuid4()),
-            "Authorization": f"Basic {auth_key}",
-        },
-    )
-    with urllib.request.urlopen(req, timeout=15, context=_ssl_ctx()) as r:
-        body = json.loads(r.read().decode())
-
-    token = body.get("access_token")
-    if not token:
-        raise RuntimeError(f"GigaChat не вернул access_token: {body}")
-
-    expires_ms = body.get("expires_at")
-    expires_at = (
-        datetime.utcfromtimestamp(expires_ms / 1000) - timedelta(minutes=2)
-        if expires_ms
-        else now + timedelta(minutes=25)
-    )
-    _TOKEN_CACHE["token"] = token
-    _TOKEN_CACHE["expires_at"] = expires_at
-    return token
-
-
-def _prepare_image(image_b64: str) -> str:
-    """
-    Всегда сжимаем до 1400px по длинной стороне и JPEG 82%.
-    Это резко сокращает время передачи в GigaChat и уменьшает таймауты.
-    """
+# ── Подготовка изображения ────────────────────────────────────────────────────
+def _load_gray(image_b64: str):
     img_bytes = base64.b64decode(image_b64)
     arr = np.frombuffer(img_bytes, dtype=np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     if img is None:
-        return image_b64
-
+        raise ValueError("Не удалось декодировать изображение")
+    # Масштаб: длинная сторона 1600px
     h, w = img.shape[:2]
-    MAX_SIDE = 1400
-    scale = MAX_SIDE / max(h, w)
+    scale = 1600 / max(h, w)
     if scale < 1.0:
-        img = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
-
-    # Повышаем контрастность для лучшего распознавания кружков
-    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
-    l, a, b = cv2.split(lab)
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    l = clahe.apply(l)
-    img = cv2.cvtColor(cv2.merge([l, a, b]), cv2.COLOR_LAB2BGR)
-
-    success, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 82])
-    if not success:
-        return image_b64
-    return base64.b64encode(buf.tobytes()).decode()
+        img = cv2.resize(img, (int(w*scale), int(h*scale)), interpolation=cv2.INTER_AREA)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    # CLAHE для выравнивания контраста
+    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
+    gray = clahe.apply(gray)
+    return img, gray
 
 
-def _gigachat_vision(image_b64: str, questions_count: int) -> dict:
-    """
-    Запрос к GigaChat Vision с inline base64.
-    Возвращает {'code': '12345', 'answers': ['А','Б',...]}
-    """
-    token = _get_gigachat_token()
+# ── Поиск всех кружков ────────────────────────────────────────────────────────
+def _find_circles(gray):
+    """Ищем все кружки через HoughCircles с широким диапазоном радиусов."""
+    h, w = gray.shape
+    blurred = cv2.GaussianBlur(gray, (5, 5), 1)
+    # Минимальный радиус ~1% от короткой стороны, максимальный ~4%
+    min_r = max(8,  int(min(h, w) * 0.010))
+    max_r = max(30, int(min(h, w) * 0.040))
 
-    prompt = (
-        f"Это заполненный бланк ответов. Внимательно изучи изображение.\n\n"
-        f"БЛОК ОТВЕТОВ НА ВОПРОСЫ:\n"
-        f"Сетка {questions_count} вопросов. Каждая строка — вопрос с кружками-вариантами (А, Б, В, Г или похожие). "
-        f"Закрашенный/зачёрнённый кружок = выбранный ответ. "
-        f"Если кружок не закрашен — пустая строка.\n\n"
-        f"БЛОК КОД УЧЕНИКА:\n"
-        f"5 горизонтальных строк (разряды кода). В каждой строке 10 кружков с цифрами 0-9 (слева направо). "
-        f"Закрашенный кружок в строке = цифра этого разряда. Один закрашенный кружок на строку. "
-        f"Если закрашенного нет — поставь '?' для этого разряда.\n\n"
-        f"Верни ТОЛЬКО JSON без пояснений:\n"
-        f'{{"code":"XXXXX","answers":["А","Б","В",...]}}\n\n'
-        f"code — ровно 5 символов (цифры 0-9, или ? если не закрашено/неразборчиво).\n"
-        f"answers — ровно {questions_count} элементов: русская буква (А/Б/В/Г) или пустая строка.\n"
-        f"Только JSON, без пояснений."
+    circles = cv2.HoughCircles(
+        blurred,
+        cv2.HOUGH_GRADIENT,
+        dp=1.2,
+        minDist=int(min_r * 1.5),
+        param1=60,
+        param2=22,
+        minRadius=min_r,
+        maxRadius=max_r,
     )
+    if circles is None:
+        return []
+    return [(int(x), int(y), int(r)) for x, y, r in circles[0]]
 
-    data_uri = f"data:image/jpeg;base64,{image_b64}"
 
-    payload = {
-        "model": "GigaChat",   # быстрее Pro, поддерживает Vision
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "image_url", "image_url": {"url": data_uri}},
-                    {"type": "text", "text": prompt},
-                ],
-            }
-        ],
-        "temperature": 0.01,
-        "max_tokens": 400,
-        "stream": False,
+# ── Яркость внутри кружка ─────────────────────────────────────────────────────
+def _circle_brightness(gray, cx, cy, r) -> float:
+    """Средняя яркость внутри кружка (0=чёрный, 255=белый)."""
+    h, w = gray.shape
+    mask = np.zeros((h, w), dtype=np.uint8)
+    inner_r = max(1, int(r * 0.65))
+    cv2.circle(mask, (cx, cy), inner_r, 255, -1)
+    pixels = gray[mask == 255]
+    return float(np.mean(pixels)) if len(pixels) > 0 else 255.0
+
+
+def _is_filled(gray, cx, cy, r, threshold=160) -> tuple[bool, float]:
+    bright = _circle_brightness(gray, cx, cy, r)
+    return bright < threshold, bright
+
+
+# ── Кластеризация кружков по строкам ─────────────────────────────────────────
+def _cluster_rows(circles, tolerance_ratio=0.6):
+    """Группируем кружки в строки по Y-координате."""
+    if not circles:
+        return []
+    avg_r = np.median([r for _, _, r in circles])
+    tol = avg_r * tolerance_ratio * 2
+
+    sorted_c = sorted(circles, key=lambda c: c[1])
+    rows = []
+    for cx, cy, r in sorted_c:
+        placed = False
+        for row in rows:
+            row_y = np.mean([c[1] for c in row])
+            if abs(cy - row_y) <= tol:
+                row.append((cx, cy, r))
+                placed = True
+                break
+        if not placed:
+            rows.append([(cx, cy, r)])
+
+    # Сортируем каждую строку по X
+    rows = [sorted(row, key=lambda c: c[0]) for row in rows]
+    # Сортируем строки по Y
+    rows.sort(key=lambda row: np.mean([c[1] for c in row]))
+    return rows
+
+
+# ── Определение порога закрашенности ─────────────────────────────────────────
+def _adaptive_threshold(brightness_list: list[float]) -> float:
+    """Автоматически подбираем порог между пустыми и закрашенными кружками."""
+    if not brightness_list:
+        return 160.0
+    arr = np.array(brightness_list)
+    # Если разброс маленький — все кружки пустые, порог не важен
+    if arr.max() - arr.min() < 30:
+        return arr.min() - 5
+    # Kmeans на 2 кластера
+    from scipy.cluster.vq import kmeans
+    try:
+        centers, _ = kmeans(arr.astype(float), 2)
+        return float(sorted(centers).mean())  # середина между кластерами
+    except Exception:
+        return float(arr.mean())
+
+
+# ── Основное распознавание ────────────────────────────────────────────────────
+def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict:
+    img, gray = _load_gray(image_b64)
+    h, w = gray.shape
+
+    circles = _find_circles(gray)
+    if len(circles) < questions_count:
+        # Пробуем с менее строгими параметрами
+        blurred = cv2.GaussianBlur(gray, (7,7), 1.5)
+        min_r = max(6, int(min(h, w) * 0.008))
+        max_r = max(35, int(min(h, w) * 0.045))
+        c2 = cv2.HoughCircles(blurred, cv2.HOUGH_GRADIENT, dp=1.0,
+                               minDist=int(min_r*1.3), param1=50, param2=18,
+                               minRadius=min_r, maxRadius=max_r)
+        if c2 is not None:
+            circles = [(int(x), int(y), int(r)) for x, y, r in c2[0]]
+
+    if not circles:
+        raise ValueError("Кружки на бланке не найдены. Убедитесь, что фото чёткое и бланк занимает весь кадр.")
+
+    rows = _cluster_rows(circles)
+
+    # Собираем все яркости для адаптивного порога
+    all_brightness = [_circle_brightness(gray, cx, cy, r) for cx, cy, r in circles]
+    threshold = _adaptive_threshold(all_brightness)
+
+    # ── Разделяем строки: ответы vs код ученика ──────────────────────────────
+    # Строки с options_count кружков = вопросы
+    # Строки с 10 кружками = код ученика (5 строк по 10)
+    answer_rows = []
+    code_rows = []
+
+    for row in rows:
+        n = len(row)
+        if n == options_count:
+            answer_rows.append(row)
+        elif n == 10:
+            code_rows.append(row)
+        elif abs(n - options_count) <= 1 and n >= 2:
+            # Почти верное число — берём первые options_count
+            answer_rows.append(row[:options_count])
+
+    # Ограничиваем количество строк ответов
+    answer_rows = answer_rows[:questions_count]
+
+    # ── Ответы А/Б/В/Г ───────────────────────────────────────────────────────
+    opts = RU_OPTS[:options_count]
+    answers = []
+    confidences = []
+
+    for i, row in enumerate(answer_rows):
+        brightnesses = [_circle_brightness(gray, cx, cy, r) for cx, cy, r in row]
+        filled_idx = int(np.argmin(brightnesses))
+        min_b = brightnesses[filled_idx]
+        max_b = max(brightnesses)
+
+        if max_b - min_b > 25:   # есть явно закрашенный
+            answers.append(opts[filled_idx] if filled_idx < len(opts) else "")
+            conf = min(0.99, (max_b - min_b) / 150)
+            confidences.append(round(conf, 2))
+        else:
+            answers.append("")   # не закрашен
+            confidences.append(0.0)
+
+    # Дополняем до questionsCount пустыми
+    while len(answers) < questions_count:
+        answers.append("")
+        confidences.append(0.0)
+
+    # ── Код ученика ───────────────────────────────────────────────────────────
+    code = ""
+    code_confs = []
+    for row in code_rows[:5]:
+        brightnesses = [_circle_brightness(gray, cx, cy, r) for cx, cy, r in row]
+        filled_idx = int(np.argmin(brightnesses))
+        min_b = brightnesses[filled_idx]
+        max_b = max(brightnesses)
+        if max_b - min_b > 20:
+            code += str(filled_idx)
+            code_confs.append(round(min(0.99, (max_b - min_b) / 120), 2))
+        else:
+            code += "?"
+            code_confs.append(0.0)
+
+    code = (code + "?????")[:5]
+    code_confs = (code_confs + [0.0]*5)[:5]
+
+    return {
+        "answers": answers[:questions_count],
+        "confidences": confidences[:questions_count],
+        "code": code,
+        "code_confs": code_confs,
+        "circles_found": len(circles),
+        "answer_rows_found": len(answer_rows),
     }
 
-    req = urllib.request.Request(
-        "https://gigachat.devices.sberbank.ru/api/v1/chat/completions",
-        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        method="POST",
-        headers={
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "Authorization": f"Bearer {token}",
-            "Connection": "close",
-        },
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=25, context=_ssl_ctx()) as r:
-            body = json.loads(r.read().decode())
-    except Exception as e:
-        raise RuntimeError(
-            "Сервис распознавания временно недоступен. "
-            "Попробуйте ещё раз через 10-15 секунд."
-        ) from e
 
-    choices = body.get("choices") or []
-    if not choices:
-        raise RuntimeError(f"GigaChat вернул пустой ответ: {body}")
-
-    content = choices[0].get("message", {}).get("content", "")
-    return _parse_vision_response(content, questions_count)
-
-
-def _parse_vision_response(content: str, questions_count: int) -> dict:
-    """Парсит JSON из ответа GigaChat Vision."""
-    fence = re.search(r"```(?:json)?\s*([\s\S]+?)```", content)
-    if fence:
-        content = fence.group(1)
-    else:
-        s = content.find("{")
-        e = content.rfind("}")
-        if s >= 0 and e > s:
-            content = content[s:e + 1]
-
-    data = json.loads(content.strip())
-
-    code = str(data.get("code", "?????"))
-    code = "".join(c if c.isdigit() or c == "?" else "?" for c in code)
-    code = (code + "?????")[:5]
-
-    answers_raw = data.get("answers", [])
-    answers = []
-    for i in range(questions_count):
-        val = answers_raw[i] if i < len(answers_raw) else ""
-        answers.append(str(val).strip() if val else "")
-
-    return {"code": code, "answers": answers}
-
-
-def _analyze(answers: list[str], answer_key: str) -> dict:
+# ── Анализ ────────────────────────────────────────────────────────────────────
+def _analyze(answers: list, answer_key: str) -> dict:
     if not answer_key:
         return {"total": len(answers), "correct": 0, "wrong": 0, "percent": 0, "details": []}
     key = list(answer_key.strip().upper())
-    details = []
-    correct = 0
+    details, correct = [], 0
     for i, a in enumerate(answers):
         ka = key[i] if i < len(key) else ""
         ok = a.upper() == ka and ka != ""
-        if ok:
-            correct += 1
-        details.append({"q": i + 1, "student": a, "key": ka, "correct": ok})
+        if ok: correct += 1
+        details.append({"q": i+1, "student": a, "key": ka, "correct": ok})
     total = len(answers)
     return {
-        "total": total,
-        "correct": correct,
-        "wrong": total - correct,
+        "total": total, "correct": correct, "wrong": total - correct,
         "percent": round(correct / total * 100, 1) if total else 0,
         "details": details,
     }
@@ -240,10 +252,14 @@ def _resp(status: int, body):
 
 
 def handler(event: dict, context) -> dict:
-    """Распознавание заполненного бланка ответов через GigaChat Vision (inline base64)."""
+    """
+    Распознавание бланка через OpenCV: HoughCircles + яркость.
+    Работает без ИИ, < 1 секунды. Кружки А/Б/В/Г и код ученика 5×10.
+    POST { image: base64, questionsCount?: 20, optionsCount?: 4, answerKey?: "..." }
+    -> { studentCode, answers[], confidence[], analysis }
+    """
     if event.get("httpMethod") == "OPTIONS":
         return {"statusCode": 200, "headers": CORS, "body": ""}
-
     if event.get("httpMethod") != "POST":
         return _resp(405, {"error": "Method not allowed"})
 
@@ -257,61 +273,57 @@ def handler(event: dict, context) -> dict:
     image_b64 = body.get("image", "")
     if not image_b64:
         return _resp(400, {"error": "Не передано изображение (поле image)"})
-
     if "," in image_b64:
         image_b64 = image_b64.split(",", 1)[1]
 
-    questions = int(body.get("questionsCount", 20))
-    if questions < 1 or questions > 60:
-        questions = 20
-    answer_key = str(body.get("answerKey", ""))
-
     try:
-        img_bytes_check = base64.b64decode(image_b64)
+        base64.b64decode(image_b64)
     except Exception:
         return _resp(400, {"error": "Некорректный base64"})
 
-    # Проверяем минимальный размер
-    arr = np.frombuffer(img_bytes_check, dtype=np.uint8)
-    check = cv2.imdecode(arr, cv2.IMREAD_GRAYSCALE)
-    if check is None:
-        return _resp(400, {"error": "Не удалось прочитать изображение"})
-    h_px, w_px = check.shape
-    if h_px < 100 or w_px < 100:
-        return _resp(422, {
-            "error": "Изображение слишком маленькое. Убедитесь, что весь бланк попал в кадр.",
-            "hint": "image_too_small",
-        })
+    questions    = max(1, min(int(body.get("questionsCount", 20)), 80))
+    options      = max(2, min(int(body.get("optionsCount",   4)),  6))
+    answer_key   = str(body.get("answerKey", ""))
 
-    # Подготовка: масштабирование + контраст (без искажения геометрии)
+    # Проверяем размер изображения
     try:
-        ready_b64 = _prepare_image(image_b64)
+        arr = np.frombuffer(base64.b64decode(image_b64), dtype=np.uint8)
+        check = cv2.imdecode(arr, cv2.IMREAD_GRAYSCALE)
+        if check is None:
+            return _resp(400, {"error": "Не удалось прочитать изображение"})
+        h_px, w_px = check.shape
+        if h_px < 100 or w_px < 100:
+            return _resp(422, {
+                "error": "Изображение слишком маленькое. Сфотографируйте бланк целиком.",
+                "hint": "image_too_small",
+            })
     except Exception as e:
-        return _resp(400, {"error": f"Ошибка обработки изображения: {e}"})
+        return _resp(400, {"error": f"Ошибка чтения изображения: {e}"})
 
-    # Распознавание через GigaChat Vision
     try:
-        result = _gigachat_vision(ready_b64, questions)
-    except RuntimeError as e:
+        result = _recognize(image_b64, questions, options)
+    except ValueError as e:
         return _resp(422, {"error": str(e)})
     except Exception as e:
-        err_str = str(e).lower()
-        if "timed out" in err_str or "timeout" in err_str:
-            return _resp(422, {"error": "Сервис распознавания не ответил вовремя. Попробуйте ещё раз через несколько секунд."})
         return _resp(422, {"error": f"Ошибка распознавания: {e}"})
 
-    code = result["code"]
-    answers = result["answers"]
-    confs = [0.92 if a else 0.0 for a in answers]
-    code_confs = [0.92 if c.isdigit() else 0.0 for c in code]
-    analysis = _analyze(answers, answer_key)
+    answers     = result["answers"]
+    confidences = result["confidences"]
+    code        = result["code"]
+    code_confs  = result["code_confs"]
+    analysis    = _analyze(answers, answer_key)
+    avg_conf    = round(float(np.mean([c for c in confidences if c > 0] or [0])), 2)
 
     return _resp(200, {
-        "studentCode": code,
-        "codeConfidence": code_confs,
-        "answers": answers,
-        "answersConfidence": confs,
-        "averageConfidence": 0.92,
-        "questionsCount": questions,
-        "analysis": analysis,
+        "studentCode":       code,
+        "codeConfidence":    code_confs,
+        "answers":           answers,
+        "answersConfidence": confidences,
+        "averageConfidence": avg_conf,
+        "questionsCount":    questions,
+        "analysis":          analysis,
+        "debug": {
+            "circlesFound":    result["circles_found"],
+            "answerRowsFound": result["answer_rows_found"],
+        }
     })

@@ -1,5 +1,5 @@
 """
-Распознавание бланка ответов через OpenCV.
+Распознавание бланка ответов через OpenCV. v2 — вертикальный порядок столбцов.
 Ответы: крестик ✕ в квадрате (ищем квадраты, оцениваем наполненность).
 Код ученика: закрашенный кружок в сетке 5×10 (нижняя зона бланка).
 
@@ -156,18 +156,65 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
 
     squares = _find_squares(gray_answers)
 
-    # Кластеризуем по строкам
+    # Кластеризуем по строкам (каждая строка = один вопрос × options_count квадратов)
     sq_rows = _cluster_rows(squares, tol_ratio=1.0)
 
-    # Оставляем только строки с ровно options_count квадратами (±1)
-    answer_rows = []
+    # Оставляем только строки с нужным числом квадратов
+    valid_rows = []
     for row in sq_rows:
         n = len(row)
         if n == options_count:
-            answer_rows.append(row)
+            valid_rows.append(row)
         elif abs(n - options_count) == 1 and n >= 2:
-            answer_rows.append(row[:options_count])
-    answer_rows = answer_rows[:questions_count]
+            valid_rows.append(row[:options_count])
+
+    # ── Перегруппировка: горизонтальные строки → вертикальные столбцы ────────
+    # Бланк вертикальный: вопросы 1-10 в левом столбце, 11-20 в правом.
+    # После кластеризации по Y строки упорядочены: [q1,q11], [q2,q12]...
+    # Нужно разбить по X-позиции первого квадрата на группы столбцов,
+    # внутри каждой группы отсортировать по Y → получим правильный порядок.
+
+    if valid_rows:
+        # Определяем число столбцов бланка по X-позициям первых квадратов
+        first_xs = [row[0][0] for row in valid_rows]
+        x_arr = sorted(set(first_xs))
+
+        # Кластеризуем X-позиции в группы (столбцы бланка)
+        # Медианный шаг между кластерами
+        if len(x_arr) > 1:
+            img_w = w
+            # Простая кластеризация: разрыв > 10% ширины = новый столбец
+            x_gap_threshold = img_w * 0.10
+            col_groups = [[x_arr[0]]]
+            for x in x_arr[1:]:
+                if x - col_groups[-1][-1] > x_gap_threshold:
+                    col_groups.append([x])
+                else:
+                    col_groups[-1].append(x)
+            n_blank_cols = len(col_groups)
+            col_centers  = [np.mean(g) for g in col_groups]
+
+            # Назначаем каждую строку в столбец бланка
+            col_buckets = [[] for _ in range(n_blank_cols)]
+            for row in valid_rows:
+                rx0 = row[0][0]
+                ci  = int(np.argmin([abs(rx0 - cc) for cc in col_centers]))
+                col_buckets[ci].append(row)
+
+            # Внутри каждого столбца сортируем по Y
+            for bucket in col_buckets:
+                bucket.sort(key=lambda r: r[0][1])
+
+            # Собираем в правильном вертикальном порядке
+            answer_rows = []
+            for bucket in col_buckets:
+                answer_rows.extend(bucket)
+        else:
+            answer_rows = valid_rows
+
+        answer_rows = answer_rows[:questions_count]
+    else:
+        answer_rows = []
 
     # Определяем порог заполненности адаптивно
     all_fills = [_fill_ratio(gray, cx, cy, cw, ch)
@@ -201,14 +248,28 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
         answers.append("")
         confidences.append(0.0)
 
-    # ── 2. Код ученика (нижние 30% бланка, кружки) ───────────────────────────
-    code_zone_start = int(h * 0.68)
+    # ── 2. Код ученика (нижние ~35% бланка, кружки) ──────────────────────────
+    code_zone_start = int(h * 0.65)
     circles = _find_circles_in_zone(gray, code_zone_start, h)
 
-    # Кластеризуем кружки по строкам
+    # Если кружков мало — ещё раз с меньшим порогом
+    if len(circles) < 10:
+        zone = gray[code_zone_start:, :]
+        blurred2 = cv2.GaussianBlur(zone, (3,3), 0)
+        h_z, w_z = zone.shape
+        min_r2 = max(4, int(min(h_z, w_z) * 0.008))
+        max_r2 = max(25, int(min(h_z, w_z) * 0.06))
+        c2 = cv2.HoughCircles(blurred2, cv2.HOUGH_GRADIENT, dp=1.0,
+                               minDist=int(min_r2*1.2), param1=40, param2=14,
+                               minRadius=min_r2, maxRadius=max_r2)
+        if c2 is not None:
+            circles = [(int(x), int(y)+code_zone_start, int(r)) for x,y,r in c2[0]]
+
+    # Кластеризуем по строкам, сортируем по Y
     cr_rows_all = _cluster_rows([(cx, cy, r, r*2) for cx, cy, r in circles], tol_ratio=1.2)
-    # Берём строки с ~10 кружками (код) — может быть 8-12
-    code_rows = [row for row in cr_rows_all if 7 <= len(row) <= 12]
+    cr_rows_all.sort(key=lambda row: np.mean([it[1] for it in row]))
+    # Берём строки с ~10 кружками (код) — может быть 7-13
+    code_rows = [row for row in cr_rows_all if 7 <= len(row) <= 13]
     code_rows = code_rows[:5]
 
     code       = ""

@@ -368,6 +368,18 @@ export const recognizeApi = {
     }
     return data as RecognizeResponse;
   },
+
+  // Пересчёт по уже распознанным ответам с новым ключом (без изображения)
+  reanalyze: async (answers: string[], answerKey: string, studentCode?: string) => {
+    const res = await fetch(RECOGNIZE_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ answers, answerKey, studentCode: studentCode ?? "" }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Ошибка пересчёта");
+    return data as RecognizeResponse;
+  },
 };
 
 export interface PresentationOutline {

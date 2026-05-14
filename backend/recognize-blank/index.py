@@ -309,7 +309,7 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
 
 
 # ── Анализ ────────────────────────────────────────────────────────────────────
-# v5: clean
+# v8: reanalyze mode
 _LAT_TO_CYR = {"A":"А","B":"Б","C":"В","D":"Г","E":"Д","F":"Е"}
 
 def _normalize_key(answer_key: str) -> list:
@@ -363,6 +363,23 @@ def handler(event: dict, context) -> dict:
     except Exception:
         return _resp(400, {"error": "Некорректный JSON"})
 
+    # Режим reanalyze: только пересчёт по готовым ответам без изображения
+    if body.get("answers") and not body.get("image"):
+        raw_answers = body["answers"]
+        answer_key  = str(body.get("answerKey", ""))
+        if not isinstance(raw_answers, list):
+            return _resp(400, {"error": "answers должен быть массивом"})
+        analysis = _analyze(raw_answers, answer_key)
+        return _resp(200, {
+            "studentCode":       body.get("studentCode", ""),
+            "codeConfidence":    [],
+            "answers":           raw_answers,
+            "answersConfidence": [],
+            "averageConfidence": 0,
+            "questionsCount":    len(raw_answers),
+            "analysis":          analysis,
+        })
+
     image_b64 = body.get("image", "")
     if not image_b64:
         return _resp(400, {"error": "Не передано изображение (поле image)"})
@@ -411,5 +428,9 @@ def handler(event: dict, context) -> dict:
             "squaresFound":   result["squares_found"],
             "answerRows":     result["answer_rows"],
             "codeRows":       result["code_rows"],
+            "answerKeyRaw":   answer_key,
+            "answerKeyHex":   answer_key.encode("utf-8").hex() if answer_key else "",
+            "answers0hex":    answers[0].encode("utf-8").hex() if answers else "",
+            "key0hex":        _normalize_key(answer_key)[0].encode("utf-8").hex() if answer_key and _normalize_key(answer_key) else "",
         }
     })

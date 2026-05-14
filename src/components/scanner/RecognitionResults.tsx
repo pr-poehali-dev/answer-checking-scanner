@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import Icon from "@/components/ui/icon";
 import { RecognitionResult } from "./upload-types";
+import { recognizeApi } from "@/lib/api";
 
 interface Props {
   result: RecognitionResult;
@@ -10,17 +11,6 @@ interface Props {
 }
 
 const OPT_LABELS = ["А", "Б", "В", "Г", "Д", "Е"];
-
-const LAT_TO_CYR: Record<string, string> = {
-  "A":"А","B":"Б","C":"В","D":"Г","E":"Д","F":"Е",
-  "a":"А","b":"Б","c":"В","d":"Г","e":"Д","f":"Е",
-};
-function normChar(ch: string): string {
-  return LAT_TO_CYR[ch] ?? ch.toUpperCase();
-}
-function normKey(key: string): string[] {
-  return key.split("").map(normChar);
-}
 
 function scoreColor(pct: number) {
   if (pct >= 80) return "text-green-700 bg-green-50 border-green-200";
@@ -39,35 +29,40 @@ export function RecognitionResults({ result, answerKey: initialKey, optionsCount
   const { student_code, all_answers } = result;
   const opts = OPT_LABELS.slice(0, optionsCount);
 
-  const [editKey, setEditKey] = useState(initialKey);
-  const [editing, setEditing] = useState(false);
+  // Текущий пересчитанный анализ (изначально — с бэкенда)
+  const [analysis, setAnalysis] = useState(result.analysis);
+  const [editing,  setEditing]  = useState(false);
   const [draftKey, setDraftKey] = useState(initialKey);
+  const [editKey,  setEditKey]  = useState(initialKey);
+  const [applying, setApplying] = useState(false);
+  const [applyErr, setApplyErr] = useState("");
 
-  // Весь пересчёт — чистая математика на фронте, без ИИ
-  const computed = useMemo(() => {
-    const keyArr = normKey(editKey);
-    const hasKey = keyArr.some(k => k.trim() !== "");
+  const details = analysis.details || [];
+  const hasKey  = details.length > 0 && details.some(d => d.key);
+  const pct     = analysis.percent ?? 0;
+  const grade   = gradeLabel(pct);
 
-    const details = all_answers.map((ans, i) => {
-      const ka = keyArr[i] ?? "";
-      // Нормализуем ОБА значения одинаково: trim → латиница→кириллица → toUpperCase
-      const normAns = normChar(ans.trim());
-      const normKa  = normChar(ka.trim());
-      const correct = normKa !== "" && normAns === normKa;
-      return { student: ans, key: normKa, correct };
-    });
+  // Применить новый ключ — отправляем на бэкенд для нормализации и пересчёта
+  const applyKey = async () => {
+    if (!draftKey.trim()) { setEditKey(""); setEditing(false); return; }
+    setApplying(true);
+    setApplyErr("");
+    try {
+      const resp = await recognizeApi.reanalyze(all_answers, draftKey, student_code);
+      setAnalysis(resp.analysis);
+      setEditKey(draftKey);
+      setEditing(false);
+    } catch (e) {
+      setApplyErr((e as Error).message);
+    } finally {
+      setApplying(false);
+    }
+  };
 
-    const correctCount = details.filter(d => d.correct).length;
-    const total = all_answers.length;
-    const percent = total > 0 ? Math.round((correctCount / total) * 1000) / 10 : 0;
-    return { details, correctCount, total, percent, hasKey };
-  }, [editKey, all_answers]);
+  const cancelEdit = () => { setDraftKey(editKey); setEditing(false); setApplyErr(""); };
 
-  const { details, correctCount, total, percent, hasKey } = computed;
-  const grade = gradeLabel(percent);
-
-  const applyEdit = () => { setEditKey(draftKey); setEditing(false); };
-  const cancelEdit = () => { setDraftKey(editKey); setEditing(false); };
+  // Текущий нормализованный ключ для отображения (из details)
+  const displayKey = useMemo(() => details.map(d => d.key).join(""), [details]);
 
   return (
     <div className="space-y-4">
@@ -83,15 +78,15 @@ export function RecognitionResults({ result, answerKey: initialKey, optionsCount
         <div className="bg-white border border-gray-200 rounded-xl p-3 text-center">
           <div className="text-xs text-gray-500 mb-1">Правильных</div>
           <div className="text-lg font-bold text-gray-900">
-            {hasKey ? correctCount : "—"}
-            <span className="text-sm text-gray-400 font-normal"> / {total}</span>
+            {hasKey ? analysis.correct : "—"}
+            <span className="text-sm text-gray-400 font-normal"> / {analysis.total}</span>
           </div>
         </div>
-        <div className={`border rounded-xl p-3 text-center ${hasKey ? scoreColor(percent) : "bg-gray-50 border-gray-200 text-gray-400"}`}>
+        <div className={`border rounded-xl p-3 text-center ${hasKey ? scoreColor(pct) : "bg-gray-50 border-gray-200 text-gray-400"}`}>
           <div className="text-xs mb-1 opacity-70">Процент</div>
-          <div className="text-lg font-bold">{hasKey ? `${percent.toFixed(1)}%` : "—"}</div>
+          <div className="text-lg font-bold">{hasKey ? `${pct.toFixed(1)}%` : "—"}</div>
         </div>
-        <div className={`border rounded-xl p-3 text-center ${hasKey ? scoreColor(percent) : "bg-gray-50 border-gray-200 text-gray-400"}`}>
+        <div className={`border rounded-xl p-3 text-center ${hasKey ? scoreColor(pct) : "bg-gray-50 border-gray-200 text-gray-400"}`}>
           <div className="text-xs mb-1 opacity-70">Оценка</div>
           <div className="text-2xl font-bold leading-none mt-1">{hasKey ? grade : "—"}</div>
         </div>
@@ -102,22 +97,19 @@ export function RecognitionResults({ result, answerKey: initialKey, optionsCount
         <div className="bg-white border border-gray-200 rounded-xl p-4">
           <div className="flex justify-between text-xs text-gray-500 mb-2">
             <span>0%</span>
-            <span className="font-semibold text-gray-700">{percent.toFixed(1)}%</span>
+            <span className="font-semibold text-gray-700">{pct.toFixed(1)}%</span>
             <span>100%</span>
           </div>
           <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
             <div
               className={`h-full rounded-full transition-all duration-500 ${
-                percent >= 80 ? "bg-green-500" : percent >= 60 ? "bg-blue-500" : percent >= 40 ? "bg-yellow-500" : "bg-red-500"
+                pct >= 80 ? "bg-green-500" : pct >= 60 ? "bg-blue-500" : pct >= 40 ? "bg-yellow-500" : "bg-red-500"
               }`}
-              style={{ width: `${percent}%` }}
+              style={{ width: `${pct}%` }}
             />
           </div>
           <div className="flex justify-between text-xs mt-1.5 text-gray-400">
-            <span>«2» &lt;50%</span>
-            <span>«3» 50%</span>
-            <span>«4» 70%</span>
-            <span>«5» 85%</span>
+            <span>«2» &lt;50%</span><span>«3» 50%</span><span>«4» 70%</span><span>«5» 85%</span>
           </div>
         </div>
       )}
@@ -125,18 +117,18 @@ export function RecognitionResults({ result, answerKey: initialKey, optionsCount
       {/* Таблица ответов */}
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
 
-        {/* Шапка с редактором ключа */}
+        {/* Шапка + редактор ключа */}
         <div className="px-4 py-3 border-b bg-gray-50">
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div className="flex items-center gap-2">
               <span className="text-sm font-semibold text-gray-900">Детальные ответы</span>
               {hasKey && (
-                <span className="text-xs text-gray-500">{correctCount} верно · {total - correctCount} неверно</span>
+                <span className="text-xs text-gray-500">{analysis.correct} верно · {analysis.wrong} неверно</span>
               )}
             </div>
 
             {editing ? (
-              <div className="flex items-center gap-2 flex-1 min-w-0 justify-end">
+              <div className="flex items-center gap-2 flex-1 min-w-0 justify-end flex-wrap">
                 <input
                   autoFocus
                   type="text"
@@ -144,9 +136,14 @@ export function RecognitionResults({ result, answerKey: initialKey, optionsCount
                   onChange={e => setDraftKey(e.target.value)}
                   placeholder="АБВГАБВГ…"
                   className="flex-1 max-w-xs border border-blue-400 rounded-lg px-3 py-1.5 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-blue-300"
-                  onKeyDown={e => { if (e.key === "Enter") applyEdit(); if (e.key === "Escape") cancelEdit(); }}
+                  onKeyDown={e => { if (e.key === "Enter") applyKey(); if (e.key === "Escape") cancelEdit(); }}
                 />
-                <button onClick={applyEdit} className="px-2.5 py-1.5 bg-blue-600 text-white text-xs rounded-lg hover:bg-blue-700 font-medium whitespace-nowrap">
+                <button
+                  onClick={applyKey}
+                  disabled={applying}
+                  className="px-2.5 py-1.5 bg-blue-600 text-white text-xs rounded-lg hover:bg-blue-700 font-medium whitespace-nowrap disabled:opacity-50 inline-flex items-center gap-1"
+                >
+                  {applying && <Icon name="Loader2" size={11} className="animate-spin" />}
                   Применить
                 </button>
                 <button onClick={cancelEdit} className="px-2.5 py-1.5 border border-gray-200 text-gray-600 text-xs rounded-lg hover:bg-gray-100 whitespace-nowrap">
@@ -155,7 +152,7 @@ export function RecognitionResults({ result, answerKey: initialKey, optionsCount
               </div>
             ) : (
               <button
-                onClick={() => { setDraftKey(editKey); setEditing(true); }}
+                onClick={() => { setDraftKey(editKey); setEditing(true); setApplyErr(""); }}
                 className="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-gray-200 text-gray-600 text-xs rounded-lg hover:bg-gray-100 transition-colors"
               >
                 <Icon name="Pencil" size={12} />
@@ -164,12 +161,14 @@ export function RecognitionResults({ result, answerKey: initialKey, optionsCount
             )}
           </div>
 
-          {!editing && editKey && (
+          {applyErr && (
+            <p className="mt-1.5 text-xs text-red-600">{applyErr}</p>
+          )}
+
+          {!editing && displayKey && (
             <div className="mt-2 flex items-center gap-2">
               <span className="text-xs text-gray-400">Ключ:</span>
-              <span className="text-xs font-mono text-gray-600 bg-gray-100 px-2 py-0.5 rounded tracking-wider">
-                {normKey(editKey).join("")}
-              </span>
+              <span className="text-xs font-mono text-gray-600 bg-gray-100 px-2 py-0.5 rounded tracking-wider">{displayKey}</span>
             </div>
           )}
         </div>
@@ -195,12 +194,9 @@ export function RecognitionResults({ result, answerKey: initialKey, optionsCount
                 const studentAns = (detail?.student ?? ans).toUpperCase();
 
                 return (
-                  <tr
-                    key={i}
-                    className={`border-b last:border-0 transition-colors ${
-                      hasKey && isCorrect ? "bg-green-50" : hasKey && isWrong ? "bg-red-50" : ""
-                    }`}
-                  >
+                  <tr key={i} className={`border-b last:border-0 transition-colors ${
+                    hasKey && isCorrect ? "bg-green-50" : hasKey && isWrong ? "bg-red-50" : ""
+                  }`}>
                     <td className="px-4 py-2 text-xs font-bold text-gray-600">{i + 1}</td>
                     {opts.map(lbl => {
                       const selected = studentAns === lbl;

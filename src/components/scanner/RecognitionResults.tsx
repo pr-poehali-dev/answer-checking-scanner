@@ -71,14 +71,10 @@ export function RecognitionResults({ result, answerKey: initialKey, optionsCount
     <div className="space-y-4">
 
       {/* ВРЕМЕННЫЙ DEBUG блок */}
-      {_dbg && Array.isArray(_dbg) && (
-        <div className="bg-yellow-50 border border-yellow-300 rounded-xl p-3 text-xs font-mono space-y-1">
-          <div className="font-bold text-yellow-800 mb-2">DEBUG — hex сравнение (первые 3 вопроса):</div>
-          {_dbg.map((d: {q:number;a_repr:string;a_hex:string;a_up:string;a_up_hex:string;ka_repr:string;ka_hex:string;eq:boolean}) => (
-            <div key={d.q} className={d.eq ? "text-green-700" : "text-red-700"}>
-              q{d.q}: ans={d.a_repr}({d.a_hex}) → upper={d.a_up}({d.a_up_hex}) | key={d.ka_repr}({d.ka_hex}) | eq={String(d.eq)}
-            </div>
-          ))}
+      {_dbg && (
+        <div className="bg-yellow-50 border border-yellow-300 rounded-xl p-3 text-xs font-mono space-y-1 break-all">
+          <div className="font-bold text-yellow-800 mb-1">DEBUG raw:</div>
+          <pre className="whitespace-pre-wrap text-[10px] text-yellow-900">{JSON.stringify(_dbg, null, 2)}</pre>
         </div>
       )}
 

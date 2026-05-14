@@ -219,12 +219,18 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
     # Определяем порог заполненности адаптивно
     all_fills = [_fill_ratio(gray, cx, cy, cw, ch)
                  for row in answer_rows for cx, cy, cw, ch in row]
-    # Порог — среднее между минимальным и максимальным заполнением
-    if all_fills and (max(all_fills) - min(all_fills)) > 0.05:
-        fill_threshold = (sorted(all_fills)[len(all_fills)//2] + max(all_fills)) / 2
-        fill_threshold = max(0.08, min(fill_threshold, 0.35))
+
+    if all_fills:
+        max_fill_global = max(all_fills)
+        # Если разброс заполненности достаточный — используем порог
+        if (max(all_fills) - min(all_fills)) > 0.03:
+            fill_threshold = (sorted(all_fills)[len(all_fills)//2] + max_fill_global) / 2
+            fill_threshold = max(0.04, min(fill_threshold, 0.30))
+        else:
+            # Разброс маленький — всё примерно одинаково пустое, берём мягкий порог
+            fill_threshold = max(0.04, max_fill_global * 0.5)
     else:
-        fill_threshold = 0.12
+        fill_threshold = 0.06
 
     answers     = []
     confidences = []
@@ -232,13 +238,19 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
     for row in answer_rows:
         fills = [_fill_ratio(gray, cx, cy, cw, ch) for cx, cy, cw, ch in row]
         max_f = max(fills)
+        sorted_f = sorted(fills, reverse=True)
+        gap = sorted_f[0] - (sorted_f[1] if len(sorted_f) > 1 else 0)
+
         if max_f >= fill_threshold:
+            # Явно заполнен — берём максимальный
             idx = int(np.argmax(fills))
             answers.append(opts[idx] if idx < len(opts) else "")
-            # Уверенность: насколько выбранный превышает следующего
-            sorted_f = sorted(fills, reverse=True)
-            gap = sorted_f[0] - (sorted_f[1] if len(sorted_f) > 1 else 0)
             confidences.append(round(min(0.99, gap / 0.3 + 0.5), 2))
+        elif max_f > 0 and gap > max_f * 0.25:
+            # Слабый сигнал но явный лидер — всё равно берём
+            idx = int(np.argmax(fills))
+            answers.append(opts[idx] if idx < len(opts) else "")
+            confidences.append(round(min(0.50, gap / 0.3), 2))
         else:
             answers.append("")
             confidences.append(0.0)
@@ -309,7 +321,7 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
 
 
 # ── Анализ ────────────────────────────────────────────────────────────────────
-# v9: dbg in response
+# v13: lower fill threshold
 _LAT_TO_CYR = {"A":"\u0410","B":"\u0411","C":"\u0412","D":"\u0413","E":"\u0414","F":"\u0415"}
 
 def _normalize_key(answer_key: str) -> list:
@@ -320,9 +332,10 @@ def _normalize_key(answer_key: str) -> list:
     return result
 
 def _analyze(answers: list, answer_key: str) -> dict:
+    dbg_answers = [{"i": i, "val": repr(a), "hex": a.encode("utf-8").hex()} for i, a in enumerate(answers[:5])]
     if not answer_key:
         return {"total": len(answers), "correct": 0, "wrong": 0, "percent": 0, "details": [],
-                "_dbg": "no_key"}
+                "_dbg": {"reason": "no_key", "answers": dbg_answers}}
     key = _normalize_key(answer_key)
     details, correct = [], 0
     dbg = []
@@ -342,7 +355,8 @@ def _analyze(answers: list, answer_key: str) -> dict:
         "total": total, "correct": correct, "wrong": total - correct,
         "percent": round(correct / total * 100, 1) if total else 0,
         "details": details,
-        "_dbg": dbg,
+        "_dbg": {"cmp": dbg, "key_raw": repr(answer_key), "key_hex": answer_key.encode("utf-8").hex()[:20],
+                 "answers_raw": dbg_answers},
     }
 
 

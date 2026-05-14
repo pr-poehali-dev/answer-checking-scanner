@@ -234,21 +234,24 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
 
     answers     = []
     confidences = []
+    dbg_fills   = []  # для диагностики
 
-    for row in answer_rows:
+    for row_i, row in enumerate(answer_rows):
         fills = [_fill_ratio(gray, cx, cy, cw, ch) for cx, cy, cw, ch in row]
         max_f = max(fills)
         sorted_f = sorted(fills, reverse=True)
         gap = sorted_f[0] - (sorted_f[1] if len(sorted_f) > 1 else 0)
+        idx = int(np.argmax(fills))
+
+        if row_i < 3:
+            dbg_fills.append({"row": row_i, "fills": [round(f,4) for f in fills],
+                               "max": round(max_f,4), "gap": round(gap,4),
+                               "threshold": round(fill_threshold,4), "chosen": opts[idx] if idx < len(opts) else "?"})
 
         if max_f >= fill_threshold:
-            # Явно заполнен — берём максимальный
-            idx = int(np.argmax(fills))
             answers.append(opts[idx] if idx < len(opts) else "")
             confidences.append(round(min(0.99, gap / 0.3 + 0.5), 2))
         elif max_f > 0 and gap > max_f * 0.25:
-            # Слабый сигнал но явный лидер — всё равно берём
-            idx = int(np.argmax(fills))
             answers.append(opts[idx] if idx < len(opts) else "")
             confidences.append(round(min(0.50, gap / 0.3), 2))
         else:
@@ -317,11 +320,12 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
         "squares_found":    len(squares),
         "answer_rows":      len(answer_rows),
         "code_rows":        len(code_rows),
+        "dbg_fills":        dbg_fills,
     }
 
 
 # ── Анализ ────────────────────────────────────────────────────────────────────
-# v13: lower fill threshold
+# v14: dbg fills
 _LAT_TO_CYR = {"A":"\u0410","B":"\u0411","C":"\u0412","D":"\u0413","E":"\u0414","F":"\u0415"}
 
 def _normalize_key(answer_key: str) -> list:
@@ -450,10 +454,7 @@ def handler(event: dict, context) -> dict:
         "debug": {
             "squaresFound":   result["squares_found"],
             "answerRows":     result["answer_rows"],
-            "codeRows":       result["code_rows"],
-            "answerKeyRaw":   answer_key,
-            "answerKeyHex":   answer_key.encode("utf-8").hex() if answer_key else "",
-            "answers0hex":    answers[0].encode("utf-8").hex() if answers else "",
-            "key0hex":        _normalize_key(answer_key)[0].encode("utf-8").hex() if answer_key and _normalize_key(answer_key) else "",
+            "answers5":       answers[:5],
+            "fills3":         result.get("dbg_fills", []),
         }
     })

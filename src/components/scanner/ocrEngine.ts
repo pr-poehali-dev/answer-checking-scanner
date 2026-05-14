@@ -73,7 +73,8 @@ export async function recognizeBlank(
       score_raw: resp.analysis.correct,
       score_scaled: resp.analysis.correct,
       details,
-      _dbg: resp.analysis._dbg,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      _dbg: { analyze: resp.analysis._dbg, ocr: (resp as unknown as any).debug },
     },
     image_size_kb: Math.round((file.size / 1024) * 10) / 10,
   };

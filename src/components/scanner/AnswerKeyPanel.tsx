@@ -23,7 +23,10 @@ export function AnswerKeyPanel({ answerKey, setAnswerKey, part1Count, setPart1Co
             className="w-full text-sm mono border border-border rounded-sm p-3 focus:outline-none focus:ring-1 focus:ring-ring resize-none"
             rows={3}
             value={answerKey}
-            onChange={e => setAnswerKey(e.target.value)}
+            onChange={e => {
+              const LAT: Record<string,string> = {"A":"А","B":"Б","C":"В","D":"Г","E":"Д","F":"Е","a":"А","b":"Б","c":"В","d":"Г","e":"Д","f":"Е"};
+              setAnswerKey(e.target.value.split("").map(ch => LAT[ch] ?? ch.toUpperCase()).join(""));
+            }}
             placeholder="Пример: ВАБГД12345АВВБГД..."
           />
         </div>

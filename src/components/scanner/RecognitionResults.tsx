@@ -50,8 +50,11 @@ export function RecognitionResults({ result, answerKey: initialKey, optionsCount
 
     const details = all_answers.map((ans, i) => {
       const ka = keyArr[i] ?? "";
-      const correct = ka !== "" && ans.toUpperCase() === ka;
-      return { student: ans, key: ka, correct };
+      // Нормализуем ОБА значения одинаково: trim → латиница→кириллица → toUpperCase
+      const normAns = normChar(ans.trim());
+      const normKa  = normChar(ka.trim());
+      const correct = normKa !== "" && normAns === normKa;
+      return { student: ans, key: normKa, correct };
     });
 
     const correctCount = details.filter(d => d.correct).length;

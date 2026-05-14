@@ -69,9 +69,11 @@ export function BulkUpload() {
       }
       setItems(prev => prev.map(i => i.id === it.id ? { ...i, status: "processing" } : i));
       try {
+        const LAT: Record<string,string> = {"A":"А","B":"Б","C":"В","D":"Г","E":"Д","F":"Е","a":"А","b":"Б","c":"В","d":"Г","e":"Д","f":"Е"};
+        const normKey = (work.answerKey || "").split("").map(ch => LAT[ch] ?? ch.toUpperCase()).join("");
         const resp = await recognizeApi.recognize(it.file, {
           questionsCount: work.totalQuestions,
-          answerKey: work.answerKey,
+          answerKey: normKey,
         });
         const correct = resp.analysis.correct;
         const grade = calcGrade(correct, work.gradeScale);

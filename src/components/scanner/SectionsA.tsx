@@ -25,11 +25,16 @@ export function UploadSection() {
   const [ocrStatus, setOcrStatus] = useState("");
   const [ocrProgress, setOcrProgress] = useState(0);
 
+  const normAnswerKey = (raw: string) => {
+    const LAT: Record<string,string> = {"A":"А","B":"Б","C":"В","D":"Г","E":"Д","F":"Е","a":"А","b":"Б","c":"В","d":"Г","e":"Д","f":"Е"};
+    return raw.split("").map(ch => LAT[ch] ?? ch.toUpperCase()).join("");
+  };
+
   const handleSelectWork = (workId: string) => {
     setSelectedWorkId(workId);
     const work = works.find(w => w.id === workId);
     if (work) {
-      setAnswerKey(work.answerKey);
+      setAnswerKey(normAnswerKey(work.answerKey));
       setQuestionsCount(work.totalQuestions);
     }
   };
@@ -204,7 +209,11 @@ export function UploadSection() {
             <div className="relative">
               <input
                 value={answerKey}
-                onChange={e => setAnswerKey(e.target.value.toUpperCase())}
+                onChange={e => {
+                  const LAT: Record<string,string> = {"A":"А","B":"Б","C":"В","D":"Г","E":"Д","F":"Е","a":"А","b":"Б","c":"В","d":"Г","e":"Д","f":"Е"};
+                  const val = e.target.value.split("").map(ch => LAT[ch] ?? ch.toUpperCase()).join("");
+                  setAnswerKey(val);
+                }}
                 placeholder={`Пример: ${opts.slice(0, Math.min(6, questionsCount)).join("")}…`}
                 maxLength={questionsCount}
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500 pr-16"

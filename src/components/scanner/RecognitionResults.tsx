@@ -24,18 +24,15 @@ function gradeLabel(pct: number) {
   return "2";
 }
 
-export function RecognitionResults({ result, answerKey, optionsCount = 4, onReset }: Props) {
+export function RecognitionResults({ result, optionsCount = 4, onReset }: Props) {
   const { analysis, student_code, all_answers } = result;
   const pct   = analysis.percent ?? 0;
   const grade = gradeLabel(pct);
   const opts  = OPT_LABELS.slice(0, optionsCount);
-  // Нормализуем ключ: латинские A/B/C/D → кириллические А/Б/В/Г
-  const LAT_TO_CYR: Record<string, string> = {
-    "A":"А","B":"Б","C":"В","D":"Г","E":"Д","F":"Е",
-    "a":"А","b":"Б","c":"В","d":"Г","e":"Д","f":"Е",
-  };
-  const normalizeChar = (ch: string) => LAT_TO_CYR[ch] ?? ch.toUpperCase();
-  const key = answerKey.split("").map(normalizeChar);
+
+  // Используем details с бэкенда — там уже правильное сравнение с нормализованным ключом
+  const details = analysis.details || [];
+  const hasKey  = details.length > 0 && details.some(d => d.key);
 
   return (
     <div className="space-y-4">
@@ -87,11 +84,13 @@ export function RecognitionResults({ result, answerKey, optionsCount = 4, onRese
         </div>
       </div>
 
-      {/* Таблица ответов A/B/C/D */}
+      {/* Таблица ответов */}
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
         <div className="px-4 py-3 border-b bg-gray-50 flex items-center justify-between">
           <span className="text-sm font-semibold text-gray-900">Детальные ответы</span>
-          <span className="text-xs text-gray-500">{analysis.correct} верно · {analysis.wrong} неверно</span>
+          {hasKey && (
+            <span className="text-xs text-gray-500">{analysis.correct} верно · {analysis.wrong} неверно</span>
+          )}
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -101,26 +100,33 @@ export function RecognitionResults({ result, answerKey, optionsCount = 4, onRese
                 {opts.map(lbl => (
                   <th key={lbl} className="text-center px-2 py-2 text-xs text-gray-500 font-medium w-10">{lbl}</th>
                 ))}
-                <th className="text-center px-3 py-2 text-xs text-gray-500 font-medium">Ключ</th>
-                <th className="text-center px-3 py-2 text-xs text-gray-500 font-medium">Итог</th>
+                {hasKey && (
+                  <th className="text-center px-3 py-2 text-xs text-gray-500 font-medium">Ключ</th>
+                )}
+                {hasKey && (
+                  <th className="text-center px-3 py-2 text-xs text-gray-500 font-medium">Итог</th>
+                )}
               </tr>
             </thead>
             <tbody>
               {all_answers.map((ans, i) => {
-                const keyAns = key[i] || "";
-                const isCorrect = keyAns && ans.toUpperCase() === keyAns;
-                const isWrong   = keyAns && ans && !isCorrect;
+                // Берём данные из бэкенда — они уже правильно сравнены
+                const detail    = details[i];
+                const keyAns    = detail?.key  ?? "";
+                const isCorrect = detail?.correct === true;
+                const isWrong   = hasKey && keyAns !== "" && !isCorrect;
+                const studentAns = detail?.student ?? ans; // ответ ученика из бэкенда
 
                 return (
                   <tr
                     key={i}
                     className={`border-b last:border-0 transition-colors ${
-                      isCorrect ? "bg-green-50" : isWrong ? "bg-red-50" : ""
+                      hasKey && isCorrect ? "bg-green-50" : hasKey && isWrong ? "bg-red-50" : ""
                     }`}
                   >
                     <td className="px-4 py-2 text-xs font-bold text-gray-600">{i + 1}</td>
                     {opts.map(lbl => {
-                      const selected = ans.toUpperCase() === lbl;
+                      const selected = studentAns.toUpperCase() === lbl;
                       const correct  = keyAns === lbl;
                       return (
                         <td key={lbl} className="px-2 py-2 text-center">
@@ -140,20 +146,24 @@ export function RecognitionResults({ result, answerKey, optionsCount = 4, onRese
                         </td>
                       );
                     })}
-                    <td className="px-3 py-2 text-center">
-                      {keyAns
-                        ? <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 text-blue-700 text-xs font-bold">{keyAns}</span>
-                        : <span className="text-gray-300 text-xs">—</span>
-                      }
-                    </td>
-                    <td className="px-3 py-2 text-center">
-                      {!keyAns
-                        ? <span className="text-gray-400 text-xs">—</span>
-                        : isCorrect
-                        ? <Icon name="CheckCircle2" size={16} className="text-green-500 mx-auto" />
-                        : <Icon name="XCircle" size={16} className="text-red-500 mx-auto" />
-                      }
-                    </td>
+                    {hasKey && (
+                      <td className="px-3 py-2 text-center">
+                        {keyAns
+                          ? <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 text-blue-700 text-xs font-bold">{keyAns}</span>
+                          : <span className="text-gray-300 text-xs">—</span>
+                        }
+                      </td>
+                    )}
+                    {hasKey && (
+                      <td className="px-3 py-2 text-center">
+                        {keyAns === ""
+                          ? <span className="text-gray-400 text-xs">—</span>
+                          : isCorrect
+                          ? <Icon name="CheckCircle2" size={16} className="text-green-500 mx-auto" />
+                          : <Icon name="XCircle" size={16} className="text-red-500 mx-auto" />
+                        }
+                      </td>
+                    )}
                   </tr>
                 );
               })}

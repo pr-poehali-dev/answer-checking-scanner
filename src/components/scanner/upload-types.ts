@@ -19,6 +19,7 @@ export interface RecognitionResult {
     score_scaled: number;
     percent: number;
     details: AnalysisDetail[];
+    _dbg?: unknown;
   };
   image_size_kb: number;
 }

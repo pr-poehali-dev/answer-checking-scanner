@@ -309,7 +309,7 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
 
 
 # ── Анализ ────────────────────────────────────────────────────────────────────
-# v8: reanalyze mode
+# v9: dbg in response
 _LAT_TO_CYR = {"A":"\u0410","B":"\u0411","C":"\u0412","D":"\u0413","E":"\u0414","F":"\u0415"}
 
 def _normalize_key(answer_key: str) -> list:
@@ -321,19 +321,28 @@ def _normalize_key(answer_key: str) -> list:
 
 def _analyze(answers: list, answer_key: str) -> dict:
     if not answer_key:
-        return {"total": len(answers), "correct": 0, "wrong": 0, "percent": 0, "details": []}
+        return {"total": len(answers), "correct": 0, "wrong": 0, "percent": 0, "details": [],
+                "_dbg": "no_key"}
     key = _normalize_key(answer_key)
     details, correct = [], 0
+    dbg = []
     for i, a in enumerate(answers):
         ka = key[i] if i < len(key) else ""
         ok = a.upper() == ka and ka != ""
         if ok: correct += 1
         details.append({"q": i+1, "student": a, "key": ka, "correct": ok})
+        if i < 3:
+            dbg.append({"q": i+1,
+                        "a_repr": repr(a), "a_hex": a.encode("utf-8").hex(),
+                        "a_up": repr(a.upper()), "a_up_hex": a.upper().encode("utf-8").hex(),
+                        "ka_repr": repr(ka), "ka_hex": ka.encode("utf-8").hex(),
+                        "eq": a.upper() == ka})
     total = len(answers)
     return {
         "total": total, "correct": correct, "wrong": total - correct,
         "percent": round(correct / total * 100, 1) if total else 0,
         "details": details,
+        "_dbg": dbg,
     }
 
 

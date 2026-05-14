@@ -73,6 +73,7 @@ export async function recognizeBlank(
       score_raw: resp.analysis.correct,
       score_scaled: resp.analysis.correct,
       details,
+      _dbg: resp.analysis._dbg,
     },
     image_size_kb: Math.round((file.size / 1024) * 10) / 10,
   };

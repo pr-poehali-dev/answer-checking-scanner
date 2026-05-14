@@ -312,6 +312,7 @@ export interface RecognizeResponse {
     wrong: number;
     percent: number;
     details: { q: number; student: string; key: string; correct: boolean }[];
+    _dbg?: unknown;
   };
 }
 

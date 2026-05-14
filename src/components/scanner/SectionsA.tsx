@@ -7,7 +7,7 @@ import { FlowStep, RecognitionResult } from "./upload-types";
 import { recognizeBlank } from "./ocrEngine";
 import { appStore, useAppStore } from "@/store/appStore";
 
-const OPT_LABELS = ["А", "Б", "В", "Г", "Д", "Е"];
+const OPT_LABELS = ["\u0410", "\u0411", "\u0412", "\u0413", "\u0414", "\u0415"];
 
 export function UploadSection() {
   const { works, students } = useAppStore();
@@ -26,7 +26,10 @@ export function UploadSection() {
   const [ocrProgress, setOcrProgress] = useState(0);
 
   const normAnswerKey = (raw: string) => {
-    const LAT: Record<string,string> = {"A":"А","B":"Б","C":"В","D":"Г","E":"Д","F":"Е","a":"А","b":"Б","c":"В","d":"Г","e":"Д","f":"Е"};
+    const LAT: Record<string,string> = {
+      "A":"\u0410","B":"\u0411","C":"\u0412","D":"\u0413","E":"\u0414","F":"\u0415",
+      "a":"\u0410","b":"\u0411","c":"\u0412","d":"\u0413","e":"\u0414","f":"\u0415",
+    };
     return raw.split("").map(ch => LAT[ch] ?? ch.toUpperCase()).join("");
   };
 
@@ -210,7 +213,10 @@ export function UploadSection() {
               <input
                 value={answerKey}
                 onChange={e => {
-                  const LAT: Record<string,string> = {"A":"А","B":"Б","C":"В","D":"Г","E":"Д","F":"Е","a":"А","b":"Б","c":"В","d":"Г","e":"Д","f":"Е"};
+                  const LAT: Record<string,string> = {
+                    "A":"\u0410","B":"\u0411","C":"\u0412","D":"\u0413","E":"\u0414","F":"\u0415",
+                    "a":"\u0410","b":"\u0411","c":"\u0412","d":"\u0413","e":"\u0414","f":"\u0415",
+                  };
                   const val = e.target.value.split("").map(ch => LAT[ch] ?? ch.toUpperCase()).join("");
                   setAnswerKey(val);
                 }}

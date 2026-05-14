@@ -16,7 +16,7 @@ CORS = {
     "Access-Control-Allow-Headers": "Content-Type, X-Authorization",
 }
 
-RU_OPTS = ["А", "Б", "В", "Г", "Д", "Е"]
+RU_OPTS = ["\u0410", "\u0411", "\u0412", "\u0413", "\u0414", "\u0415"]
 
 
 # ── Загрузка и нормализация ───────────────────────────────────────────────────
@@ -310,7 +310,7 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
 
 # ── Анализ ────────────────────────────────────────────────────────────────────
 # v8: reanalyze mode
-_LAT_TO_CYR = {"A":"А","B":"Б","C":"В","D":"Г","E":"Д","F":"Е"}
+_LAT_TO_CYR = {"A":"\u0410","B":"\u0411","C":"\u0412","D":"\u0413","E":"\u0414","F":"\u0415"}
 
 def _normalize_key(answer_key: str) -> list:
     """Нормализует ключ: латинские A/B/C/D → кириллические А/Б/В/Г."""

@@ -10,7 +10,8 @@ interface Props {
   onReset: () => void;
 }
 
-const OPT_LABELS = ["А", "Б", "В", "Г", "Д", "Е"];
+// Unicode escape — гарантируем кириллицу независимо от кодировки файла
+const OPT_LABELS = ["\u0410", "\u0411", "\u0412", "\u0413", "\u0414", "\u0415"];
 
 function scoreColor(pct: number) {
   if (pct >= 80) return "text-green-700 bg-green-50 border-green-200";

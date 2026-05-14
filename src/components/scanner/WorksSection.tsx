@@ -138,7 +138,10 @@ function WorkForm({ onSave, onCancel }: WorkFormProps) {
         <div>
           <label className="text-xs text-muted-foreground block mb-1">Ключ правильных ответов (без пробелов)</label>
           <textarea value={answerKey} onChange={e => {
-              const LAT: Record<string,string> = {"A":"А","B":"Б","C":"В","D":"Г","E":"Д","F":"Е","a":"А","b":"Б","c":"В","d":"Г","e":"Д","f":"Е"};
+              const LAT: Record<string,string> = {
+                "A":"\u0410","B":"\u0411","C":"\u0412","D":"\u0413","E":"\u0414","F":"\u0415",
+                "a":"\u0410","b":"\u0411","c":"\u0412","d":"\u0413","e":"\u0414","f":"\u0415",
+              };
               setAnswerKey(e.target.value.split("").map(ch => LAT[ch] ?? ch.toUpperCase()).join(""));
             }}
             rows={2} placeholder="Пример: АБВГД…"

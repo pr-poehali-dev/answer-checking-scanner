@@ -10,6 +10,7 @@ interface Props {
   onResetPassword: (login: string) => void;
   onToggle: (login: string) => void;
   onDelete: (login: string) => void;
+  onSetRole: (login: string, role: "teacher" | "tester") => void;
 }
 
 export default function AdminUsersTable({
@@ -21,13 +22,14 @@ export default function AdminUsersTable({
   onResetPassword,
   onToggle,
   onDelete,
+  onSetRole,
 }: Props) {
   return (
-    <div className="border border-border rounded-sm bg-white overflow-hidden">
-      <table className="w-full text-xs">
+    <div className="border border-border rounded-sm bg-white overflow-hidden overflow-x-auto">
+      <table className="w-full text-xs min-w-[700px]">
         <thead className="bg-muted">
           <tr>
-            <th className="px-3 py-2 text-left font-semibold">Логин</th>
+            <th className="px-3 py-2 text-left font-semibold">Логин / Роль</th>
             <th className="px-3 py-2 text-left font-semibold">ФИО</th>
             <th className="px-3 py-2 text-left font-semibold">Email</th>
             <th className="px-3 py-2 text-left font-semibold">Подписка / Trial</th>
@@ -47,12 +49,18 @@ export default function AdminUsersTable({
                 {u.role === "admin" && (
                   <span className="ml-1.5 px-1.5 py-0.5 rounded-sm text-[9px] font-bold bg-primary/10 text-primary">ADMIN</span>
                 )}
+                {u.role === "tester" && (
+                  <span className="ml-1.5 px-1.5 py-0.5 rounded-sm text-[9px] font-bold bg-purple-100 text-purple-700">TESTER</span>
+                )}
               </td>
               <td className="px-3 py-2">{u.full_name}</td>
               <td className="px-3 py-2 text-muted-foreground">{u.email || "—"}</td>
               <td className="px-3 py-2">
-                {u.role === "admin" ? (
-                  <span className="text-muted-foreground">—</span>
+                {u.role === "admin" || u.role === "tester" ? (
+                  <span className="inline-flex items-center gap-1 text-purple-600">
+                    <Icon name="Infinity" size={12} />
+                    бессрочный
+                  </span>
                 ) : u.subscription_active && u.subscription_status !== "trial" ? (
                   <span className="inline-flex items-center gap-1 text-green-600">
                     <Icon name="CircleCheck" size={12} fallback="CheckCircle" />
@@ -93,11 +101,18 @@ export default function AdminUsersTable({
               <td className="px-3 py-2 text-right">
                 <div className="inline-flex gap-1">
                   {u.role !== "admin" && (
-                    <button
-                      onClick={() => onSubscription(u)}
-                      title="Управление подпиской АОУСПТ"
-                      className="p-1.5 hover:bg-primary/10 rounded-sm text-muted-foreground hover:text-primary"
-                    ><Icon name="Crown" size={13} fallback="Star" /></button>
+                    <>
+                      <button
+                        onClick={() => onSubscription(u)}
+                        title="Управление подпиской"
+                        className="p-1.5 hover:bg-primary/10 rounded-sm text-muted-foreground hover:text-primary"
+                      ><Icon name="Crown" size={13} fallback="Star" /></button>
+                      <button
+                        onClick={() => onSetRole(u.login, u.role === "tester" ? "teacher" : "tester")}
+                        title={u.role === "tester" ? "Снять роль тестера" : "Назначить тестером"}
+                        className={`p-1.5 rounded-sm transition-colors ${u.role === "tester" ? "bg-purple-100 text-purple-700 hover:bg-purple-200" : "hover:bg-purple-50 text-muted-foreground hover:text-purple-700"}`}
+                      ><Icon name="FlaskConical" size={13} fallback="TestTube" /></button>
+                    </>
                   )}
                   <button
                     onClick={() => onResetPassword(u.login)}

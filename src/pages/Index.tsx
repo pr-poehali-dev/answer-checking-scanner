@@ -44,7 +44,7 @@ export default function Index() {
   const [active, setActive]         = useState<Section>("works");
   const [sidebarOpen, setSidebar]   = useState(false);
   const [authMode, setAuthMode]     = useState<"landing" | "login" | "signup">("landing");
-  const { teacher, yadiskConnected } = useAppStore();
+  const { teacher, yadiskConnected, maintenanceSections } = useAppStore();
   const ActiveSection = SECTION_COMPONENTS[active];
 
   useEffect(() => {
@@ -53,6 +53,11 @@ export default function Index() {
     const t = setInterval(() => appStore.refreshSubscription(), 5 * 60 * 1000);
     return () => clearInterval(t);
   }, [teacher?.login, teacher?.role]);
+
+  // Загружаем список разделов на ТО при старте
+  useEffect(() => {
+    appStore.loadMaintenance();
+  }, []);
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -86,8 +91,17 @@ export default function Index() {
   }
 
   if (teacher.role === "admin") return <AdminPanel />;
-  if (!teacher.subscriptionActive) return <SubscriptionGate />;
-  if (!yadiskConnected) return <YadiskRequiredGate />;
+
+  const isTester = teacher.role === "tester";
+
+  // Тестер — обходит проверки подписки и Я.Диска
+  if (!isTester) {
+    if (!teacher.subscriptionActive) return <SubscriptionGate />;
+    if (!yadiskConnected) return <YadiskRequiredGate />;
+  }
+
+  // Раздел на техработах — только тестер проходит, остальные видят заглушку
+  const isMaintenance = maintenanceSections.includes(active) && !isTester;
 
   const initials = teacher.name.split(" ").slice(0, 2).map(w => w[0]).join("").toUpperCase();
 
@@ -130,16 +144,22 @@ export default function Index() {
         {/* Nav */}
         <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
           <p className="section-header px-3 mb-3" style={{ color: "hsl(var(--sidebar-foreground))", opacity: 0.45 }}>Разделы</p>
-          {NAV_ITEMS.map((item) => (
-            <div
-              key={item.id}
-              className={`nav-item ${active === item.id ? "active" : ""}`}
-              onClick={() => navigate(item.id)}
-            >
-              <Icon name={item.icon} size={16} fallback="Circle" />
-              <span className="flex-1">{item.label}</span>
-            </div>
-          ))}
+          {NAV_ITEMS.map((item) => {
+            const inMaintenance = maintenanceSections.includes(item.id) && !isTester;
+            return (
+              <div
+                key={item.id}
+                className={`nav-item ${active === item.id ? "active" : ""} ${inMaintenance ? "opacity-60" : ""}`}
+                onClick={() => navigate(item.id)}
+              >
+                <Icon name={item.icon} size={16} fallback="Circle" />
+                <span className="flex-1">{item.label}</span>
+                {inMaintenance && (
+                  <Icon name="Construction" size={12} className="text-orange-400 flex-shrink-0" />
+                )}
+              </div>
+            );
+          })}
         </nav>
 
         {/* Я.Диск */}
@@ -204,7 +224,19 @@ export default function Index() {
         {/* Контент */}
         <main className="flex-1 overflow-y-auto pb-16 md:pb-0">
           <div className="px-3 md:px-6 py-4 md:py-6">
-            <ActiveSection key={active} />
+            {isMaintenance ? (
+              <div className="flex flex-col items-center justify-center py-20 text-center">
+                <div className="w-16 h-16 rounded-full bg-orange-100 flex items-center justify-center mb-4">
+                  <Icon name="Construction" size={28} className="text-orange-500" />
+                </div>
+                <h2 className="text-lg font-bold mb-2">Технические работы</h2>
+                <p className="text-muted-foreground text-sm max-w-xs">
+                  Этот раздел временно недоступен. Мы уже работаем над этим — попробуйте зайти позже.
+                </p>
+              </div>
+            ) : (
+              <ActiveSection key={active} />
+            )}
           </div>
           <CompanyFooter variant="full" />
         </main>

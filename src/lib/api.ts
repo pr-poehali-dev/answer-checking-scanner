@@ -6,6 +6,7 @@ const PRESENTATION_URL = "https://functions.poehali.dev/9aa03e93-715c-41fd-91f4-
 const TEST_URL = "https://functions.poehali.dev/80f9c6ec-e492-47b6-881a-633a41d7e4f4";
 const SUBSCRIPTION_URL = "https://functions.poehali.dev/0dc83bdb-3da2-4cb9-b9d9-f0b48cfb25da";
 
+export type UserRole = "admin" | "teacher" | "tester";
 export type SubscriptionStatus = "none" | "active" | "expired" | "trial";
 
 export interface SubscriptionInfo {
@@ -20,7 +21,7 @@ export interface SubscriptionInfo {
 }
 
 export interface AuthUser extends SubscriptionInfo {
-  role: "admin" | "teacher";
+  role: UserRole;
   login: string;
   full_name: string;
   first_name?: string;
@@ -38,7 +39,7 @@ export interface UserRow extends SubscriptionInfo {
   last_name?: string;
   email?: string;
   school: string;
-  role: string;
+  role: UserRole;
   is_active: boolean;
   created_at: string;
   subscription_plan?: string | null;
@@ -148,6 +149,23 @@ export const authApi = {
       "check-ai-limit",
       { method: "POST", body: JSON.stringify({ login }) }
     ),
+
+  setRole: (token: string, login: string, role: "teacher" | "tester") =>
+    request<{ success: boolean; login: string; role: string }>("set-role", {
+      method: "POST",
+      token,
+      body: JSON.stringify({ login, role }),
+    }),
+
+  getMaintenance: () =>
+    request<{ sections: string[] }>("maintenance", { method: "GET" }),
+
+  setMaintenance: (token: string, sections: string[]) =>
+    request<{ success: boolean; sections: string[] }>("maintenance", {
+      method: "POST",
+      token,
+      body: JSON.stringify({ sections }),
+    }),
 };
 
 const SYNOPSIS_URL = "https://functions.poehali.dev/c757a5f9-12cd-499d-a66f-79b9f9aeb8d1";

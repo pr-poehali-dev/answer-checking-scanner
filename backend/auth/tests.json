@@ -33,6 +33,26 @@
       "path": "/?action=check-ai-limit",
       "body": {},
       "expectedStatus": 400
+    },
+    {
+      "name": "GET maintenance returns 200",
+      "method": "GET",
+      "path": "/?action=maintenance",
+      "expectedStatus": 200
+    },
+    {
+      "name": "POST maintenance without admin token returns 403",
+      "method": "POST",
+      "path": "/?action=maintenance",
+      "body": { "sections": ["upload"] },
+      "expectedStatus": 403
+    },
+    {
+      "name": "Set-role without admin token returns 403",
+      "method": "POST",
+      "path": "/?action=set-role",
+      "body": { "login": "test", "role": "tester" },
+      "expectedStatus": 403
     }
   ]
 }

@@ -1,15 +1,17 @@
 """
 API авторизации и управления пользователями АОУСПТ.
-POST /login — вход (учитель/админ)
+POST /login — вход (учитель/админ/tester)
 POST /signup — самостоятельная регистрация (имя, фамилия, email, пароль) — логин генерируется автоматически
 POST /register — добавление пользователя админом
 POST /me — получить актуальный статус подписки (по токену)
 POST /activate-trial — активация пробного периода 5 дней
 POST /check-ai-limit — проверить/увеличить счётчик AI-запросов (trial: макс 5 в день)
 GET /users — список пользователей (admin)
-POST /toggle, /reset-password — admin
+POST /toggle, /reset-password, /set-role — admin
 DELETE /delete — admin
 POST /grant-subscription — admin (выдать/продлить/отозвать подписку)
+GET /maintenance — получить список разделов на ТО
+POST /maintenance — обновить список разделов на ТО (admin)
 """
 import json
 import os
@@ -273,6 +275,11 @@ def handler(event: dict, context) -> dict:
 
             sub = get_subscription_payload(sub_status, sub_until, trial_until, trial_ai_calls_today or 0, trial_ai_date)
 
+            # Тестер — всегда активен без подписки
+            if role == "tester":
+                sub["subscription_active"] = True
+                sub["subscription_status"] = "active"
+
             # Обновляем last_seen_at и, если нужно, статус подписки
             now_ts = datetime.utcnow()
             if sub_status == 'active' and sub['subscription_status'] == 'expired':
@@ -317,7 +324,7 @@ def handler(event: dict, context) -> dict:
             cur = conn.cursor()
             cur.execute(
                 f"""SELECT subscription_status, subscription_until,
-                           trial_until, trial_ai_calls_today, trial_ai_date
+                           trial_until, trial_ai_calls_today, trial_ai_date, role
                     FROM {SCHEMA}.users WHERE login = %s""",
                 (login,)
             )
@@ -325,7 +332,11 @@ def handler(event: dict, context) -> dict:
             if not row:
                 return _resp(404, {"error": "Пользователь не найден"})
             sub = get_subscription_payload(row[0], row[1], row[2], row[3] or 0, row[4])
-            return _resp(200, {"login": login, **sub})
+            user_role = row[5]
+            if user_role == "tester":
+                sub["subscription_active"] = True
+                sub["subscription_status"] = "active"
+            return _resp(200, {"login": login, "role": user_role, **sub})
         finally:
             conn.close()
 
@@ -446,8 +457,8 @@ def handler(event: dict, context) -> dict:
 
         if not login or not password or not full_name:
             return _resp(400, {"error": "Заполните все поля"})
-        if role not in ("teacher", "admin"):
-            return _resp(400, {"error": "Роль должна быть teacher или admin"})
+        if role not in ("teacher", "admin", "tester"):
+            return _resp(400, {"error": "Роль должна быть teacher, admin или tester"})
         if len(password) < 6:
             return _resp(400, {"error": "Пароль должен быть не менее 6 символов"})
 
@@ -726,6 +737,72 @@ def handler(event: dict, context) -> dict:
             if not cur.fetchone():
                 return _resp(404, {"error": "Пользователь не найден"})
             return _resp(200, {"success": True})
+        finally:
+            conn.close()
+
+    # ── POST set-role (admin) — сменить роль пользователя ───────────────────
+    if method == "POST" and route in ("set-role", "set_role"):
+        if not check_admin_token(headers):
+            return _resp(403, {"error": "Нет доступа"})
+
+        login = (body.get("login") or "").strip()
+        role = (body.get("role") or "").strip()
+        if not login or not role:
+            return _resp(400, {"error": "Укажите login и role"})
+        if role not in ("teacher", "tester"):
+            return _resp(400, {"error": "Роль должна быть teacher или tester"})
+        if login == "admin":
+            return _resp(400, {"error": "Нельзя изменить роль администратора"})
+
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"UPDATE {SCHEMA}.users SET role = %s WHERE login = %s RETURNING id",
+                (role, login)
+            )
+            conn.commit()
+            if not cur.fetchone():
+                return _resp(404, {"error": "Пользователь не найден"})
+            return _resp(200, {"success": True, "login": login, "role": role})
+        finally:
+            conn.close()
+
+    # ── GET maintenance — получить список разделов на ТО ────────────────────
+    if method == "GET" and route == "maintenance":
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(f"SELECT sections FROM {SCHEMA}.maintenance WHERE id = 1")
+            row = cur.fetchone()
+            sections = json.loads(row[0]) if row else []
+            return _resp(200, {"sections": sections})
+        finally:
+            conn.close()
+
+    # ── POST maintenance — обновить список разделов на ТО (admin) ───────────
+    if method == "POST" and route == "maintenance":
+        if not check_admin_token(headers):
+            return _resp(403, {"error": "Нет доступа"})
+
+        sections = body.get("sections", [])
+        if not isinstance(sections, list):
+            return _resp(400, {"error": "sections должен быть массивом"})
+
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"""INSERT INTO {SCHEMA}.maintenance (id, sections, updated_at, updated_by)
+                    VALUES (1, %s, NOW(), 'admin')
+                    ON CONFLICT (id) DO UPDATE
+                    SET sections = EXCLUDED.sections,
+                        updated_at = EXCLUDED.updated_at,
+                        updated_by = EXCLUDED.updated_by""",
+                (json.dumps(sections, ensure_ascii=False),)
+            )
+            conn.commit()
+            return _resp(200, {"success": True, "sections": sections})
         finally:
             conn.close()
 

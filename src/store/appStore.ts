@@ -75,7 +75,7 @@ function _scheduleAutoSave() {
   }, 2500);
 }
 
-export type UserRole = "admin" | "teacher";
+export type UserRole = "admin" | "teacher" | "tester";
 
 export type SubscriptionStatus = "none" | "active" | "expired" | "trial";
 
@@ -206,6 +206,7 @@ export type AppState = {
   yadiskUser: YadiskUser | null;
   yadiskSyncing: boolean;
   yadiskLastSync: string | null;
+  maintenanceSections: string[];
 };
 
 // Начальное состояние — восстанавливаем сессию из localStorage
@@ -223,6 +224,7 @@ let state: AppState = {
   yadiskUser: null,
   yadiskSyncing: false,
   yadiskLastSync: null,
+  maintenanceSections: [],
 };
 
 type Listener = () => void;
@@ -649,6 +651,28 @@ export const appStore = {
       return false;
     } catch {
       return false;
+    }
+  },
+
+  /** Загружает список разделов на техническом обслуживании с сервера. */
+  loadMaintenance: async () => {
+    try {
+      const { sections } = await authApi.getMaintenance();
+      state = { ...state, maintenanceSections: sections || [] };
+      notify();
+    } catch { /* ignore */ }
+  },
+
+  /** Обновляет список разделов на ТО (только для admin). */
+  setMaintenance: async (sections: string[]): Promise<{ ok: boolean; error?: string }> => {
+    const token = state.teacher?.authToken || "";
+    try {
+      await authApi.setMaintenance(token, sections);
+      state = { ...state, maintenanceSections: sections };
+      notify();
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: (e as Error).message };
     }
   },
 };

@@ -353,19 +353,22 @@ function fileToBase64(file: File): Promise<string> {
 export const recognizeApi = {
   recognize: async (file: File, params: { questionsCount?: number; answerKey?: string }) => {
     const image = await fileToBase64(file);
+    const payload = {
+      image,
+      questionsCount: params.questionsCount ?? 40,
+      answerKey: params.answerKey ?? "",
+    };
+    console.log("[recognize] answerKey sent:", JSON.stringify(payload.answerKey), "hex:", [...(payload.answerKey||"")].map(c=>c.codePointAt(0)?.toString(16)).join(","));
     const res = await fetch(RECOGNIZE_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        image,
-        questionsCount: params.questionsCount ?? 40,
-        answerKey: params.answerKey ?? "",
-      }),
+      body: JSON.stringify(payload),
     });
     const data = await res.json();
     if (!res.ok) {
       throw new Error(data.error || `Ошибка распознавания (${res.status})`);
     }
+    console.log("[recognize] analysis.details[0]:", data.analysis?.details?.[0]);
     return data as RecognizeResponse;
   },
 

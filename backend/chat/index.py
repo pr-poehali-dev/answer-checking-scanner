@@ -12,8 +12,8 @@ CORS = {
 }
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-# Бесплатная модель — Meta Llama 3.1 8B (free tier, без оплаты)
-FREE_MODEL = "meta-llama/llama-3.1-8b-instruct:free"
+# Бесплатная модель — Google Gemma 3 12B (free tier, без оплаты)
+FREE_MODEL = "google/gemma-3-12b-it:free"
 
 
 def _resp(status, body):

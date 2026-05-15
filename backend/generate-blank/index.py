@@ -203,22 +203,21 @@ def draw_blank(c, x0, y0, bw, bh, cfg):
     HL(c, x0, cur_y, x0+bw, lw=0.5, color=C_BLUE)
     cur_y -= S(2*mm)
 
-    # ── Код ученика: 5 строк × кружки 0-9 (закрашивать) ────────────────────
+    # ── Код ученика: 5 строк × кружки 0-9 ───────────────────────────────────
     cr2   = S(1.5*mm)
     gap_x = cr2*2 + S(0.5*mm)
     gap_y = cr2*2 + S(0.8*mm)
     nw2   = S(5*mm)
+    anc_c = S(3.5*mm)   # размер якоря для кода (чуть меньше)
 
-    T(c, x0+P, cur_y, "КОД УЧЕНИКА", BOLD, S(5.5), C_DARK)
-    T(c, x0+P+nw2+10*gap_x+S(1*mm), cur_y,
-      "(закрасьте нужную цифру в каждой строке)", REG, S(4.5), C_GRAY)
+    code_top_y = cur_y - S(1*mm)   # верх зоны кода (отступ от линии)
 
-    # Заголовок 0-9
+    # Заголовок 0-9 (над кружками)
     for di in range(10):
         T(c, x0+P+nw2+di*gap_x+cr2, cur_y, str(di), BOLD, S(4.5), C_BLUE, "center")
     cur_y -= S(2.8*mm)
 
-    # 5 строк
+    # 5 строк кружков
     for row in range(5):
         ry = cur_y - row*gap_y - cr2
         T(c, x0+P+nw2-S(0.8*mm), ry-cr2*0.35, str(row+1), BOLD, S(4.5), C_GRAY, "right")
@@ -228,6 +227,24 @@ def draw_blank(c, x0, y0, bw, bh, cfg):
             T(c, cx, ry-cr2*0.4, str(col), BOLD, S(4), C_GRAY, "center")
 
     cur_y -= 5*gap_y + S(1.5*mm)
+    code_bottom_y = cur_y   # низ зоны кода
+
+    # Якоря кода — в левом и правом поле, выровнены по высоте зоны кружков
+    code_ax_l = x0 + P / 2
+    code_ax_r = x0 + bw - P / 2
+    code_ay_t = code_top_y - anc_c / 2
+    code_ay_b = code_bottom_y + anc_c / 2
+    ANCHOR(c, code_ax_l, code_ay_t, anc_c)
+    ANCHOR(c, code_ax_r, code_ay_t, anc_c)
+    ANCHOR(c, code_ax_l, code_ay_b, anc_c)
+    ANCHOR(c, code_ax_r, code_ay_b, anc_c)
+
+    # Подпись "КОД УЧЕНИКА" — под кружками
+    cur_y -= S(1*mm)
+    T(c, x0+P, cur_y, "КОД УЧЕНИКА", BOLD, S(5.5), C_DARK)
+    T(c, x0+P+nw2+10*gap_x+S(1*mm), cur_y,
+      "(закрасьте нужную цифру в каждой строке)", REG, S(4.5), C_GRAY)
+    cur_y -= S(3*mm)
 
     # ── Подпись ──────────────────────────────────────────────────────────────
     HL(c, x0, cur_y, x0+bw, lw=0.3, color=C_LINE)

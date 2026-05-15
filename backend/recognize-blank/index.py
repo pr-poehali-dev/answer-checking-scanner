@@ -250,27 +250,9 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
     else:
         answer_rows = []
 
-    # Определяем порог заполненности адаптивно
-    all_fills = [_fill_ratio(gray, cx, cy, cw, ch)
-                 for row in answer_rows for cx, cy, cw, ch in row]
-
-    if all_fills:
-        max_fill_global = max(all_fills)
-        min_fill_global = min(all_fills)
-        spread = max_fill_global - min_fill_global
-        if spread > 0.03:
-            # Порог = середина между медианой и максимумом, но не выше 85% от макс
-            median_f = sorted(all_fills)[len(all_fills)//2]
-            fill_threshold = (median_f + max_fill_global) / 2
-            fill_threshold = max(0.04, min(fill_threshold, max_fill_global * 0.85))
-        else:
-            fill_threshold = max(0.04, max_fill_global * 0.5)
-    else:
-        fill_threshold = 0.06
-
     answers     = []
     confidences = []
-    dbg_fills   = []  # для диагностики
+    dbg_fills   = []
 
     for row_i, row in enumerate(answer_rows):
         fills = [_fill_ratio(gray, cx, cy, cw, ch) for cx, cy, cw, ch in row]
@@ -278,18 +260,20 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
         sorted_f = sorted(fills, reverse=True)
         gap = sorted_f[0] - (sorted_f[1] if len(sorted_f) > 1 else 0)
         idx = int(np.argmax(fills))
+        chosen = opts[idx] if idx < len(opts) else "?"
 
         if row_i < 3:
             dbg_fills.append({"row": row_i, "fills": [round(f,4) for f in fills],
-                               "max": round(max_f,4), "gap": round(gap,4),
-                               "threshold": round(fill_threshold,4), "chosen": opts[idx] if idx < len(opts) else "?"})
+                               "max": round(max_f,4), "gap": round(gap,4), "chosen": chosen})
 
-        if max_f >= fill_threshold:
+        # Относительный метод: выбираем максимальный если он выделяется среди остальных
+        mean_others = (sum(fills) - max_f) / (len(fills) - 1) if len(fills) > 1 else 0
+        relative_gap = max_f - mean_others  # насколько выделяется относительно среднего остальных
+
+        if max_f > 0.15 and relative_gap > 0.05:
             answers.append(opts[idx] if idx < len(opts) else "")
-            confidences.append(round(min(0.99, gap / 0.3 + 0.5), 2))
-        elif max_f > 0 and gap > max_f * 0.25:
-            answers.append(opts[idx] if idx < len(opts) else "")
-            confidences.append(round(min(0.50, gap / 0.3), 2))
+            conf = min(0.99, relative_gap / 0.3 + 0.4)
+            confidences.append(round(conf, 2))
         else:
             answers.append("")
             confidences.append(0.0)
@@ -362,7 +346,7 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
 
 
 # ── Анализ ────────────────────────────────────────────────────────────────────
-# v18: multi-pass square detection
+# v19: relative fill method
 _LAT_TO_CYR = {"A":"\u0410","B":"\u0411","C":"\u0412","D":"\u0413","E":"\u0414","F":"\u0415"}
 
 def _normalize_key(answer_key: str) -> list:

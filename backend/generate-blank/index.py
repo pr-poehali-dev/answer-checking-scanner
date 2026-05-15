@@ -72,6 +72,11 @@ def SQ(c, cx, cy, side, stroke=C_BLUE, fill=white, lw=0.6):
     c.setStrokeColor(stroke); c.setFillColor(fill); c.setLineWidth(lw)
     c.roundRect(cx - side/2, cy - side/2, side, side, side*0.15, stroke=1, fill=1)
 
+def ANCHOR(c, cx, cy, side):
+    """Жирный чёрный квадрат-якорь для OCR-навигации."""
+    c.setFillColor(black); c.setStrokeColor(black); c.setLineWidth(0)
+    c.rect(cx - side/2, cy - side/2, side, side, stroke=0, fill=1)
+
 
 def draw_blank(c, x0, y0, bw, bh, cfg):
     n_q     = cfg["n_q"]
@@ -138,17 +143,17 @@ def draw_blank(c, x0, y0, bw, bh, cfg):
     cur_y -= S(0.5*mm)
 
     # ── Сетка вопросов: квадраты с буквой ────────────────────────────────────
-    # Порядок: вертикальный — 1-й столбец сверху вниз, затем 2-й и т.д.
     n_cols = 1 if n_q <= 15 else (2 if n_q <= 40 else 3)
-    n_rows = math.ceil(n_q / n_cols)   # строк в одном столбце
+    n_rows = math.ceil(n_q / n_cols)
     col_w  = (bw - 2*P) / n_cols
     num_w  = S(7.5*mm)
     cell_w = min((col_w - num_w) / n_opts, S(8.5*mm))
     sq     = min(cell_w * 0.78, S(5.5*mm))
     fs     = max(S(4), sq * 0.52)
     row_h  = sq + S(2.0*mm)
+    anc    = S(4.5*mm)   # размер якорного квадрата
 
-    # Заголовок А Б В Г — для каждого столбца
+    # Заголовок А Б В Г
     HDR_G = S(4.5*mm)
     for ci in range(n_cols):
         for oi, lbl in enumerate(opts):
@@ -158,10 +163,12 @@ def draw_blank(c, x0, y0, bw, bh, cfg):
     HL(c, x0+P, cur_y, x0+bw-P, lw=0.35)
     cur_y -= S(0.2*mm)
 
-    # Вертикальный порядок: qi=0..n_rows-1 → столбец 0, qi=n_rows..2*n_rows-1 → столбец 1
+    # Запоминаем Y начала сетки (верх первой строки)
+    grid_top_y = cur_y
+
     for qi in range(n_q):
-        ci = qi // n_rows        # номер столбца
-        ri = qi % n_rows         # строка внутри столбца
+        ci = qi // n_rows
+        ri = qi % n_rows
         rx = x0 + P + ci * col_w
         ry = cur_y - ri * row_h - row_h/2
 
@@ -178,7 +185,24 @@ def draw_blank(c, x0, y0, bw, bh, cfg):
             SQ(c, ox, ry, sq)
             T(c, ox, ry-sq*0.32, opts[oi], BOLD, fs, C_GRAY, "center")
 
-    cur_y -= n_rows * row_h + S(0.5*mm)
+    grid_bottom_y = cur_y - n_rows * row_h
+    cur_y = grid_bottom_y - S(0.5*mm)
+
+    # ── 4 якорных квадрата (жирные чёрные, по углам зоны ответов) ────────────
+    # Левый край сетки ответов и правый
+    grid_left_x  = x0 + P
+    grid_right_x = x0 + P + n_cols * col_w
+    # Якоря: верхний-левый, верхний-правый, нижний-левый, нижний-правый
+    anchor_margin = anc / 2
+    ax_l = grid_left_x  + anchor_margin
+    ax_r = grid_right_x - anchor_margin
+    ay_t = grid_top_y   - anchor_margin
+    ay_b = grid_bottom_y + anchor_margin
+    ANCHOR(c, ax_l, ay_t, anc)
+    ANCHOR(c, ax_r, ay_t, anc)
+    ANCHOR(c, ax_l, ay_b, anc)
+    ANCHOR(c, ax_r, ay_b, anc)
+
     HL(c, x0, cur_y, x0+bw, lw=0.5, color=C_BLUE)
     cur_y -= S(2*mm)
 

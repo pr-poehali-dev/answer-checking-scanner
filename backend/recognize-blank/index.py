@@ -1,11 +1,11 @@
 """
 Распознавание бланка ответов через OpenCV.
-Ответы: крестик ✕ в квадрате. Код ученика: закрашенный кружок.
+Алгоритм: находим 4 жирных якорных квадрата → вычисляем точную сетку ответов → распознаём крестики.
 
 POST / — { image: base64, questionsCount?: 20, optionsCount?: 4, answerKey?: "АБВГ..." }
 -> { studentCode, answers[], confidence[], analysis }
 """
-# v23: grid-based detection
+# v24: anchor-based grid detection
 import json, base64
 import numpy as np
 import cv2
@@ -19,7 +19,7 @@ CORS = {
 RU_OPTS = ["А", "Б", "В", "Г", "Д", "Е"]
 
 
-# ── Загрузка и нормализация ───────────────────────────────────────────────────
+# ── Загрузка ──────────────────────────────────────────────────────────────────
 def _load(image_b64: str):
     img_bytes = base64.b64decode(image_b64)
     arr = np.frombuffer(img_bytes, dtype=np.uint8)
@@ -36,145 +36,93 @@ def _load(image_b64: str):
     return img, gray
 
 
-# ── Поиск всех прямоугольных контуров ────────────────────────────────────────
-def _find_all_rects(gray, min_side, max_side):
-    blurred = cv2.GaussianBlur(gray, (3, 3), 0)
-    rects = []
-    seen = set()
-    for block_size, C in [(15, 4), (21, 6), (11, 3)]:
-        thresh = cv2.adaptiveThreshold(blurred, 255,
-                    cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, block_size, C)
-        k = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
-        thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, k)
-        contours, _ = cv2.findContours(thresh, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-        for cnt in contours:
-            x, y, cw, ch = cv2.boundingRect(cnt)
-            side = (cw + ch) / 2
-            if not (min_side < side < max_side):
-                continue
-            ratio = cw / ch if ch > 0 else 0
-            if not (0.45 < ratio < 2.2):
-                continue
-            area = cv2.contourArea(cnt)
-            if area < min_side * min_side * 0.25:
-                continue
-            cx = x + cw // 2
-            cy = y + ch // 2
-            key = (cx // 6, cy // 6)
-            if key in seen:
-                continue
-            seen.add(key)
-            rects.append((cx, cy, int(cw), int(ch)))
-    return rects
+# ── Поиск якорных квадратов ───────────────────────────────────────────────────
+def _find_anchors(gray):
+    """Якоря — полностью залитые чёрные квадраты ~4-6мм."""
+    h, w = gray.shape
+    min_s = int(min(h, w) * 0.012)
+    max_s = int(min(h, w) * 0.060)
+
+    _, bw = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    k = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+    bw = cv2.morphologyEx(bw, cv2.MORPH_CLOSE, k, iterations=2)
+
+    contours, _ = cv2.findContours(bw, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    candidates = []
+    for cnt in contours:
+        x, y, cw, ch = cv2.boundingRect(cnt)
+        side = (cw + ch) / 2
+        if not (min_s < side < max_s):
+            continue
+        ratio = cw / ch if ch > 0 else 0
+        if not (0.5 < ratio < 2.0):
+            continue
+        area = cv2.contourArea(cnt)
+        fill = area / (cw * ch) if cw * ch > 0 else 0
+        if fill < 0.65:
+            continue
+        roi = gray[y:y+ch, x:x+cw]
+        if float(np.mean(roi)) > 100:
+            continue
+        cx = x + cw // 2
+        cy = y + ch // 2
+        candidates.append((cx, cy, cw, ch, side))
+
+    return candidates
 
 
-# ── Восстановление регулярной сетки по 1D-проекции ───────────────────────────
-def _find_grid_centers(coords, expected_count, img_size):
-    """
-    По списку координат (x или y) находит expected_count регулярных позиций.
-    Использует гистограмму + поиск пиков.
-    """
-    if not coords:
-        return []
-    coords = np.array(sorted(coords))
-    # Гистограмма с размером бина ~2% от размера изображения
-    bin_size = max(3, img_size // 80)
-    bins = int(img_size / bin_size) + 1
-    hist = np.zeros(bins, dtype=np.int32)
-    for c in coords:
-        b = int(c / bin_size)
-        if 0 <= b < bins:
-            hist[b] += 1
-
-    # Сглаживаем
-    hist = np.convolve(hist, [1, 2, 3, 2, 1], mode='same').astype(np.float32)
-
-    # Находим пики
-    peaks = []
-    for i in range(1, len(hist) - 1):
-        if hist[i] > hist[i - 1] and hist[i] >= hist[i + 1] and hist[i] > 0:
-            peaks.append(i * bin_size + bin_size // 2)
-
-    if not peaks:
-        return []
-
-    # Если пиков больше чем нужно — оставляем самые сильные
-    if len(peaks) > expected_count * 2:
-        peak_vals = [(hist[int(p / bin_size)], p) for p in peaks]
-        peak_vals.sort(reverse=True)
-        peaks = sorted([p for _, p in peak_vals[:expected_count * 2]])
-
-    return peaks
+# ── Выбираем 4 угловых якоря ──────────────────────────────────────────────────
+def _select_corner_anchors(candidates, img_w, img_h):
+    if len(candidates) < 4:
+        return None
+    corners_target = [(0, 0), (img_w, 0), (0, img_h), (img_w, img_h)]
+    selected = []
+    used = set()
+    for tx, ty in corners_target:
+        best = min(
+            [(i, c) for i, c in enumerate(candidates) if i not in used],
+            key=lambda ic: (ic[1][0] - tx)**2 + (ic[1][1] - ty)**2,
+            default=None
+        )
+        if best:
+            used.add(best[0])
+            selected.append(best[1])
+    if len(selected) == 4:
+        selected.sort(key=lambda p: (p[1], p[0]))
+        top = sorted(selected[:2], key=lambda p: p[0])
+        bot = sorted(selected[2:], key=lambda p: p[0])
+        return top[0], top[1], bot[0], bot[1]
+    return None
 
 
-# ── Кластеризация пиков в регулярные позиции ─────────────────────────────────
-def _cluster_peaks(peaks, expected_n, img_size):
-    """Из списка пиков выбираем expected_n наиболее регулярных."""
-    if len(peaks) <= expected_n:
-        return peaks
-    # Берём наиболее равномерно распределённые
-    # Простой жадный алгоритм: берём первый, потом ближайший к ожидаемому шагу
-    best = None
-    best_score = 1e9
-    n = len(peaks)
-    for start in range(n):
-        subset = [peaks[start]]
-        remaining = list(peaks[start + 1:])
-        while len(subset) < expected_n and remaining:
-            if len(subset) >= 2:
-                step = (subset[-1] - subset[0]) / (len(subset) - 1)
-                expected_next = subset[-1] + step
-            else:
-                expected_next = subset[-1] + img_size / expected_n
-            closest = min(remaining, key=lambda p: abs(p - expected_next))
-            subset.append(closest)
-            remaining.remove(closest)
-        if len(subset) == expected_n:
-            diffs = [subset[i+1] - subset[i] for i in range(len(subset)-1)]
-            score = np.std(diffs)
-            if score < best_score:
-                best_score = score
-                best = subset[:]
-    return sorted(best) if best else sorted(peaks[:expected_n])
-
-
-# ── Оценка крестика в квадрате ────────────────────────────────────────────────
+# ── Оценка крестика в ячейке ──────────────────────────────────────────────────
 def _cross_score(gray, cx, cy, cell_w, cell_h) -> float:
-    """
-    Крестик ✕ занимает диагонали квадрата — детектируем через угловые зоны.
-    Буква занимает только центр.
-    """
     pad = max(2, int(min(cell_w, cell_h) * 0.10))
-    x1 = max(0, cx - cell_w // 2 + pad)
-    y1 = max(0, cy - cell_h // 2 + pad)
-    x2 = min(gray.shape[1], cx + cell_w // 2 - pad)
-    y2 = min(gray.shape[0], cy + cell_h // 2 - pad)
+    x1 = max(0, int(cx - cell_w / 2 + pad))
+    y1 = max(0, int(cy - cell_h / 2 + pad))
+    x2 = min(gray.shape[1], int(cx + cell_w / 2 - pad))
+    y2 = min(gray.shape[0], int(cy + cell_h / 2 - pad))
     if x2 <= x1 or y2 <= y1:
         return 0.0
-
     roi = gray[y1:y2, x1:x2]
     rh, rw = roi.shape
-    if rh < 4 or rw < 4:
+    if rh < 3 or rw < 3:
         return 0.0
-
     _, bw = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-
-    c = max(2, int(min(rh, rw) * 0.28))
-    corners = [bw[:c, :c], bw[:c, rw-c:], bw[rh-c:, :c], bw[rh-c:, rw-c:]]
+    c_size = max(2, int(min(rh, rw) * 0.28))
+    corners = [bw[:c_size, :c_size], bw[:c_size, rw-c_size:],
+               bw[rh-c_size:, :c_size], bw[rh-c_size:, rw-c_size:]]
     corner_fill = float(np.mean([np.mean(z > 0) for z in corners]))
-
     mc = max(1, int(min(rh, rw) * 0.22))
     cy_r, cx_r = rh // 2, rw // 2
-    center = bw[max(0,cy_r-mc):cy_r+mc, max(0,cx_r-mc):cx_r+mc]
+    center = bw[max(0, cy_r-mc):cy_r+mc, max(0, cx_r-mc):cx_r+mc]
     center_fill = float(np.mean(center > 0)) if center.size > 0 else 0.0
-
     total_fill = float(np.mean(bw > 0))
-
     score = corner_fill * 0.55 + total_fill * 0.35 - center_fill * 0.15
     return float(np.clip(score, 0, 1))
 
 
-# ── Кластеризация по строкам (для кружков кода) ───────────────────────────────
+# ── Кластеризация по строкам ──────────────────────────────────────────────────
 def _cluster_rows(items, tol_ratio=1.2):
     if not items:
         return []
@@ -198,7 +146,7 @@ def _cluster_rows(items, tol_ratio=1.2):
     return rows
 
 
-# ── Поиск кружков (код ученика) ───────────────────────────────────────────────
+# ── Поиск кружков ─────────────────────────────────────────────────────────────
 def _find_circles_in_zone(gray, y_start, y_end):
     zone = gray[y_start:y_end, :]
     blurred = cv2.GaussianBlur(zone, (5, 5), 1)
@@ -221,92 +169,108 @@ def _circle_brightness(gray, cx, cy, r) -> float:
     return float(np.mean(pixels)) if len(pixels) > 0 else 255.0
 
 
-# ── Главная функция распознавания ─────────────────────────────────────────────
+# ── Fallback без якорей ───────────────────────────────────────────────────────
+def _fallback_detect(gray, questions_count, options_count):
+    h, w = gray.shape
+    min_s = int(min(h, w) * 0.015)
+    max_s = int(min(h, w) * 0.090)
+    blurred = cv2.GaussianBlur(gray, (3, 3), 0)
+    rects = []
+    seen = set()
+    for block_size, C in [(15, 4), (21, 6)]:
+        thresh = cv2.adaptiveThreshold(blurred, 255,
+                    cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, block_size, C)
+        k = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+        thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, k)
+        contours, _ = cv2.findContours(thresh, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+        for cnt in contours:
+            x, y, cw, ch = cv2.boundingRect(cnt)
+            side = (cw + ch) / 2
+            if not (min_s < side < max_s):
+                continue
+            ratio = cw / ch if ch > 0 else 0
+            if not (0.45 < ratio < 2.2):
+                continue
+            area = cv2.contourArea(cnt)
+            if area < min_s * min_s * 0.25:
+                continue
+            cx = x + cw // 2
+            cy = y + ch // 2
+            key = (cx // 6, cy // 6)
+            if key in seen:
+                continue
+            seen.add(key)
+            rects.append((cx, cy, int(cw), int(ch)))
+    if not rects:
+        return []
+    rows_raw = _cluster_rows(rects, tol_ratio=0.8)
+    result = []
+    for row in rows_raw:
+        n = len(row)
+        if n == options_count:
+            result.append(row)
+        elif abs(n - options_count) == 1 and n >= 2:
+            result.append(row[:options_count])
+    return result
+
+
+# ── Главная функция ───────────────────────────────────────────────────────────
 def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict:
     img, gray = _load(image_b64)
     h, w = gray.shape
     opts = RU_OPTS[:options_count]
 
-    # ── 1. Зона ответов (верхние 75%) ────────────────────────────────────────
-    answer_zone_h = int(h * 0.75)
+    answer_zone_h = int(h * 0.78)
     gray_ans = gray[:answer_zone_h, :]
-    zh, zw = gray_ans.shape
 
-    # Оценочный размер квадрата: ~2-6% от короткой стороны
-    min_side = int(min(zh, zw) * 0.015)
-    max_side = int(min(zh, zw) * 0.090)
+    anchor_cands = _find_anchors(gray_ans)
+    anchors = _select_corner_anchors(anchor_cands, w, answer_zone_h)
 
-    # Находим все прямоугольные объекты нужного размера
-    rects = _find_all_rects(gray_ans, min_side, max_side)
+    dbg_anchors = len(anchor_cands)
+    answer_rows = []
+    dbg_rows_dist = []
 
-    # ── 2. Строим сетку по проекциям X и Y ───────────────────────────────────
-    # Бланк: 2 колонки × 10 строк × options_count вариантов
-    n_rows = questions_count  # всего вопросов (строк в сетке)
-    n_cols = options_count    # вариантов в строке (А,Б,В,Г)
+    if anchors:
+        tl, tr, bl, br = anchors
+        grid_x0 = tl[0]
+        grid_x1 = tr[0]
+        grid_y0 = tl[1]
+        grid_y1 = bl[1]
+        grid_w  = grid_x1 - grid_x0
+        grid_h  = grid_y1 - grid_y0
 
-    # Бланк двухколоночный: левые 10 вопросов + правые 10 вопросов
-    # По X ожидаем: options_count * 2 колонки квадратов (+ разрыв между половинами)
-    # По Y ожидаем: questions_count / 2 строк (10 строк если 20 вопросов)
-    rows_per_col = questions_count // 2  # 10 строк в каждой колонке бланка
+        n_blank_cols = 1 if questions_count <= 15 else (2 if questions_count <= 40 else 3)
+        rows_per_col = questions_count // n_blank_cols
 
-    xs = [r[0] for r in rects]
-    ys = [r[1] for r in rects]
-    cell_w = int(np.median([r[2] for r in rects])) if rects else max_side // 2
-    cell_h = int(np.median([r[3] for r in rects])) if rects else max_side // 2
+        section_w = grid_w / n_blank_cols
 
-    # Пики по Y = строки бланка
-    y_peaks = _find_grid_centers(ys, rows_per_col, zh)
-    # Пики по X = колонки вариантов (4 варианта × 2 секции = 8 позиций)
-    x_peaks = _find_grid_centers(xs, n_cols * 2, zw)
+        for sec in range(n_blank_cols):
+            sec_x0 = grid_x0 + sec * section_w
+            sq_area_w = section_w * 0.80
+            sq_step = sq_area_w / options_count
+            sq_x_start = sec_x0 + section_w * 0.20 + sq_step / 2
 
-    dbg_rows_dist = [len(y_peaks), len(x_peaks), len(rects)]
+            row_step = grid_h / rows_per_col
+            sq_y_start = grid_y0 + row_step / 2
 
-    answer_rows = []  # список строк, каждая = список (cx,cy,cw,ch) для вариантов
-
-    if y_peaks and x_peaks:
-        # Разбиваем X-пики на 2 секции (левая и правая колонка бланка)
-        # Находим самый большой разрыв между X-пиками
-        x_sorted = sorted(x_peaks)
-        if len(x_sorted) >= 2:
-            gaps = [(x_sorted[i+1] - x_sorted[i], i) for i in range(len(x_sorted)-1)]
-            max_gap_idx = max(gaps, key=lambda g: g[0])[1]
-            left_xs  = x_sorted[:max_gap_idx + 1]
-            right_xs = x_sorted[max_gap_idx + 1:]
-        else:
-            left_xs  = x_sorted
-            right_xs = []
-
-        # Берём по n_cols позиций из каждой секции
-        left_xs  = sorted(left_xs)[-n_cols:]   # последние n_cols (ближайшие к центру)
-        right_xs = sorted(right_xs)[:n_cols]   # первые n_cols
-
-        # Формируем строки: сначала левая колонка (вопросы 1-10), потом правая (11-20)
-        for section_xs in [left_xs, right_xs]:
-            if not section_xs:
-                continue
-            for yc in y_peaks[:rows_per_col]:
+            for ri in range(rows_per_col):
                 row = []
-                for xc in sorted(section_xs):
-                    row.append((int(xc), int(yc), cell_w, cell_h))
-                if len(row) >= 2:
-                    answer_rows.append(row)
-
-    # Fallback: если сетка не построилась — используем исходные rects
-    if not answer_rows and rects:
-        from collections import Counter
-        sq_rows_raw = _cluster_rows(rects, tol_ratio=0.8)
-        cnt = Counter(len(r) for r in sq_rows_raw)
-        mode_n = cnt.most_common(1)[0][0] if cnt else n_cols
-        for row in sq_rows_raw:
-            n = len(row)
-            if n == n_cols:
+                cy_cell = sq_y_start + ri * row_step
+                for oi in range(options_count):
+                    cx_cell = sq_x_start + oi * sq_step
+                    row.append((int(cx_cell), int(cy_cell),
+                                int(sq_step * 0.8), int(row_step * 0.75)))
                 answer_rows.append(row)
-            elif abs(n - n_cols) == 1 and n >= 2:
-                answer_rows.append(row[:n_cols])
+
+        dbg_rows_dist = [f"anchors_ok", len(answer_rows),
+                         f"grid={int(grid_w)}x{int(grid_h)}",
+                         f"tl=({tl[0]},{tl[1]})", f"br=({br[0]},{br[1]})"]
+    else:
+        answer_rows = _fallback_detect(gray_ans, questions_count, options_count)
+        dbg_rows_dist = [f"fallback", f"cands={dbg_anchors}", len(answer_rows)]
 
     answer_rows = answer_rows[:questions_count]
 
-    # ── 3. Оцениваем заполненность каждого варианта ───────────────────────────
     answers     = []
     confidences = []
     dbg_fills   = []
@@ -317,23 +281,20 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
             answers.append("")
             confidences.append(0.0)
             continue
-
-        idx   = int(np.argmax(fills))
-        max_f = fills[idx]
+        idx      = int(np.argmax(fills))
+        max_f    = fills[idx]
         sorted_f = sorted(fills, reverse=True)
-        gap = sorted_f[0] - (sorted_f[1] if len(sorted_f) > 1 else 0)
-        mean_others = (sum(fills) - max_f) / (len(fills) - 1) if len(fills) > 1 else 0
-        relative_gap = max_f - mean_others
-
-        chosen = opts[idx] if idx < len(opts) else "?"
+        gap      = sorted_f[0] - (sorted_f[1] if len(sorted_f) > 1 else 0)
+        mean_oth = (sum(fills) - max_f) / (len(fills) - 1) if len(fills) > 1 else 0
+        rel_gap  = max_f - mean_oth
+        chosen   = opts[idx] if idx < len(opts) else "?"
         if row_i < 5:
             dbg_fills.append({"row": row_i, "fills": [round(f, 4) for f in fills],
                                "max": round(max_f, 4), "gap": round(gap, 4),
-                               "rel_gap": round(relative_gap, 4), "chosen": chosen})
-
-        if max_f > 0.10 and relative_gap > 0.04:
+                               "rel_gap": round(rel_gap, 4), "chosen": chosen})
+        if max_f > 0.10 and rel_gap > 0.04:
             answers.append(opts[idx] if idx < len(opts) else "")
-            confidences.append(round(min(0.99, relative_gap / 0.25 + 0.35), 2))
+            confidences.append(round(min(0.99, rel_gap / 0.25 + 0.35), 2))
         else:
             answers.append("")
             confidences.append(0.0)
@@ -342,10 +303,8 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
         answers.append("")
         confidences.append(0.0)
 
-    # ── 4. Код ученика (нижние ~35%) ─────────────────────────────────────────
     code_zone_start = int(h * 0.65)
     circles = _find_circles_in_zone(gray, code_zone_start, h)
-
     if len(circles) < 10:
         zone = gray[code_zone_start:, :]
         blurred2 = cv2.GaussianBlur(zone, (3, 3), 0)
@@ -388,7 +347,7 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
         "confidences":   confidences[:questions_count],
         "code":          code,
         "code_confs":    code_confs,
-        "squares_found": len(rects),
+        "squares_found": dbg_anchors,
         "answer_rows":   len(answer_rows),
         "code_rows":     len(code_rows),
         "dbg_fills":     dbg_fills,
@@ -401,10 +360,7 @@ _LAT_TO_CYR = {"A": "А", "B": "Б", "C": "В", "D": "Г", "E": "Д", "F": "Е"}
 
 
 def _normalize_key(answer_key: str) -> list:
-    result = []
-    for ch in answer_key.strip().upper():
-        result.append(_LAT_TO_CYR.get(ch, ch))
-    return result
+    return [_LAT_TO_CYR.get(ch, ch) for ch in answer_key.strip().upper()]
 
 
 def _analyze(answers: list, answer_key: str) -> dict:
@@ -422,8 +378,7 @@ def _analyze(answers: list, answer_key: str) -> dict:
             correct += 1
         details.append({"q": i + 1, "student": a, "key": ka, "correct": ok})
         if i < 3:
-            dbg.append({"q": i + 1,
-                        "a_repr": repr(a), "a_hex": a.encode("utf-8").hex(),
+            dbg.append({"q": i + 1, "a_repr": repr(a), "a_hex": a.encode("utf-8").hex(),
                         "a_up": repr(a.upper()), "a_up_hex": a.upper().encode("utf-8").hex(),
                         "ka_repr": repr(ka), "ka_hex": ka.encode("utf-8").hex(),
                         "eq": a.upper() == ka})
@@ -438,7 +393,6 @@ def _analyze(answers: list, answer_key: str) -> dict:
     }
 
 
-# ── HTTP handler ──────────────────────────────────────────────────────────────
 def _resp(status, body):
     return {"statusCode": status, "headers": {**CORS, "Content-Type": "application/json"},
             "body": json.dumps(body, ensure_ascii=False)}
@@ -446,9 +400,8 @@ def _resp(status, body):
 
 def handler(event: dict, context) -> dict:
     """
-    Распознавание бланка: крестики в квадратах (ответы) + закрашенные кружки (код).
+    Распознавание бланка: якоря → сетка → крестики + кружки кода.
     POST { image: base64, questionsCount?: 20, optionsCount?: 4, answerKey?: "..." }
-    -> { studentCode, answers[], confidence[], analysis }
     """
     if event.get("httpMethod") == "OPTIONS":
         return {"statusCode": 200, "headers": CORS, "body": ""}
@@ -462,7 +415,6 @@ def handler(event: dict, context) -> dict:
     except Exception:
         return _resp(400, {"error": "Некорректный JSON"})
 
-    # Режим reanalyze
     if body.get("answers") and not body.get("image"):
         raw_answers = body["answers"]
         answer_key  = str(body.get("answerKey", ""))
@@ -519,7 +471,7 @@ def handler(event: dict, context) -> dict:
         "questionsCount":    questions,
         "analysis":          analysis,
         "debug": {
-            "squaresFound": result["squares_found"],
+            "anchorsFound": result["squares_found"],
             "answerRows":   result["answer_rows"],
             "answers5":     answers[:5],
             "fills3":       result.get("dbg_fills", []),

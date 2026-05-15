@@ -159,7 +159,11 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
     # Кластеризуем по строкам (каждая строка = один вопрос × options_count квадратов)
     sq_rows = _cluster_rows(squares, tol_ratio=1.0)
 
+    # ── DEBUG: сколько квадратов в каждой строке ──────────────────────────────
+    dbg_rows_dist = [len(r) for r in sq_rows]
+
     # Оставляем только строки с нужным числом квадратов
+    # Ищем наиболее частое количество квадратов в строке (мода) как fallback
     valid_rows = []
     for row in sq_rows:
         n = len(row)
@@ -167,6 +171,16 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
             valid_rows.append(row)
         elif abs(n - options_count) == 1 and n >= 2:
             valid_rows.append(row[:options_count])
+
+    # Если всё равно ничего не нашли — пробуем взять строки с модой (наиб. частое n)
+    if not valid_rows and sq_rows:
+        from collections import Counter
+        cnt = Counter(len(r) for r in sq_rows)
+        mode_n = cnt.most_common(1)[0][0]
+        for row in sq_rows:
+            n = len(row)
+            if n == mode_n and n >= 2:
+                valid_rows.append(row[:options_count] if n > options_count else row)
 
     # ── Перегруппировка: горизонтальные строки → вертикальные столбцы ────────
     # Бланк вертикальный: вопросы 1-10 в левом столбце, 11-20 в правом.
@@ -321,11 +335,12 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
         "answer_rows":      len(answer_rows),
         "code_rows":        len(code_rows),
         "dbg_fills":        dbg_fills,
+        "dbg_rows_dist":    dbg_rows_dist,
     }
 
 
 # ── Анализ ────────────────────────────────────────────────────────────────────
-# v14: dbg fills
+# v16: rows dist + fallback mode
 _LAT_TO_CYR = {"A":"\u0410","B":"\u0411","C":"\u0412","D":"\u0413","E":"\u0414","F":"\u0415"}
 
 def _normalize_key(answer_key: str) -> list:
@@ -456,5 +471,6 @@ def handler(event: dict, context) -> dict:
             "answerRows":     result["answer_rows"],
             "answers5":       answers[:5],
             "fills3":         result.get("dbg_fills", []),
+            "rowsDist":       result.get("dbg_rows_dist", []),
         }
     })

@@ -40,35 +40,42 @@ def _load(image_b64: str):
 # ── Поиск прямоугольников (квадратов ответов) ────────────────────────────────
 def _find_squares(gray):
     """Ищем все квадраты/прямоугольники на изображении."""
-    blurred = cv2.GaussianBlur(gray, (3,3), 0)
-    thresh  = cv2.adaptiveThreshold(blurred, 255,
-                cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 15, 4)
-    # Убираем мелкий шум
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2,2))
-    thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
-
-    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    squares = []
     h, w = gray.shape
-    min_side = int(min(h, w) * 0.012)   # ~1.2% короткой стороны
-    max_side = int(min(h, w) * 0.060)   # ~6%
+    min_side = int(min(h, w) * 0.010)
+    max_side = int(min(h, w) * 0.080)
 
-    for cnt in contours:
-        peri = cv2.arcLength(cnt, True)
-        approx = cv2.approxPolyDP(cnt, 0.05 * peri, True)
-        if len(approx) != 4:
-            continue
-        x, y, cw, ch = cv2.boundingRect(approx)
-        # Квадратность: стороны примерно равны
-        ratio = cw / ch if ch > 0 else 0
-        if not (0.5 < ratio < 2.0):
-            continue
-        side = (cw + ch) / 2
-        if not (min_side < side < max_side):
-            continue
-        cx = x + cw//2
-        cy = y + ch//2
-        squares.append((cx, cy, int(cw), int(ch)))
+    squares = []
+    seen = set()
+
+    for block_size, C in [(11, 3), (19, 5), (31, 7)]:
+        blurred = cv2.GaussianBlur(gray, (3, 3), 0)
+        thresh = cv2.adaptiveThreshold(blurred, 255,
+                    cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, block_size, C)
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+        thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
+
+        for mode in (cv2.RETR_LIST, cv2.RETR_EXTERNAL):
+            contours, _ = cv2.findContours(thresh, mode, cv2.CHAIN_APPROX_SIMPLE)
+            for cnt in contours:
+                x, y, cw, ch = cv2.boundingRect(cnt)
+                side = (cw + ch) / 2
+                if not (min_side < side < max_side):
+                    continue
+                ratio = cw / ch if ch > 0 else 0
+                if not (0.45 < ratio < 2.2):
+                    continue
+                # Проверяем что контур прямоугольный (площадь / bbox ≥ 0.5)
+                area = cv2.contourArea(cnt)
+                bbox_area = cw * ch
+                if bbox_area == 0 or area / bbox_area < 0.4:
+                    continue
+                cx = x + cw // 2
+                cy = y + ch // 2
+                key = (cx // 5, cy // 5)
+                if key in seen:
+                    continue
+                seen.add(key)
+                squares.append((cx, cy, int(cw), int(ch)))
 
     return squares
 
@@ -355,7 +362,7 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
 
 
 # ── Анализ ────────────────────────────────────────────────────────────────────
-# v17: split long rows + adaptive threshold fix
+# v18: multi-pass square detection
 _LAT_TO_CYR = {"A":"\u0410","B":"\u0411","C":"\u0412","D":"\u0413","E":"\u0414","F":"\u0415"}
 
 def _normalize_key(answer_key: str) -> list:

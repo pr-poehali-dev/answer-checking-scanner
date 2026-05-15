@@ -162,8 +162,24 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
     # ── DEBUG: сколько квадратов в каждой строке ──────────────────────────────
     dbg_rows_dist = [len(r) for r in sq_rows]
 
-    # Оставляем только строки с нужным числом квадратов
-    # Ищем наиболее частое количество квадратов в строке (мода) как fallback
+    # Разбиваем длинные строки на группы по options_count квадратов
+    # (бланк двухколоночный: в одной горизонтальной строке может быть 8 или 16 квадратов)
+    def _split_row_by_x(row, n):
+        """Разбивает строку квадратов на группы по n штук, кластеризуя по X."""
+        if len(row) <= n:
+            return [row]
+        xs = [sq[0] for sq in row]
+        gaps = sorted(range(1, len(xs)), key=lambda i: xs[i] - xs[i-1], reverse=True)
+        # Находим k-1 наибольших разрывов где k = кол-во ожидаемых групп
+        expected_groups = round(len(row) / n)
+        split_points = sorted(gaps[:expected_groups - 1])
+        groups, prev = [], 0
+        for sp in split_points:
+            groups.append(row[prev:sp])
+            prev = sp
+        groups.append(row[prev:])
+        return [g for g in groups if len(g) >= 2]
+
     valid_rows = []
     for row in sq_rows:
         n = len(row)
@@ -171,16 +187,13 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
             valid_rows.append(row)
         elif abs(n - options_count) == 1 and n >= 2:
             valid_rows.append(row[:options_count])
-
-    # Если всё равно ничего не нашли — пробуем взять строки с модой (наиб. частое n)
-    if not valid_rows and sq_rows:
-        from collections import Counter
-        cnt = Counter(len(r) for r in sq_rows)
-        mode_n = cnt.most_common(1)[0][0]
-        for row in sq_rows:
-            n = len(row)
-            if n == mode_n and n >= 2:
-                valid_rows.append(row[:options_count] if n > options_count else row)
+        elif n > options_count and n % options_count == 0:
+            valid_rows.extend(_split_row_by_x(row, options_count))
+        elif n > options_count:
+            sub = _split_row_by_x(row, options_count)
+            for s in sub:
+                if abs(len(s) - options_count) <= 1:
+                    valid_rows.append(s[:options_count])
 
     # ── Перегруппировка: горизонтальные строки → вертикальные столбцы ────────
     # Бланк вертикальный: вопросы 1-10 в левом столбце, 11-20 в правом.
@@ -236,12 +249,14 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
 
     if all_fills:
         max_fill_global = max(all_fills)
-        # Если разброс заполненности достаточный — используем порог
-        if (max(all_fills) - min(all_fills)) > 0.03:
-            fill_threshold = (sorted(all_fills)[len(all_fills)//2] + max_fill_global) / 2
-            fill_threshold = max(0.04, min(fill_threshold, 0.30))
+        min_fill_global = min(all_fills)
+        spread = max_fill_global - min_fill_global
+        if spread > 0.03:
+            # Порог = середина между медианой и максимумом, но не выше 85% от макс
+            median_f = sorted(all_fills)[len(all_fills)//2]
+            fill_threshold = (median_f + max_fill_global) / 2
+            fill_threshold = max(0.04, min(fill_threshold, max_fill_global * 0.85))
         else:
-            # Разброс маленький — всё примерно одинаково пустое, берём мягкий порог
             fill_threshold = max(0.04, max_fill_global * 0.5)
     else:
         fill_threshold = 0.06
@@ -340,7 +355,7 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
 
 
 # ── Анализ ────────────────────────────────────────────────────────────────────
-# v16: rows dist + fallback mode
+# v17: split long rows + adaptive threshold fix
 _LAT_TO_CYR = {"A":"\u0410","B":"\u0411","C":"\u0412","D":"\u0413","E":"\u0414","F":"\u0415"}
 
 def _normalize_key(answer_key: str) -> list:

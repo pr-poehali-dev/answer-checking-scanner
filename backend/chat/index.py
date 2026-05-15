@@ -12,8 +12,11 @@ CORS = {
 }
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-# Бесплатная модель — Google Gemma 3 12B (free tier, без оплаты)
-FREE_MODEL = "google/gemma-3-12b-it:free"
+# Бесплатные модели по приоритету (fallback при 404)
+FREE_MODELS = [
+    "nousresearch/hermes-3-llama-3.1-405b:free",
+    "minimax/minimax-m2.5:free",
+]
 
 
 def _resp(status, body):
@@ -55,33 +58,39 @@ def handler(event: dict, context) -> dict:
         if m.get("role") in ("user", "assistant") and m.get("content")
     ]
 
-    try:
-        resp = requests.post(
-            OPENROUTER_URL,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-                "HTTP-Referer": "https://poehali.dev",
-                "X-Title": "AOUSPT Chat",
-            },
-            json={
-                "model": FREE_MODEL,
-                "messages": chat_messages,
-                "temperature": 0.7,
-                "max_tokens": 1500,
-            },
-            timeout=25,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        reply = data["choices"][0]["message"]["content"]
-        return _resp(200, {"reply": reply})
-    except requests.HTTPError as e:
-        err = ""
+    last_err = "Нет доступных моделей"
+    for model in FREE_MODELS:
         try:
-            err = e.response.json().get("error", {}).get("message", "")
-        except Exception:
-            pass
-        return _resp(502, {"error": f"API error {e.response.status_code}: {err}"})
-    except Exception as e:
-        return _resp(502, {"error": f"Ошибка: {e}"})
+            resp = requests.post(
+                OPENROUTER_URL,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://poehali.dev",
+                    "X-Title": "AOUSPT Chat",
+                },
+                json={
+                    "model": model,
+                    "messages": chat_messages,
+                    "temperature": 0.7,
+                    "max_tokens": 1500,
+                },
+                timeout=25,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            reply = data["choices"][0]["message"]["content"]
+            return _resp(200, {"reply": reply})
+        except requests.HTTPError as e:
+            try:
+                err_msg = e.response.json().get("error", {}).get("message", "")
+            except Exception:
+                err_msg = str(e)
+            last_err = f"API error {e.response.status_code}: {err_msg}"
+            if e.response.status_code == 404:
+                continue  # пробуем следующую модель
+            return _resp(502, {"error": last_err})
+        except Exception as e:
+            last_err = str(e)
+            continue
+    return _resp(502, {"error": last_err})

@@ -61,7 +61,7 @@ export function YadiskCard() {
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">
               Подключите свой Яндекс.Диск — приложение будет автоматически сохранять список учеников,
-              работы и результаты в папку <span className="mono font-semibold">АОУСПТ</span> на вашем диске.
+              работы и результаты в папку <span className="mono font-semibold">САОУ</span> на вашем диске.
               Данные принадлежат только вам.
             </p>
             <button
@@ -144,7 +144,7 @@ export function YadiskCard() {
             </div>
 
             <p className="text-xs text-muted-foreground">
-              Папка: <span className="mono font-semibold">АОУСПТ/</span> — ученики, работы, результаты.
+              Папка: <span className="mono font-semibold">САОУ/</span> — ученики, работы, результаты.
             </p>
           </div>
         )}

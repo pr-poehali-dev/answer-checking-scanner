@@ -30,12 +30,9 @@ export default function YadiskRequiredGate() {
           {/* Шапка */}
           <div className="flex items-center justify-between mb-8">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-sm flex items-center justify-center"
-                style={{ background: "hsl(var(--sidebar-primary))" }}>
-                <Icon name="ScanLine" size={20} className="text-white" />
-              </div>
+              <img src="https://cdn.poehali.dev/projects/d27f4839-edaf-47f9-8c40-4a5b1af76f6d/bucket/7bd38a19-122a-479d-96c5-931aa6ce875c.jpg" alt="САОУ" className="w-10 h-10 rounded-sm object-contain" />
               <div>
-                <p className="text-sm font-bold">АОУСПТ</p>
+                <p className="text-sm font-bold">САОУ</p>
                 <p className="text-xs text-muted-foreground">{teacher?.name}</p>
               </div>
             </div>
@@ -58,7 +55,7 @@ export default function YadiskRequiredGate() {
               </div>
               <h1 className="text-xl font-bold mb-2">Привяжите Яндекс.Диск</h1>
               <p className="text-sm opacity-85">
-                АОУСПТ хранит все ваши данные — учеников, работы, результаты и файлы — исключительно на вашем личном Яндекс.Диске. Без привязки система не работает.
+                САОУ хранит все ваши данные — учеников, работы, результаты и файлы — исключительно на вашем личном Яндекс.Диске. Без привязки система не работает.
               </p>
             </div>
           </div>

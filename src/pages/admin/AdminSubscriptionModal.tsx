@@ -28,7 +28,7 @@ export default function AdminSubscriptionModal({
       <div className="bg-white rounded-sm border border-border max-w-md w-full p-5" onClick={e => e.stopPropagation()}>
         <div className="flex items-center gap-2 mb-1">
           <Icon name="Crown" size={16} className="text-primary" fallback="Star" />
-          <h3 className="text-sm font-bold">Подписка АОУСПТ</h3>
+          <h3 className="text-sm font-bold">Подписка САОУ</h3>
         </div>
         <p className="text-xs text-muted-foreground mb-4">
           Пользователь: <span className="font-semibold text-foreground">{subFor.full_name}</span>{" "}

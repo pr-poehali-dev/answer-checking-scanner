@@ -21,7 +21,7 @@ export default function PrivacyPage() {
 
           <p className="text-sm text-muted-foreground leading-relaxed mb-8">
             Настоящий документ («Политика конфиденциальности») определяет порядок обработки и защиты персональных данных
-            пользователей веб-сайта АОУСПТ /{" "}
+            пользователей веб-сайта САОУ /{" "}
             <a href="https://ooo29.ru" target="_blank" rel="noreferrer" className="underline hover:text-foreground">ooo29.ru</a>,
             предоставляющего услуги подписки на контент/сервисы на условиях срочного пользования.
           </p>

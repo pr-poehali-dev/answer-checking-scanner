@@ -24,7 +24,7 @@ export default function AdminPanel() {
   const [newLogin, setNewLogin]       = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [newName, setNewName]         = useState("");
-  const [newSchool, setNewSchool]     = useState("АОУСПТ");
+  const [newSchool, setNewSchool]     = useState("САОУ");
 
   const [resetFor, setResetFor]   = useState<string | null>(null);
   const [resetPass, setResetPass] = useState("");
@@ -59,10 +59,10 @@ export default function AdminPanel() {
         login: newLogin.trim(),
         password: newPassword,
         full_name: newName.trim(),
-        school: newSchool.trim() || "АОУСПТ",
+        school: newSchool.trim() || "САОУ",
         role: "teacher",
       });
-      setNewLogin(""); setNewPassword(""); setNewName(""); setNewSchool("АОУСПТ");
+      setNewLogin(""); setNewPassword(""); setNewName(""); setNewSchool("САОУ");
       setShowForm(false);
       await loadUsers();
     } catch (e) {
@@ -153,7 +153,7 @@ export default function AdminPanel() {
           </div>
           <div>
             <h1 className="text-base font-bold leading-none">Панель администратора</h1>
-            <p className="text-xs text-muted-foreground mt-0.5">АОУСПТ · управление системой</p>
+            <p className="text-xs text-muted-foreground mt-0.5">САОУ · управление системой</p>
           </div>
         </div>
         <button

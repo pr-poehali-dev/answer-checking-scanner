@@ -109,12 +109,9 @@ export default function LoginPage({ onLogin, initialMode = "login", onBack }: Lo
       <div className="w-full max-w-sm">
         {/* Logo */}
         <div className="text-center mb-8">
-          <div className="w-14 h-14 rounded-sm flex items-center justify-center mx-auto mb-4"
-            style={{ background: "hsl(var(--sidebar-primary))" }}>
-            <Icon name="ScanLine" size={28} className="text-white" />
-          </div>
-          <h1 className="text-xl font-bold text-foreground">АОУСПТ</h1>
-          <p className="text-sm text-muted-foreground mt-1">Система проверки работ</p>
+          <img src="https://cdn.poehali.dev/projects/d27f4839-edaf-47f9-8c40-4a5b1af76f6d/bucket/7bd38a19-122a-479d-96c5-931aa6ce875c.jpg" alt="САОУ" className="w-16 h-16 rounded-xl object-contain mx-auto mb-4" />
+          <h1 className="text-xl font-bold text-foreground">САОУ</h1>
+          <p className="text-sm text-muted-foreground mt-1">Система Автоматизации Образовательных Учреждений</p>
         </div>
 
         {/* Tabs */}
@@ -143,7 +140,7 @@ export default function LoginPage({ onLogin, initialMode = "login", onBack }: Lo
         <div className="border border-border rounded-sm bg-white shadow-sm">
           <div className="px-6 py-4 border-b border-border bg-muted">
             <p className="text-sm font-semibold text-center">
-              {mode === "login" ? "Вход для учителя" : "Регистрация в системе АОУСПТ"}
+              {mode === "login" ? "Вход для учителя" : "Регистрация в системе САОУ"}
             </p>
           </div>
 

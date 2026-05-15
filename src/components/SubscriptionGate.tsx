@@ -125,12 +125,9 @@ export default function SubscriptionGate() {
         {/* Шапка */}
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-sm flex items-center justify-center"
-              style={{ background: "hsl(var(--sidebar-primary))" }}>
-              <Icon name="ScanLine" size={20} className="text-white" />
-            </div>
+            <img src="https://cdn.poehali.dev/projects/d27f4839-edaf-47f9-8c40-4a5b1af76f6d/bucket/7bd38a19-122a-479d-96c5-931aa6ce875c.jpg" alt="САОУ" className="w-10 h-10 rounded-sm object-contain" />
             <div>
-              <p className="text-sm font-bold">АОУСПТ</p>
+              <p className="text-sm font-bold">САОУ</p>
               <p className="text-xs text-muted-foreground">{teacher?.name}</p>
             </div>
           </div>
@@ -149,7 +146,7 @@ export default function SubscriptionGate() {
           <div className="p-6 text-white">
             <div className="flex items-center gap-2 mb-1">
               <Icon name="Crown" size={16} className="text-yellow-300" fallback="Star" />
-              <span className="text-xs font-semibold uppercase tracking-wider opacity-80">Подписка АОУСПТ</span>
+              <span className="text-xs font-semibold uppercase tracking-wider opacity-80">Подписка САОУ</span>
             </div>
             <h1 className="text-2xl font-bold mb-2">
               {status === "expired" ? "Подписка истекла" : trialExpired ? "Пробный период завершён" : "Активируйте подписку"}

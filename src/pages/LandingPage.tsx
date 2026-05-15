@@ -84,11 +84,8 @@ export default function LandingPage({ onLogin, onRegister, onTrial }: LandingPag
         <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
           {/* Логотип */}
           <div className="flex items-center gap-2.5 flex-shrink-0">
-            <div className="w-8 h-8 rounded-sm flex items-center justify-center"
-              style={{ background: "hsl(var(--sidebar-primary))" }}>
-              <Icon name="ScanLine" size={16} className="text-white" />
-            </div>
-            <span className="font-bold text-sm text-foreground">АОУСПТ</span>
+            <img src="https://cdn.poehali.dev/projects/d27f4839-edaf-47f9-8c40-4a5b1af76f6d/bucket/7bd38a19-122a-479d-96c5-931aa6ce875c.jpg" alt="САОУ" className="w-8 h-8 rounded-sm object-contain" />
+            <span className="font-bold text-sm text-foreground">САОУ</span>
           </div>
 
           {/* Навигация десктоп */}
@@ -166,7 +163,7 @@ export default function LandingPage({ onLogin, onRegister, onTrial }: LandingPag
               Автоматизируйте проверку работ и создание материалов
             </h1>
             <p className="text-base sm:text-lg text-white/75 mb-8 leading-relaxed max-w-2xl">
-              АОУСПТ экономит учителям часы ручной проверки: сканирует бланки ответов, генерирует тесты и презентации, пишет конспекты — строго по программе Минпросвещения РФ.
+              САОУ экономит учителям часы ручной проверки: сканирует бланки ответов, генерирует тесты и презентации, пишет конспекты — строго по программе Минпросвещения РФ.
             </p>
             <div className="flex flex-col sm:flex-row gap-3 flex-wrap">
               <button

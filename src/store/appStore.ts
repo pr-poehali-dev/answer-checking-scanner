@@ -1,4 +1,4 @@
-// Глобальное хранилище приложения АОУСПТ
+// Глобальное хранилище приложения САОУ
 import { authApi } from "@/lib/api";
 import { yadisk, yadiskStorage, ROOT_FOLDER, STUDENTS_FILE, WORKS_FILE, type YadiskUser } from "@/lib/yadisk";
 

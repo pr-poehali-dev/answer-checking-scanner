@@ -66,12 +66,7 @@ export default function CompanyFooter({
           {/* Юр. лицо + регистрация */}
           <div className="md:col-span-2">
             <div className="flex items-center gap-2 mb-2">
-              <div
-                className="w-6 h-6 rounded-sm flex items-center justify-center"
-                style={{ background: "hsl(var(--sidebar-primary))" }}
-              >
-                <Icon name="ScanLine" size={13} className="text-white" />
-              </div>
+              <img src="https://cdn.poehali.dev/projects/d27f4839-edaf-47f9-8c40-4a5b1af76f6d/bucket/7bd38a19-122a-479d-96c5-931aa6ce875c.jpg" alt="САОУ" className="w-6 h-6 rounded-sm object-contain" />
               <p className="text-xs font-bold">{COMPANY_INFO.fullName}</p>
             </div>
             <p className="text-[11px] text-muted-foreground leading-snug mb-3">

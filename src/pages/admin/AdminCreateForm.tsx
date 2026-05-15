@@ -48,7 +48,7 @@ export default function AdminCreateForm({
           <input
             value={newSchool}
             onChange={e => setNewSchool(e.target.value)}
-            placeholder="АОУСПТ"
+            placeholder="САОУ"
             className="w-full px-3 py-2 border border-border rounded-sm text-sm focus:outline-none focus:ring-1 focus:ring-ring"
           />
         </div>

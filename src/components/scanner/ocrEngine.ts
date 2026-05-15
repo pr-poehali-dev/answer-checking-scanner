@@ -1,4 +1,4 @@
-// OCR-движок АОУСПТ — реальное распознавание через бэкенд (OpenCV).
+// OCR-движок САОУ — реальное распознавание через бэкенд (OpenCV).
 // Старая сигнатура сохранена, чтобы не ломать UI.
 import { AnalysisDetail, RecognitionResult } from "./upload-types";
 import { recognizeApi } from "@/lib/api";

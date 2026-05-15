@@ -130,13 +130,13 @@ export default function Index() {
         {/* Logo + закрыть на мобиле */}
         <div className="px-5 py-5 border-b flex items-start justify-between" style={{ borderColor: "hsl(var(--sidebar-border))" }}>
           <div>
-            <div className="flex items-center gap-2.5 mb-1">
-              <div className="w-7 h-7 rounded-sm flex items-center justify-center" style={{ background: "hsl(var(--sidebar-primary))" }}>
-                <Icon name="ScanLine" size={15} className="text-white" />
+            <div className="flex items-center gap-2.5">
+              <img src="https://cdn.poehali.dev/projects/d27f4839-edaf-47f9-8c40-4a5b1af76f6d/bucket/7bd38a19-122a-479d-96c5-931aa6ce875c.jpg" alt="САОУ" className="w-8 h-8 rounded-sm object-contain" />
+              <div>
+                <span className="font-bold text-sm" style={{ color: "hsl(var(--sidebar-accent-foreground))" }}>САОУ</span>
+                <p className="text-[10px]" style={{ color: "hsl(var(--sidebar-foreground))", opacity: 0.55 }}>Система Автоматизации<br/>Образовательных Учреждений</p>
               </div>
-              <span className="font-bold text-sm" style={{ color: "hsl(var(--sidebar-accent-foreground))" }}>АОУСПТ</span>
             </div>
-            <p className="text-xs" style={{ color: "hsl(var(--sidebar-foreground))", opacity: 0.55 }}>Система проверки работ</p>
           </div>
           <button className="md:hidden p-1 mt-0.5 text-muted-foreground" onClick={() => setSidebar(false)}>
             <Icon name="X" size={18} />

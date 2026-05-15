@@ -37,95 +37,84 @@ def _load(image_b64: str):
     return img, gray
 
 
-# ── Поиск прямоугольников через морфологию линий ─────────────────────────────
+# ── Поиск квадратов бланка через RETR_CCOMP (внутренние контуры рамок) ───────
 def _find_squares(gray):
     """
-    Ищем квадраты бланка через горизонтальные + вертикальные линии.
-    Квадраты бланка — прямоугольные рамки с буквой/крестиком внутри.
+    Квадрат бланка = прямоугольная рамка.
+    Ищем через RETR_CCOMP: внешний контур рамки + внутренний (дырка).
+    Это даёт именно рамки нужного размера, а не содержимое.
     """
     h, w = gray.shape
-    min_side = int(min(h, w) * 0.012)
-    max_side = int(min(h, w) * 0.090)
-
-    blurred = cv2.GaussianBlur(gray, (3, 3), 0)
-    thresh = cv2.adaptiveThreshold(blurred, 255,
-                cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 15, 4)
-
-    # Горизонтальные линии
-    h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (max(15, w//40), 1))
-    h_lines = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, h_kernel)
-
-    # Вертикальные линии
-    v_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, max(15, h//40)))
-    v_lines = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, v_kernel)
-
-    # Сетка = пересечение горизонтальных и вертикальных линий
-    grid = cv2.add(h_lines, v_lines)
-    # Дилатация чтобы соединить близкие линии
-    dil_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-    grid = cv2.dilate(grid, dil_kernel, iterations=2)
-
-    contours, _ = cv2.findContours(grid, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    squares = []
-    seen = set()
-    for cnt in contours:
-        x, y, cw, ch = cv2.boundingRect(cnt)
-        side = (cw + ch) / 2
-        if not (min_side < side < max_side):
-            continue
-        ratio = cw / ch if ch > 0 else 0
-        if not (0.4 < ratio < 2.5):
-            continue
-        cx = x + cw // 2
-        cy = y + ch // 2
-        key = (cx // 6, cy // 6)
-        if key in seen:
-            continue
-        seen.add(key)
-        squares.append((cx, cy, int(cw), int(ch)))
-
-    # Если линейный метод дал мало — fallback через контуры
-    if len(squares) < 20:
-        squares = _find_squares_contour(gray)
-
-    return squares
-
-
-def _find_squares_contour(gray):
-    """Fallback: поиск квадратов через контуры с approxPolyDP."""
-    h, w = gray.shape
-    min_side = int(min(h, w) * 0.012)
-    max_side = int(min(h, w) * 0.090)
+    min_side = int(min(h, w) * 0.015)
+    max_side = int(min(h, w) * 0.085)
 
     blurred = cv2.GaussianBlur(gray, (3, 3), 0)
     squares = []
     seen = set()
 
-    for block_size, C in [(11, 3), (21, 5)]:
+    for block_size, C in [(15, 4), (25, 6)]:
         thresh = cv2.adaptiveThreshold(blurred, 255,
                     cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, block_size, C)
-        contours, _ = cv2.findContours(thresh, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-        for cnt in contours:
-            area = cv2.contourArea(cnt)
-            if area < min_side * min_side * 0.5:
-                continue
-            x, y, cw, ch = cv2.boundingRect(cnt)
-            side = (cw + ch) / 2
+        # Убираем мелкий шум
+        k = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+        thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, k)
+
+        contours, hierarchy = cv2.findContours(thresh, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+        if hierarchy is None:
+            continue
+
+        for i, cnt in enumerate(contours):
+            # Берём только контуры у которых есть родитель (дырки внутри рамок)
+            # hierarchy[0][i] = [next, prev, child, parent]
+            parent = hierarchy[0][i][3]
+            if parent < 0:
+                continue  # внешний контур, пропускаем
+
+            # Используем bbox родителя (внешней рамки)
+            px, py, pcw, pch = cv2.boundingRect(contours[parent])
+            side = (pcw + pch) / 2
             if not (min_side < side < max_side):
                 continue
-            ratio = cw / ch if ch > 0 else 0
-            if not (0.45 < ratio < 2.2):
+            ratio = pcw / pch if pch > 0 else 0
+            if not (0.5 < ratio < 2.0):
                 continue
-            if cw * ch == 0 or area / (cw * ch) < 0.35:
-                continue
-            cx = x + cw // 2
-            cy = y + ch // 2
-            key = (cx // 6, cy // 6)
+
+            cx = px + pcw // 2
+            cy = py + pch // 2
+            key = (cx // 5, cy // 5)
             if key in seen:
                 continue
             seen.add(key)
-            squares.append((cx, cy, int(cw), int(ch)))
+            squares.append((cx, cy, int(pcw), int(pch)))
+
+    # Если мало — fallback: ищем контуры с approxPolyDP == 4 вершины
+    if len(squares) < 20:
+        for block_size, C in [(11, 3), (21, 5)]:
+            thresh = cv2.adaptiveThreshold(blurred, 255,
+                        cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, block_size, C)
+            contours, _ = cv2.findContours(thresh, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+            for cnt in contours:
+                peri = cv2.arcLength(cnt, True)
+                approx = cv2.approxPolyDP(cnt, 0.04 * peri, True)
+                if len(approx) not in (4, 5, 6):
+                    continue
+                x, y, cw, ch = cv2.boundingRect(approx)
+                side = (cw + ch) / 2
+                if not (min_side < side < max_side):
+                    continue
+                ratio = cw / ch if ch > 0 else 0
+                if not (0.5 < ratio < 2.0):
+                    continue
+                area = cv2.contourArea(cnt)
+                if area / (cw * ch + 1) < 0.3:
+                    continue
+                cx = x + cw // 2
+                cy = y + ch // 2
+                key = (cx // 5, cy // 5)
+                if key in seen:
+                    continue
+                seen.add(key)
+                squares.append((cx, cy, int(cw), int(ch)))
 
     return squares
 
@@ -428,7 +417,7 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
 
 
 # ── Анализ ────────────────────────────────────────────────────────────────────
-# v21: line morphology square detection
+# v22: RETR_CCOMP parent-child detection
 _LAT_TO_CYR = {"A":"\u0410","B":"\u0411","C":"\u0412","D":"\u0413","E":"\u0414","F":"\u0415"}
 
 def _normalize_key(answer_key: str) -> list:

@@ -9,7 +9,8 @@ export type Section =
   | "exams"
   | "fipiExams"
   | "chat"
-  | "settings";
+  | "settings"
+  | "collective";
 
 export const NAV_ITEMS: { id: Section; label: string; icon: string }[] = [
   { id: "works", label: "Работы", icon: "ClipboardList" },
@@ -48,6 +49,7 @@ export const SECTION_TITLES: Record<Section, string> = {
   fipiExams: "Экзамены ФИПИ — готовые варианты без ИИ",
   chat: "Чат с ИИ",
   settings: "Настройки",
+  collective: "Коллектив",
 };
 
 export const WORK_TYPES = ["Проверочная работа", "Контрольная работа"] as const;

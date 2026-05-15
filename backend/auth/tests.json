@@ -53,6 +53,12 @@
       "path": "/?action=set-role",
       "body": { "login": "test", "role": "tester" },
       "expectedStatus": 403
+    },
+    {
+      "name": "collective-by-token without params returns 400",
+      "method": "GET",
+      "path": "/?action=collective-by-token",
+      "expectedStatus": 400
     }
   ]
 }

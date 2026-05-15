@@ -806,6 +806,56 @@ def handler(event: dict, context) -> dict:
         finally:
             conn.close()
 
+    # ── GET collective-by-token — коллектив ОУ для обычного пользователя ────
+    if method == "GET" and route in ("collective-by-token", "collective_by_token"):
+        token = headers.get("x-authorization", "").strip()
+        login = (qs.get("login") or "").strip()
+        if not token or not login:
+            return _resp(400, {"error": "Укажите login и токен"})
+
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"""SELECT institution_id FROM {SCHEMA}.users
+                    WHERE login = %s AND is_active = true AND institution_id IS NOT NULL""",
+                (login,)
+            )
+            row = cur.fetchone()
+            if not row:
+                return _resp(200, {"members": [], "has_institution": False})
+
+            institution_id = row[0]
+            cur.execute(
+                f"""SELECT full_name, institution_position, subject
+                    FROM {SCHEMA}.users
+                    WHERE institution_id = %s AND is_active = true
+                    ORDER BY institution_position, full_name""",
+                (institution_id,)
+            )
+            position_labels = {
+                "director": "Директор",
+                "vice_director": "Зам. директора",
+                "counselor": "Советник",
+                "teacher": "Педагог",
+            }
+            members = []
+            for r in cur.fetchall():
+                pos = r[1]
+                subj = r[2]
+                label = position_labels.get(pos, pos)
+                if pos == "teacher" and subj:
+                    label = f"Педагог ({subj})"
+                members.append({
+                    "full_name": r[0],
+                    "position": pos,
+                    "position_label": label,
+                    "subject": subj,
+                })
+            return _resp(200, {"members": members, "has_institution": True})
+        finally:
+            conn.close()
+
     return _resp(404, {"error": "Метод не найден"})
 
 

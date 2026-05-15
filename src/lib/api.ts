@@ -167,6 +167,13 @@ export const authApi = {
       token,
       body: JSON.stringify({ sections }),
     }),
+
+  getCollectiveByToken: (token: string, login: string) => {
+    const url = `${AUTH_URL}?action=collective-by-token&login=${encodeURIComponent(login)}`;
+    return fetch(url, { headers: { "X-Authorization": token } })
+      .then(r => r.json())
+      .then(d => d as { members: { full_name: string; position: string; position_label: string; subject: string | null }[]; has_institution: boolean });
+  },
 };
 
 // ── Institution API ───────────────────────────────────────────────────────────

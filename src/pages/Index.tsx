@@ -11,6 +11,8 @@ import { SynopsisSection } from "@/components/scanner/SynopsisSection";
 import { ExamsSection } from "@/components/scanner/ExamsSection";
 import { FipiExamsSection } from "@/components/scanner/FipiExamsSection";
 import { ChatSection } from "@/components/scanner/ChatSection";
+import CollectiveSection from "@/components/scanner/CollectiveSection";
+import { authApi } from "@/lib/api";
 import LoginPage from "@/pages/LoginPage";
 import LandingPage from "@/pages/LandingPage";
 import AdminPanel from "@/pages/AdminPanel";
@@ -65,6 +67,7 @@ const SECTION_COMPONENTS: Record<Section, React.FC> = {
   fipiExams: FipiExamsSection,
   chat: ChatSection,
   settings: SettingsSection,
+  collective: CollectiveSection,
 };
 
 // Разделы для нижней мобильной панели (самые частые)
@@ -81,6 +84,7 @@ export default function Index() {
   const [sidebarOpen, setSidebar]   = useState(false);
   const [authMode, setAuthMode]     = useState<"landing" | "login" | "signup" | "ou-login" | "ou-register">("landing");
   const [ouUser, setOuUser]         = useState<OUUser | null>(() => loadOUSession());
+  const [hasInstitution, setHasInstitution] = useState(false);
   const { teacher, yadiskConnected, maintenanceSections } = useAppStore();
   const ActiveSection = SECTION_COMPONENTS[active];
 
@@ -90,6 +94,13 @@ export default function Index() {
     const t = setInterval(() => appStore.refreshSubscription(), 5 * 60 * 1000);
     return () => clearInterval(t);
   }, [teacher?.login, teacher?.role]);
+
+  useEffect(() => {
+    if (!teacher) { setHasInstitution(false); return; }
+    authApi.getCollectiveByToken(teacher.authToken, teacher.login)
+      .then(d => setHasInstitution(d.has_institution))
+      .catch(() => setHasInstitution(false));
+  }, [teacher?.login]);
 
   // Загружаем список разделов на ТО при старте
   useEffect(() => {
@@ -228,6 +239,15 @@ export default function Index() {
               </div>
             );
           })}
+          {hasInstitution && (
+            <div
+              className={`nav-item ${active === "collective" ? "active" : ""}`}
+              onClick={() => navigate("collective")}
+            >
+              <Icon name="Building2" size={16} fallback="Circle" />
+              <span className="flex-1">Коллектив</span>
+            </div>
+          )}
         </nav>
 
         {/* Я.Диск */}

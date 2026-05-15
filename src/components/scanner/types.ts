@@ -8,6 +8,7 @@ export type Section =
   | "synopsis"
   | "exams"
   | "fipiExams"
+  | "chat"
   | "settings";
 
 export const NAV_ITEMS: { id: Section; label: string; icon: string }[] = [
@@ -20,6 +21,7 @@ export const NAV_ITEMS: { id: Section; label: string; icon: string }[] = [
   { id: "presentations", label: "Презентации", icon: "Presentation" },
   { id: "exams", label: "ОГЭ / ЕГЭ", icon: "GraduationCap" },
   { id: "fipiExams", label: "Экзамены ФИПИ", icon: "ScrollText" },
+  { id: "chat", label: "Чат с ИИ", icon: "MessageSquare" },
   { id: "settings", label: "Настройки", icon: "Settings" },
 ];
 
@@ -44,6 +46,7 @@ export const SECTION_TITLES: Record<Section, string> = {
   synopsis: "Конспекты",
   exams: "ОГЭ / ЕГЭ — варианты по ФИПИ",
   fipiExams: "Экзамены ФИПИ — готовые варианты без ИИ",
+  chat: "Чат с ИИ",
   settings: "Настройки",
 };
 

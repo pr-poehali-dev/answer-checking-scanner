@@ -37,6 +37,24 @@
       "expectedStatus": 400,
       "expectedBody": {"error": "string"},
       "bodyMatcher": "partial"
+    },
+    {
+      "name": "POST buy-tokens без логина",
+      "method": "POST",
+      "path": "/?action=buy-tokens",
+      "body": {"token_count": 1000},
+      "expectedStatus": 400,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "POST check-tokens без payment_id",
+      "method": "POST",
+      "path": "/?action=check-tokens",
+      "body": {},
+      "expectedStatus": 400,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
     }
   ]
 }

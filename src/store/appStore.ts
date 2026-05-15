@@ -24,6 +24,7 @@ function saveSession(teacher: Teacher) {
       trialUntil: teacher.trialUntil,
       trialAiCallsToday: teacher.trialAiCallsToday,
       trialAiLimit: teacher.trialAiLimit,
+      aiTokens: teacher.aiTokens,
     }));
   } catch { /* ignore */ }
 }
@@ -56,6 +57,7 @@ function loadSession(): Teacher | null {
       trialUntil: d.trialUntil || null,
       trialAiCallsToday: d.trialAiCallsToday || 0,
       trialAiLimit: d.trialAiLimit || 5,
+      aiTokens: d.aiTokens || 0,
     };
   } catch { return null; }
 }
@@ -97,6 +99,7 @@ export interface Teacher {
   trialUntil: string | null;
   trialAiCallsToday: number;
   trialAiLimit: number;
+  aiTokens: number;
 }
 
 export interface Student {
@@ -266,6 +269,7 @@ export const appStore = {
         trialUntil: user.trial_until || null,
         trialAiCallsToday: user.trial_ai_calls_today || 0,
         trialAiLimit: user.trial_ai_limit || 5,
+        aiTokens: (user as unknown as { ai_tokens_balance?: number }).ai_tokens_balance || 0,
       };
       saveSession(newTeacher);
       state = { ...state, teacher: newTeacher };
@@ -315,6 +319,7 @@ export const appStore = {
         trialUntil: user.trial_until || null,
         trialAiCallsToday: user.trial_ai_calls_today || 0,
         trialAiLimit: user.trial_ai_limit || 5,
+        aiTokens: 0,
       };
       saveSession(signupTeacher);
       state = { ...state, teacher: signupTeacher };
@@ -339,6 +344,7 @@ export const appStore = {
         trialUntil: data.trial_until || null,
         trialAiCallsToday: data.trial_ai_calls_today || 0,
         trialAiLimit: data.trial_ai_limit || 5,
+        aiTokens: (data as unknown as { ai_tokens_balance?: number }).ai_tokens_balance ?? state.teacher!.aiTokens,
       };
       saveSession(updatedTeacher);
       state = { ...state, teacher: updatedTeacher };
@@ -346,6 +352,14 @@ export const appStore = {
     } catch (e) {
       console.warn("refreshSubscription failed:", e);
     }
+  },
+
+  setAiTokens: (amount: number) => {
+    if (!state.teacher) return;
+    const updated = { ...state.teacher, aiTokens: amount };
+    saveSession(updated);
+    state = { ...state, teacher: updated };
+    notify();
   },
 
   activateTrial: async (): Promise<{ ok: true } | { ok: false; error: string }> => {

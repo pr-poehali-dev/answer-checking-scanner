@@ -103,8 +103,11 @@ def yookassa_request(method: str, path: str, body: dict | None = None, idempoten
         raise RuntimeError(f"ЮKassa HTTP {e.code}: {msg}")
 
 
+SUBSCRIPTION_TOKENS_GIFT = 3000
+
+
 def grant_subscription(login: str, plan_code: str, months: int, payment_id: str | None) -> datetime:
-    """Активирует подписку: продлевает или начинает новую. Возвращает дату окончания."""
+    """Активирует подписку: продлевает или начинает новую. Начисляет 3000 токенов. Возвращает дату окончания."""
     conn = get_conn()
     try:
         cur = conn.cursor()
@@ -125,9 +128,11 @@ def grant_subscription(login: str, plan_code: str, months: int, payment_id: str 
             f"""UPDATE {SCHEMA}.users
                 SET subscription_status='active', subscription_plan=%s,
                     subscription_until=%s,
-                    subscription_started_at = COALESCE(subscription_started_at, NOW())
+                    subscription_started_at = COALESCE(subscription_started_at, NOW()),
+                    ai_tokens_balance = ai_tokens_balance + %s,
+                    ai_tokens_gifted = ai_tokens_gifted + %s
                 WHERE login = %s""",
-            (plan_code, new_until, login)
+            (plan_code, new_until, SUBSCRIPTION_TOKENS_GIFT, SUBSCRIPTION_TOKENS_GIFT, login)
         )
 
         if payment_id:
@@ -324,5 +329,128 @@ def handler(event: dict, context) -> dict:
             return _resp(200, {"history": history})
         finally:
             conn.close()
+
+    # ── POST buy-tokens — создать платёж на покупку токенов ─────────────────
+    if method == "POST" and route in ("buy-tokens", "buy_tokens"):
+        if not user_login or user_login == "admin":
+            return _resp(400, {"error": "Неизвестный пользователь"})
+        try:
+            token_count = int(body.get("token_count") or 0)
+        except (TypeError, ValueError):
+            token_count = 0
+        if token_count < 1000:
+            return _resp(400, {"error": "Минимальная покупка: 1000 токенов"})
+        if token_count > 1000000:
+            return _resp(400, {"error": "Максимальная покупка: 1 000 000 токенов"})
+
+        amount_rub = round(token_count / 1000 * 30, 2)
+        return_url = (body.get("return_url") or "").strip() or "https://poehali.dev"
+
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(f"SELECT email, full_name FROM {SCHEMA}.users WHERE login = %s", (user_login,))
+            row = cur.fetchone()
+            if not row:
+                return _resp(404, {"error": "Пользователь не найден"})
+            email, full_name = row[0], row[1]
+        finally:
+            conn.close()
+
+        try:
+            payment_body = {
+                "amount": {"value": f"{amount_rub:.2f}", "currency": "RUB"},
+                "capture": True,
+                "confirmation": {"type": "redirect", "return_url": return_url},
+                "description": f"АОУСПТ · Токены ИИ ({token_count:,}) · {full_name}",
+                "metadata": {"login": user_login, "plan": "tokens", "token_count": str(token_count)},
+            }
+            if email:
+                payment_body["receipt"] = {
+                    "customer": {"email": email},
+                    "items": [{
+                        "description": f"Токены ИИ {token_count:,} шт.",
+                        "quantity": "1.00",
+                        "amount": {"value": f"{amount_rub:.2f}", "currency": "RUB"},
+                        "vat_code": 1,
+                        "payment_subject": "service",
+                        "payment_mode": "full_payment",
+                    }],
+                }
+            idempotence = str(uuid.uuid4())
+            result = yookassa_request("POST", "/payments", payment_body, idempotence=idempotence)
+        except Exception as e:
+            return _resp(503, {"error": f"Не удалось создать платёж: {e}"})
+
+        payment_id = result.get("id")
+        confirmation = (result.get("confirmation") or {}).get("confirmation_url")
+        status = result.get("status", "pending")
+
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"""INSERT INTO {SCHEMA}.payments
+                    (user_login, plan, amount, months, provider, provider_payment_id, status, source)
+                    VALUES (%s, 'tokens', %s, 0, 'yookassa', %s, %s, 'user')""",
+                (user_login, amount_rub, payment_id, status)
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        return _resp(200, {
+            "payment_id": payment_id,
+            "confirmation_url": confirmation,
+            "status": status,
+            "amount": amount_rub,
+            "token_count": token_count,
+        })
+
+    # ── POST check-tokens — проверить статус платежа за токены ──────────────
+    if method == "POST" and route in ("check-tokens", "check_tokens"):
+        payment_id = (body.get("payment_id") or "").strip()
+        if not payment_id:
+            return _resp(400, {"error": "Укажите payment_id"})
+        try:
+            result = yookassa_request("GET", f"/payments/{payment_id}")
+        except Exception as e:
+            return _resp(503, {"error": f"Не удалось проверить платёж: {e}"})
+
+        status = result.get("status", "pending")
+        meta = result.get("metadata") or {}
+        login = meta.get("login")
+        try:
+            token_count = int(meta.get("token_count") or 0)
+        except (TypeError, ValueError):
+            token_count = 0
+
+        if status == "succeeded" and login and token_count > 0:
+            conn = get_conn()
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    f"""UPDATE {SCHEMA}.payments SET status='succeeded', paid_at=NOW()
+                        WHERE provider_payment_id = %s AND status != 'succeeded'""",
+                    (payment_id,)
+                )
+                updated = cur.rowcount
+                if updated > 0:
+                    cur.execute(
+                        f"UPDATE {SCHEMA}.users SET ai_tokens_balance = ai_tokens_balance + %s WHERE login = %s RETURNING ai_tokens_balance",
+                        (token_count, login)
+                    )
+                    row = cur.fetchone()
+                    new_balance = row[0] if row else 0
+                else:
+                    cur.execute(f"SELECT ai_tokens_balance FROM {SCHEMA}.users WHERE login = %s", (login,))
+                    row = cur.fetchone()
+                    new_balance = row[0] if row else 0
+                conn.commit()
+                return _resp(200, {"status": "succeeded", "token_count": token_count, "ai_tokens_balance": new_balance})
+            finally:
+                conn.close()
+
+        return _resp(200, {"status": status, "token_count": token_count})
 
     return _resp(404, {"error": "Метод не найден"})

@@ -28,6 +28,35 @@ from datetime import datetime, timedelta
 
 AUTH_URL = os.environ.get("AUTH_FUNCTION_URL", "https://functions.poehali.dev/b08ae7cf-6c0b-4178-acc9-4b62b2c2a61b")
 
+TOKENS_COST_PRESENTATION = 4000
+
+
+def spend_ai_tokens(login: str, amount: int) -> tuple[bool, str]:
+    if not login:
+        return True, ""
+    try:
+        req = urllib.request.Request(
+            f"{AUTH_URL}?action=spend-tokens",
+            data=json.dumps({"login": login, "amount": amount}).encode("utf-8"),
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as r:
+            json.loads(r.read().decode())
+        return True, ""
+    except urllib.error.HTTPError as e:
+        err_body = {}
+        try:
+            err_body = json.loads(e.read().decode())
+        except Exception:
+            pass
+        if e.code == 402:
+            return False, err_body.get("error", "Недостаточно токенов")
+        return True, ""
+    except Exception:
+        return True, ""
+
+
 from pptx import Presentation
 from pptx.util import Inches, Pt, Emu
 from pptx.dml.color import RGBColor
@@ -801,6 +830,11 @@ def handler(event: dict, context) -> dict:
 
     if not topic:
         return _resp(400, {"error": "Укажите тему урока"})
+
+    # Списываем токены
+    ok, tok_err = spend_ai_tokens(login, TOKENS_COST_PRESENTATION)
+    if not ok:
+        return _resp(402, {"error": tok_err})
 
     # Проверяем лимит AI-запросов для trial-пользователей
     if login:

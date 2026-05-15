@@ -59,6 +59,19 @@
       "method": "GET",
       "path": "/?action=collective-by-token",
       "expectedStatus": 400
+    },
+    {
+      "name": "spend-tokens without login returns 400",
+      "method": "POST",
+      "path": "/?action=spend-tokens",
+      "body": {},
+      "expectedStatus": 400
+    },
+    {
+      "name": "get-tokens-balance without login returns 400",
+      "method": "GET",
+      "path": "/?action=get-tokens-balance",
+      "expectedStatus": 400
     }
   ]
 }

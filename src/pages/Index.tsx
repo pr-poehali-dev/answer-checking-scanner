@@ -12,6 +12,7 @@ import { ExamsSection } from "@/components/scanner/ExamsSection";
 import { FipiExamsSection } from "@/components/scanner/FipiExamsSection";
 import { ChatSection } from "@/components/scanner/ChatSection";
 import CollectiveSection from "@/components/scanner/CollectiveSection";
+import TokensModal from "@/components/TokensModal";
 import { authApi } from "@/lib/api";
 import LoginPage from "@/pages/LoginPage";
 import LandingPage from "@/pages/LandingPage";
@@ -85,6 +86,7 @@ export default function Index() {
   const [authMode, setAuthMode]     = useState<"landing" | "login" | "signup" | "ou-login" | "ou-register">("landing");
   const [ouUser, setOuUser]         = useState<OUUser | null>(() => loadOUSession());
   const [hasInstitution, setHasInstitution] = useState(false);
+  const [showTokensModal, setShowTokensModal] = useState(false);
   const { teacher, yadiskConnected, maintenanceSections } = useAppStore();
   const ActiveSection = SECTION_COMPONENTS[active];
 
@@ -250,6 +252,23 @@ export default function Index() {
           )}
         </nav>
 
+        {/* Токены ИИ */}
+        <div className="px-3 mb-2">
+          <button
+            onClick={() => setShowTokensModal(true)}
+            className="w-full px-3 py-2 rounded-sm border flex items-center gap-2 hover:border-primary/40 transition-colors"
+            style={{ borderColor: (teacher.aiTokens ?? 0) > 0 ? "hsl(215 60% 22% / 0.3)" : "hsl(var(--sidebar-border))", background: (teacher.aiTokens ?? 0) > 0 ? "hsl(215 60% 22% / 0.06)" : "transparent" }}
+          >
+            <Icon name="Coins" size={13} style={{ color: (teacher.aiTokens ?? 0) > 0 ? "hsl(215 60% 40%)" : "hsl(var(--sidebar-foreground))", opacity: (teacher.aiTokens ?? 0) > 0 ? 1 : 0.45 }} fallback="Circle" />
+            <span className="text-xs flex-1 text-left" style={{ color: "hsl(var(--sidebar-foreground))", opacity: (teacher.aiTokens ?? 0) > 0 ? 0.85 : 0.45 }}>
+              {(teacher.aiTokens ?? 0) > 0
+                ? `${(teacher.aiTokens).toLocaleString("ru-RU")} токенов`
+                : "Купить токены ИИ"}
+            </span>
+            <Icon name="Plus" size={11} style={{ color: "hsl(var(--sidebar-foreground))", opacity: 0.4 }} />
+          </button>
+        </div>
+
         {/* Я.Диск */}
         <div className="px-3 py-2 mx-3 mb-2 rounded-sm border"
           style={{ borderColor: yadiskConnected ? "hsl(142 71% 45% / 0.3)" : "hsl(var(--sidebar-border))", background: yadiskConnected ? "hsl(142 71% 45% / 0.06)" : "transparent" }}>
@@ -356,6 +375,8 @@ export default function Index() {
           })}
         </div>
       </nav>
+
+      {showTokensModal && <TokensModal onClose={() => setShowTokensModal(false)} />}
     </div>
   );
 }

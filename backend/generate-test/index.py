@@ -24,6 +24,36 @@ from datetime import datetime, timedelta
 
 AUTH_URL = os.environ.get("AUTH_FUNCTION_URL", "https://functions.poehali.dev/b08ae7cf-6c0b-4178-acc9-4b62b2c2a61b")
 
+TOKENS_COST_TEST = 3500
+
+
+def spend_ai_tokens(login: str, amount: int) -> tuple[bool, str]:
+    """Списывает токены через auth. Возвращает (ok, error_message)."""
+    if not login:
+        return True, ""
+    try:
+        req = urllib.request.Request(
+            f"{AUTH_URL}?action=spend-tokens",
+            data=json.dumps({"login": login, "amount": amount}).encode("utf-8"),
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as r:
+            data = json.loads(r.read().decode())
+        return True, ""
+    except urllib.error.HTTPError as e:
+        err_body = {}
+        try:
+            err_body = json.loads(e.read().decode())
+        except Exception:
+            pass
+        if e.code == 402:
+            return False, err_body.get("error", "Недостаточно токенов")
+        return True, ""
+    except Exception:
+        return True, ""
+
+
 from docx import Document
 from docx.shared import Pt, Cm, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -666,6 +696,11 @@ def handler(event: dict, context) -> dict:
         return _resp(400, {"error": "Укажите тему"})
     if part1_count + part2_count == 0:
         return _resp(400, {"error": "Должен быть хотя бы один вопрос (часть 1 или часть 2)"})
+
+    # Списываем токены
+    ok, tok_err = spend_ai_tokens(login, TOKENS_COST_TEST)
+    if not ok:
+        return _resp(402, {"error": tok_err})
 
     # Проверяем лимит AI-запросов для trial-пользователей
     if login:

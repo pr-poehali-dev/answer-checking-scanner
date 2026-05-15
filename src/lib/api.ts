@@ -889,4 +889,23 @@ export const subscriptionApi = {
       method: "GET",
       login,
     }),
+
+  buyTokens: (login: string, token_count: number, return_url: string) =>
+    subRequest<{ payment_id: string; confirmation_url: string; status: string; amount: number; token_count: number }>(
+      "buy-tokens",
+      {
+        method: "POST",
+        login,
+        body: JSON.stringify({ login, token_count, return_url }),
+      }
+    ),
+
+  checkTokens: (payment_id: string) =>
+    subRequest<{ status: string; token_count: number; ai_tokens_balance?: number }>(
+      "check-tokens",
+      {
+        method: "POST",
+        body: JSON.stringify({ payment_id }),
+      }
+    ),
 };

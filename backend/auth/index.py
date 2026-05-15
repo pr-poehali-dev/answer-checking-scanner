@@ -258,7 +258,7 @@ def handler(event: dict, context) -> dict:
             cur.execute(
                 f"""SELECT login, password_hash, full_name, first_name, last_name, email, school, role, is_active,
                           subscription_status, subscription_until,
-                          trial_until, trial_ai_calls_today, trial_ai_date
+                          trial_until, trial_ai_calls_today, trial_ai_date, ai_tokens_balance
                     FROM {SCHEMA}.users
                     WHERE login = %s OR LOWER(email) = LOWER(%s)
                     LIMIT 1""",
@@ -269,7 +269,7 @@ def handler(event: dict, context) -> dict:
                 return _resp(401, {"error": "Неверный логин или пароль"})
 
             (login, _ph, full_name, first_name, last_name, email, school, role, is_active,
-             sub_status, sub_until, trial_until, trial_ai_calls_today, trial_ai_date) = row
+             sub_status, sub_until, trial_until, trial_ai_calls_today, trial_ai_date, ai_tokens_balance) = row
             if not is_active:
                 return _resp(403, {"error": "Аккаунт заблокирован. Обратитесь к администратору."})
 
@@ -304,6 +304,7 @@ def handler(event: dict, context) -> dict:
                 "email": email,
                 "school": school,
                 "token": token,
+                "ai_tokens_balance": ai_tokens_balance or 0,
                 **sub,
             })
         finally:
@@ -324,7 +325,7 @@ def handler(event: dict, context) -> dict:
             cur = conn.cursor()
             cur.execute(
                 f"""SELECT subscription_status, subscription_until,
-                           trial_until, trial_ai_calls_today, trial_ai_date, role
+                           trial_until, trial_ai_calls_today, trial_ai_date, role, ai_tokens_balance
                     FROM {SCHEMA}.users WHERE login = %s""",
                 (login,)
             )
@@ -333,10 +334,11 @@ def handler(event: dict, context) -> dict:
                 return _resp(404, {"error": "Пользователь не найден"})
             sub = get_subscription_payload(row[0], row[1], row[2], row[3] or 0, row[4])
             user_role = row[5]
+            ai_tokens = row[6] or 0
             if user_role == "tester":
                 sub["subscription_active"] = True
                 sub["subscription_status"] = "active"
-            return _resp(200, {"login": login, "role": user_role, **sub})
+            return _resp(200, {"login": login, "role": user_role, "ai_tokens_balance": ai_tokens, **sub})
         finally:
             conn.close()
 
@@ -803,6 +805,85 @@ def handler(event: dict, context) -> dict:
             )
             conn.commit()
             return _resp(200, {"success": True, "sections": sections})
+        finally:
+            conn.close()
+
+    # ── POST spend-tokens — списание токенов перед ИИ-генерацией ────────────
+    if method == "POST" and route in ("spend-tokens", "spend_tokens"):
+        login = (body.get("login") or "").strip()
+        try:
+            amount = int(body.get("amount") or 0)
+        except (TypeError, ValueError):
+            amount = 0
+        if not login:
+            return _resp(400, {"error": "Укажите login"})
+        if amount <= 0:
+            return _resp(400, {"error": "Укажите amount > 0"})
+
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"SELECT ai_tokens_balance, role FROM {SCHEMA}.users WHERE login = %s",
+                (login,)
+            )
+            row = cur.fetchone()
+            if not row:
+                return _resp(404, {"error": "Пользователь не найден"})
+            balance, role = row[0] or 0, row[1]
+            if role == "tester":
+                return _resp(200, {"ok": True, "balance": balance})
+            if balance < amount:
+                return _resp(402, {"error": f"Недостаточно токенов. Баланс: {balance}, нужно: {amount}. Пополните баланс в личном кабинете."})
+            new_balance = balance - amount
+            cur.execute(
+                f"UPDATE {SCHEMA}.users SET ai_tokens_balance = %s WHERE login = %s",
+                (new_balance, login)
+            )
+            conn.commit()
+            return _resp(200, {"ok": True, "balance": new_balance, "spent": amount})
+        finally:
+            conn.close()
+
+    # ── GET get-tokens-balance — получить баланс токенов ────────────────────
+    if method == "GET" and route in ("get-tokens-balance", "get_tokens_balance"):
+        login = (qs.get("login") or "").strip()
+        if not login:
+            return _resp(400, {"error": "Укажите login"})
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(f"SELECT ai_tokens_balance FROM {SCHEMA}.users WHERE login = %s", (login,))
+            row = cur.fetchone()
+            if not row:
+                return _resp(404, {"error": "Пользователь не найден"})
+            return _resp(200, {"balance": row[0] or 0})
+        finally:
+            conn.close()
+
+    # ── POST add-tokens (admin) — начислить токены вручную ───────────────────
+    if method == "POST" and route in ("add-tokens", "add_tokens"):
+        if not check_admin_token(headers):
+            return _resp(403, {"error": "Нет доступа"})
+        login = (body.get("login") or "").strip()
+        try:
+            amount = int(body.get("amount") or 0)
+        except (TypeError, ValueError):
+            amount = 0
+        if not login or amount <= 0:
+            return _resp(400, {"error": "Укажите login и amount > 0"})
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"UPDATE {SCHEMA}.users SET ai_tokens_balance = ai_tokens_balance + %s WHERE login = %s RETURNING ai_tokens_balance",
+                (amount, login)
+            )
+            conn.commit()
+            row = cur.fetchone()
+            if not row:
+                return _resp(404, {"error": "Пользователь не найден"})
+            return _resp(200, {"ok": True, "balance": row[0]})
         finally:
             conn.close()
 

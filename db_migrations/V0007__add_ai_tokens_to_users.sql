@@ -1,0 +1,3 @@
+ALTER TABLE t_p31556921_answer_checking_scan.users
+  ADD COLUMN IF NOT EXISTS ai_tokens_balance INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS ai_tokens_gifted  INTEGER NOT NULL DEFAULT 0;

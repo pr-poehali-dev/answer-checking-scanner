@@ -188,16 +188,13 @@ def draw_blank(c, x0, y0, bw, bh, cfg):
     grid_bottom_y = cur_y - n_rows * row_h
     cur_y = grid_bottom_y - S(0.5*mm)
 
-    # ── 4 якорных квадрата (жирные чёрные, по углам зоны ответов) ────────────
-    # Левый край сетки ответов и правый
-    grid_left_x  = x0 + P
-    grid_right_x = x0 + P + n_cols * col_w
-    # Якоря: верхний-левый, верхний-правый, нижний-левый, нижний-правый
-    anchor_margin = anc / 2
-    ax_l = grid_left_x  + anchor_margin
-    ax_r = grid_right_x - anchor_margin
-    ay_t = grid_top_y   - anchor_margin
-    ay_b = grid_bottom_y + anchor_margin
+    # ── 4 якорных квадрата — за пределами сетки ответов ─────────────────────
+    # По X: левее левого края и правее правого края бланка (в поле рамки)
+    # По Y: выше первой строки и ниже последней (с зазором row_h)
+    ax_l = x0 + P / 2          # левее сетки, в левом поле
+    ax_r = x0 + bw - P / 2     # правее сетки, в правом поле
+    ay_t = grid_top_y + anc / 2 + S(1*mm)          # над первой строкой
+    ay_b = grid_bottom_y - anc / 2 - S(1*mm)       # под последней строкой
     ANCHOR(c, ax_l, ay_t, anc)
     ANCHOR(c, ax_r, ay_t, anc)
     ANCHOR(c, ax_l, ay_b, anc)

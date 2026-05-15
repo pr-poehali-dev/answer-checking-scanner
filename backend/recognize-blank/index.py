@@ -232,10 +232,13 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
 
     if anchors:
         tl, tr, bl, br = anchors
-        grid_x0 = tl[0]
-        grid_x1 = tr[0]
-        grid_y0 = tl[1]
-        grid_y1 = bl[1]
+        # Якоря расположены СНАРУЖИ сетки (в полях бланка).
+        # Сетка ответов находится между якорями, чуть внутрь от них.
+        anchor_half = tl[2] // 2
+        grid_x0 = tl[0] + anchor_half + 2   # правее левого якоря
+        grid_x1 = tr[0] - anchor_half - 2   # левее правого якоря
+        grid_y0 = tl[1]                     # Y верхних якорей = верх сетки
+        grid_y1 = bl[1]                     # Y нижних якорей = низ сетки
         grid_w  = grid_x1 - grid_x0
         grid_h  = grid_y1 - grid_y0
 

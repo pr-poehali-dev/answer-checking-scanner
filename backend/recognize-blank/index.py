@@ -80,19 +80,51 @@ def _find_squares(gray):
     return squares
 
 
-# ── Заполненность области (крестик темнее пустого квадрата) ──────────────────
+# ── Оценка "крестика" в квадрате ─────────────────────────────────────────────
 def _fill_ratio(gray, cx, cy, cw, ch) -> float:
-    """Доля тёмных пикселей внутри прямоугольника (0=пустой, 1=закрашен)."""
-    pad = max(2, int(min(cw, ch)*0.12))
+    """
+    Оценивает наличие крестика ✕ в квадрате.
+    Крестик занимает углы квадрата, буква — только центр.
+    Возвращает score: высокий = крестик, низкий = просто буква или пусто.
+    """
+    pad = max(1, int(min(cw, ch) * 0.08))
     x1 = max(0, cx - cw//2 + pad)
     y1 = max(0, cy - ch//2 + pad)
     x2 = min(gray.shape[1], cx + cw//2 - pad)
     y2 = min(gray.shape[0], cy + ch//2 - pad)
     if x2 <= x1 or y2 <= y1:
         return 0.0
+
     roi = gray[y1:y2, x1:x2]
+    h, w = roi.shape
+    if h < 4 or w < 4:
+        return 0.0
+
     _, bw = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-    return float(np.sum(bw > 0)) / bw.size
+
+    # Угловые зоны (каждая ~25% стороны) — там где крестик
+    corner = max(2, int(min(h, w) * 0.30))
+    corners = [
+        bw[:corner, :corner],
+        bw[:corner, w-corner:],
+        bw[h-corner:, :corner],
+        bw[h-corner:, w-corner:],
+    ]
+    corner_fill = np.mean([np.mean(c > 0) for c in corners])
+
+    # Центральная зона — там где буква
+    mc = max(1, int(min(h, w) * 0.25))
+    cy_r, cx_r = h//2, w//2
+    center = bw[cy_r-mc:cy_r+mc, cx_r-mc:cx_r+mc]
+    center_fill = float(np.mean(center > 0)) if center.size > 0 else 0.0
+
+    # Общая заполненность
+    total_fill = float(np.mean(bw > 0))
+
+    # Крестик = высокий угловой fill + общий fill заметно выше центрального
+    # Буква = центральный fill высокий, угловой — низкий
+    cross_score = corner_fill * 0.6 + total_fill * 0.4 - center_fill * 0.2
+    return float(np.clip(cross_score, 0, 1))
 
 
 # ── Кластеризация по строкам ──────────────────────────────────────────────────
@@ -346,7 +378,7 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
 
 
 # ── Анализ ────────────────────────────────────────────────────────────────────
-# v19: relative fill method
+# v20: cross detection via corner fill
 _LAT_TO_CYR = {"A":"\u0410","B":"\u0411","C":"\u0412","D":"\u0413","E":"\u0414","F":"\u0415"}
 
 def _normalize_key(answer_key: str) -> list:

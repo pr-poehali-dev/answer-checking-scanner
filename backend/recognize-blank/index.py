@@ -5,7 +5,7 @@
 POST / — { image: base64, questionsCount?: 20, optionsCount?: 4, answerKey?: "АБВГ..." }
 -> { studentCode, answers[], confidence[], analysis }
 """
-# v24: anchor-based grid detection
+# v25: robust anchor detection
 import json, base64
 import numpy as np
 import cv2
@@ -38,35 +38,54 @@ def _load(image_b64: str):
 
 # ── Поиск якорных квадратов ───────────────────────────────────────────────────
 def _find_anchors(gray):
-    """Якоря — полностью залитые чёрные квадраты ~4-6мм."""
+    """Якоря — полностью залитые чёрные квадраты в полях бланка."""
     h, w = gray.shape
-    min_s = int(min(h, w) * 0.012)
-    max_s = int(min(h, w) * 0.060)
+    min_s = int(min(h, w) * 0.010)
+    max_s = int(min(h, w) * 0.075)
 
-    _, bw = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-    k = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-    bw = cv2.morphologyEx(bw, cv2.MORPH_CLOSE, k, iterations=2)
-
-    contours, _ = cv2.findContours(bw, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    seen = set()
     candidates = []
-    for cnt in contours:
-        x, y, cw, ch = cv2.boundingRect(cnt)
-        side = (cw + ch) / 2
-        if not (min_s < side < max_s):
-            continue
-        ratio = cw / ch if ch > 0 else 0
-        if not (0.5 < ratio < 2.0):
-            continue
-        area = cv2.contourArea(cnt)
-        fill = area / (cw * ch) if cw * ch > 0 else 0
-        if fill < 0.65:
-            continue
-        roi = gray[y:y+ch, x:x+cw]
-        if float(np.mean(roi)) > 100:
-            continue
-        cx = x + cw // 2
-        cy = y + ch // 2
-        candidates.append((cx, cy, cw, ch, side))
+    k = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+
+    # Пробуем несколько методов бинаризации
+    thresh_list = []
+    # 1. Otsu глобальный
+    _, bw_otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    thresh_list.append(cv2.morphologyEx(bw_otsu, cv2.MORPH_CLOSE, k, iterations=2))
+    # 2. Фиксированный порог (для светлых фото)
+    for thr in [80, 100, 130]:
+        _, bw_fix = cv2.threshold(gray, thr, 255, cv2.THRESH_BINARY_INV)
+        thresh_list.append(cv2.morphologyEx(bw_fix, cv2.MORPH_CLOSE, k, iterations=1))
+    # 3. Адаптивный
+    blurred = cv2.GaussianBlur(gray, (3, 3), 0)
+    bw_adp = cv2.adaptiveThreshold(blurred, 255,
+                cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 25, 8)
+    thresh_list.append(cv2.morphologyEx(bw_adp, cv2.MORPH_CLOSE, k, iterations=2))
+
+    for bw in thresh_list:
+        contours, _ = cv2.findContours(bw, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for cnt in contours:
+            x, y, cw, ch = cv2.boundingRect(cnt)
+            side = (cw + ch) / 2
+            if not (min_s < side < max_s):
+                continue
+            ratio = cw / ch if ch > 0 else 0
+            if not (0.45 < ratio < 2.2):
+                continue
+            area = cv2.contourArea(cnt)
+            fill = area / (cw * ch) if cw * ch > 0 else 0
+            if fill < 0.55:
+                continue
+            roi = gray[y:y+ch, x:x+cw]
+            if float(np.mean(roi)) > 130:
+                continue
+            cx = x + cw // 2
+            cy = y + ch // 2
+            key = (cx // 8, cy // 8)
+            if key in seen:
+                continue
+            seen.add(key)
+            candidates.append((cx, cy, cw, ch, side))
 
     return candidates
 
@@ -270,7 +289,7 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
                          f"tl=({tl[0]},{tl[1]})", f"br=({br[0]},{br[1]})"]
     else:
         answer_rows = _fallback_detect(gray_ans, questions_count, options_count)
-        dbg_rows_dist = [f"fallback", f"cands={dbg_anchors}", len(answer_rows)]
+        dbg_rows_dist = [f"fallback", f"cands={dbg_anchors}_need4", len(answer_rows)]
 
     answer_rows = answer_rows[:questions_count]
 

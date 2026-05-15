@@ -62,7 +62,7 @@ def handler(event: dict, context) -> dict:
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
                 "HTTP-Referer": "https://poehali.dev",
-                "X-Title": "АОУСПТ Чат",
+                "X-Title": "AOUSPT Chat",
             },
             json={
                 "model": FREE_MODEL,

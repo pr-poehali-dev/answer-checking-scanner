@@ -37,7 +37,7 @@ const SECTION_COMPONENTS: Record<Section, React.FC> = {
 const MOBILE_NAV: { id: Section; label: string; icon: string }[] = [
   { id: "works",   label: "Работы",    icon: "ClipboardList" },
   { id: "upload",  label: "Проверка",  icon: "ScanLine" },
-  { id: "results", label: "Результаты", icon: "BarChart2" },
+  { id: "chat",    label: "ИИ Чат",    icon: "MessageSquare" },
   { id: "students",label: "Ученики",   icon: "Users" },
   { id: "settings",label: "Ещё",       icon: "Menu" },
 ];

@@ -58,6 +58,16 @@ export default function InstitutionDashboard({ user, onLogout }: Props) {
   const [newShowPass, setNewShowPass] = useState(false);
   const [newPosition, setNewPosition] = useState("teacher");
   const [newSubject, setNewSubject] = useState("");
+
+  // Edit staff form
+  const [editStaff, setEditStaff] = useState<InstitutionStaff | null>(null);
+  const [editFullName, setEditFullName] = useState("");
+  const [editPosition, setEditPosition] = useState("teacher");
+  const [editSubject, setEditSubject] = useState("");
+  const [editPassword, setEditPassword] = useState("");
+  const [editShowPass, setEditShowPass] = useState(false);
+  const [editError, setEditError] = useState("");
+  const [editLoading, setEditLoading] = useState(false);
   const [createError, setCreateError] = useState("");
   const [createLoading, setCreateLoading] = useState(false);
 
@@ -119,6 +129,39 @@ export default function InstitutionDashboard({ user, onLogout }: Props) {
       await institutionApi.deleteStaff(user.login, user.password, s.id);
       await loadStaff();
     } catch { /* ignore */ }
+  };
+
+  const openEdit = (s: InstitutionStaff) => {
+    setEditStaff(s);
+    setEditFullName(s.full_name);
+    setEditPosition(s.position);
+    setEditSubject(s.subject || "");
+    setEditPassword("");
+    setEditError("");
+  };
+
+  const handleEditStaff = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editStaff) return;
+    setEditError("");
+    if (!editFullName || !editPosition) { setEditError("Заполните все обязательные поля"); return; }
+    if (editPosition === "teacher" && !editSubject) { setEditError("Укажите предмет для педагога"); return; }
+    if (editPassword && editPassword.length < 6) { setEditError("Пароль должен быть не менее 6 символов"); return; }
+    setEditLoading(true);
+    try {
+      await institutionApi.updateStaff(user.login, user.password, editStaff.id, {
+        full_name: editFullName,
+        position: editPosition,
+        subject: editSubject || undefined,
+        new_password: editPassword || undefined,
+      });
+      setEditStaff(null);
+      await loadStaff();
+    } catch (e) {
+      setEditError((e as Error).message || "Ошибка сохранения");
+    } finally {
+      setEditLoading(false);
+    }
   };
 
   const nav = [
@@ -382,6 +425,97 @@ export default function InstitutionDashboard({ user, onLogout }: Props) {
                 </div>
               )}
 
+              {/* Форма редактирования */}
+              {editStaff && (
+                <div className="bg-white border border-primary/30 rounded-sm p-5 space-y-3">
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-sm font-semibold text-foreground">Редактировать: {editStaff.full_name}</p>
+                    <button onClick={() => setEditStaff(null)} className="text-muted-foreground hover:text-foreground">
+                      <Icon name="X" size={16} />
+                    </button>
+                  </div>
+                  <form onSubmit={handleEditStaff} className="space-y-3">
+                    <div>
+                      <label className="text-xs text-muted-foreground block mb-1">ФИО сотрудника *</label>
+                      <input
+                        type="text"
+                        value={editFullName}
+                        onChange={e => setEditFullName(e.target.value)}
+                        placeholder="Фамилия Имя Отчество"
+                        className="w-full px-3 py-2 border border-border rounded-sm text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground block mb-1">Должность *</label>
+                      <select
+                        value={editPosition}
+                        onChange={e => setEditPosition(e.target.value)}
+                        className="w-full px-3 py-2 border border-border rounded-sm text-sm bg-white focus:outline-none focus:ring-1 focus:ring-ring"
+                      >
+                        {POSITIONS.map(p => (
+                          <option key={p.value} value={p.value}>{p.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    {editPosition === "teacher" && (
+                      <div>
+                        <label className="text-xs text-muted-foreground block mb-1">Предмет *</label>
+                        <input
+                          type="text"
+                          value={editSubject}
+                          onChange={e => setEditSubject(e.target.value)}
+                          placeholder="Например: Математика, История..."
+                          className="w-full px-3 py-2 border border-border rounded-sm text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                        />
+                      </div>
+                    )}
+                    <div>
+                      <label className="text-xs text-muted-foreground block mb-1">
+                        Новый пароль <span className="text-muted-foreground/60">(оставьте пустым, чтобы не менять)</span>
+                      </label>
+                      <div className="relative">
+                        <input
+                          type={editShowPass ? "text" : "password"}
+                          value={editPassword}
+                          onChange={e => setEditPassword(e.target.value)}
+                          placeholder="Мин. 6 символов"
+                          className="w-full pr-8 px-3 py-2 border border-border rounded-sm text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                        />
+                        <button type="button" onClick={() => setEditShowPass(v => !v)}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground">
+                          <Icon name={editShowPass ? "EyeOff" : "Eye"} size={13} />
+                        </button>
+                      </div>
+                    </div>
+                    {editError && (
+                      <div className="flex items-center gap-2 p-2.5 rounded-sm bg-destructive/5 border border-destructive/20">
+                        <Icon name="AlertCircle" size={13} className="text-destructive flex-shrink-0" />
+                        <p className="text-xs text-destructive">{editError}</p>
+                      </div>
+                    )}
+                    <div className="flex gap-2 pt-1">
+                      <button
+                        type="submit"
+                        disabled={editLoading}
+                        className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-primary text-primary-foreground text-xs font-semibold rounded-sm hover:opacity-90 disabled:opacity-50"
+                      >
+                        {editLoading
+                          ? <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                          : <Icon name="Save" size={13} />}
+                        {editLoading ? "Сохранение..." : "Сохранить изменения"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditStaff(null)}
+                        className="px-4 py-2 border border-border text-xs rounded-sm hover:bg-muted transition-colors"
+                      >
+                        Отмена
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              )}
+
               {/* Список сотрудников */}
               <div className="bg-white border border-border rounded-sm overflow-hidden">
                 <div className="px-4 py-3 border-b border-border bg-muted">
@@ -416,6 +550,15 @@ export default function InstitutionDashboard({ user, onLogout }: Props) {
                           }`}>
                             {s.is_active ? "Активен" : "Деактивирован"}
                           </span>
+                          {s.is_active && (
+                            <button
+                              onClick={() => openEdit(s)}
+                              className="p-1 text-muted-foreground hover:text-primary transition-colors"
+                              title="Редактировать"
+                            >
+                              <Icon name="Pencil" size={14} />
+                            </button>
+                          )}
                           {s.is_active && s.login !== user.login && (
                             <button
                               onClick={() => handleDeleteStaff(s)}

@@ -229,6 +229,12 @@ export const institutionApi = {
       "delete-staff", { method: "POST", body: { auth_login: authLogin, auth_password: authPassword, staff_id: staffId } }
     ),
 
+  updateStaff: (authLogin: string, authPassword: string, staffId: number, payload: {
+    full_name: string; position: string; subject?: string; new_password?: string;
+  }) => instRequest<{ success: boolean }>(
+    "update-staff", { method: "POST", body: { auth_login: authLogin, auth_password: authPassword, staff_id: staffId, ...payload } }
+  ),
+
   getCollective: (authLogin: string, authPassword: string) =>
     instRequest<{ members: { full_name: string; position: string; position_label: string; subject: string | null }[] }>(
       "collective", { method: "GET", authLogin, authPassword }

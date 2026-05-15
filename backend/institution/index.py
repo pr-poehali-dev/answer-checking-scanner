@@ -423,6 +423,70 @@ def handler(event: dict, context) -> dict:
         finally:
             conn.close()
 
+    # ── POST update-staff ─────────────────────────────────────────────────────
+    if method == "POST" and action == "update-staff":
+        login_val = (body.get("auth_login") or "").strip()
+        password_val = (body.get("auth_password") or "").strip()
+        staff_id = body.get("staff_id")
+
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"""SELECT u.institution_id, u.institution_position
+                    FROM {SCHEMA}.users u
+                    WHERE u.login = %s AND u.password_hash = %s
+                      AND u.institution_id IS NOT NULL AND u.is_active = true""",
+                (login_val, hash_password(password_val))
+            )
+            admin_row = cur.fetchone()
+            if not admin_row or admin_row[1] not in MANAGEMENT_POSITIONS:
+                return _resp(403, {"error": "Доступ запрещён"})
+
+            institution_id = admin_row[0]
+
+            full_name = (body.get("full_name") or "").strip()
+            position = (body.get("position") or "").strip()
+            subject = (body.get("subject") or "").strip()
+            new_password = (body.get("new_password") or "").strip()
+
+            if not full_name or not position:
+                return _resp(400, {"error": "ФИО и должность обязательны"})
+            if position not in POSITIONS:
+                return _resp(400, {"error": "Некорректная должность"})
+            if position == "teacher" and not subject:
+                return _resp(400, {"error": "Укажите предмет для педагога"})
+            if new_password and len(new_password) < 6:
+                return _resp(400, {"error": "Пароль должен быть не менее 6 символов"})
+
+            is_manager = position in MANAGEMENT_POSITIONS
+            role = "ou_admin" if is_manager else "ou_staff"
+
+            if new_password:
+                cur.execute(
+                    f"""UPDATE {SCHEMA}.users
+                        SET full_name = %s, institution_position = %s, subject = %s,
+                            role = %s, password_hash = %s
+                        WHERE id = %s AND institution_id = %s""",
+                    (full_name, position, subject if position == "teacher" else None,
+                     role, hash_password(new_password), staff_id, institution_id)
+                )
+            else:
+                cur.execute(
+                    f"""UPDATE {SCHEMA}.users
+                        SET full_name = %s, institution_position = %s, subject = %s, role = %s
+                        WHERE id = %s AND institution_id = %s""",
+                    (full_name, position, subject if position == "teacher" else None,
+                     role, staff_id, institution_id)
+                )
+            conn.commit()
+            return _resp(200, {"success": True})
+        except Exception as e:
+            conn.rollback()
+            return _resp(500, {"error": str(e)})
+        finally:
+            conn.close()
+
     # ── GET collective ────────────────────────────────────────────────────────
     if method == "GET" and action == "collective":
         login_val = (qs.get("auth_login") or "").strip()

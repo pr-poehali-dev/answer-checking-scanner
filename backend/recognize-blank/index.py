@@ -5,7 +5,7 @@
 POST / — { image: base64, questionsCount?: 20, optionsCount?: 4, answerKey?: "АБВГ..." }
 -> { studentCode, answers[], confidence[], analysis }
 """
-# v25: robust anchor detection
+# v26: smarter anchor selection
 import json, base64
 import numpy as np
 import cv2
@@ -92,26 +92,52 @@ def _find_anchors(gray):
 
 # ── Выбираем 4 угловых якоря ──────────────────────────────────────────────────
 def _select_corner_anchors(candidates, img_w, img_h):
+    """
+    Из кандидатов ищем 4 квадрата одинакового размера, образующих прямоугольник:
+    два слева (маленький X) + два справа (большой X), на одной горизонтали.
+    Якоря у нас в левом и правом полях бланка — X маленький, X большой.
+    """
     if len(candidates) < 4:
         return None
-    corners_target = [(0, 0), (img_w, 0), (0, img_h), (img_w, img_h)]
-    selected = []
-    used = set()
-    for tx, ty in corners_target:
-        best = min(
-            [(i, c) for i, c in enumerate(candidates) if i not in used],
-            key=lambda ic: (ic[1][0] - tx)**2 + (ic[1][1] - ty)**2,
-            default=None
-        )
-        if best:
-            used.add(best[0])
-            selected.append(best[1])
-    if len(selected) == 4:
-        selected.sort(key=lambda p: (p[1], p[0]))
-        top = sorted(selected[:2], key=lambda p: p[0])
-        bot = sorted(selected[2:], key=lambda p: p[0])
-        return top[0], top[1], bot[0], bot[1]
-    return None
+
+    # Медианный размер якоря
+    sizes = sorted([c[4] for c in candidates])
+    med_size = float(np.median(sizes))
+
+    # Оставляем только кандидатов близкого размера (±40% от медианы)
+    same_size = [c for c in candidates if abs(c[4] - med_size) / max(med_size, 1) < 0.4]
+
+    if len(same_size) < 4:
+        # Смягчаем — берём всех
+        same_size = candidates
+
+    # Сортируем по X: левые (малый X) и правые (большой X)
+    same_size.sort(key=lambda c: c[0])
+    n = len(same_size)
+
+    # Левые кандидаты — первая треть по X
+    left  = [c for c in same_size if c[0] < img_w * 0.35]
+    right = [c for c in same_size if c[0] > img_w * 0.65]
+
+    if len(left) < 2 or len(right) < 2:
+        # Fallback: просто берём 2 самых левых и 2 самых правых
+        left  = same_size[:2]
+        right = same_size[-2:]
+
+    # Из левых берём самый верхний и самый нижний
+    left_top = min(left, key=lambda c: c[1])
+    left_bot = max(left, key=lambda c: c[1])
+    # Из правых — самый верхний и самый нижний
+    right_top = min(right, key=lambda c: c[1])
+    right_bot = max(right, key=lambda c: c[1])
+
+    # Проверяем что образуют разумный прямоугольник
+    grid_h = left_bot[1] - left_top[1]
+    grid_w = right_top[0] - left_top[0]
+    if grid_h < img_h * 0.05 or grid_w < img_w * 0.3:
+        return None
+
+    return left_top, right_top, left_bot, right_bot
 
 
 # ── Оценка крестика в ячейке ──────────────────────────────────────────────────
@@ -242,8 +268,16 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
     answer_zone_h = int(h * 0.78)
     gray_ans = gray[:answer_zone_h, :]
 
+    # Ищем якоря по всей высоте зоны ответов
     anchor_cands = _find_anchors(gray_ans)
     anchors = _select_corner_anchors(anchor_cands, w, answer_zone_h)
+
+    # Если не нашли — пробуем по всему изображению (якоря могут быть ниже)
+    if not anchors and len(anchor_cands) < 4:
+        anchor_cands_full = _find_anchors(gray)
+        anchors = _select_corner_anchors(anchor_cands_full, w, h)
+        if anchors:
+            anchor_cands = anchor_cands_full
 
     dbg_anchors = len(anchor_cands)
     answer_rows = []

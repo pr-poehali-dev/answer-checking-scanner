@@ -7,6 +7,7 @@ interface LandingPageProps {
   onLogin: () => void;
   onRegister: () => void;
   onTrial?: () => void;
+  onOuLogin?: () => void;
 }
 
 const FEATURES = [
@@ -59,7 +60,7 @@ function formatRub(n: number) {
   return new Intl.NumberFormat("ru-RU").format(n) + " ₽";
 }
 
-export default function LandingPage({ onLogin, onRegister, onTrial }: LandingPageProps) {
+export default function LandingPage({ onLogin, onRegister, onTrial, onOuLogin }: LandingPageProps) {
   const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
   const [loadingPlans, setLoadingPlans] = useState(true);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -98,6 +99,15 @@ export default function LandingPage({ onLogin, onRegister, onTrial }: LandingPag
 
           {/* Кнопки */}
           <div className="flex items-center gap-2">
+            {onOuLogin && (
+              <button
+                onClick={onOuLogin}
+                className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 border border-border text-xs font-semibold rounded-sm hover:bg-muted transition-colors text-muted-foreground"
+              >
+                <Icon name="Building2" size={13} />
+                Для ОУ
+              </button>
+            )}
             <button
               onClick={onLogin}
               className="hidden sm:inline-flex items-center gap-1.5 px-4 py-2 border border-border text-sm font-semibold rounded-sm hover:bg-muted transition-colors"
@@ -136,6 +146,11 @@ export default function LandingPage({ onLogin, onRegister, onTrial }: LandingPag
             <button onClick={onLogin} className="block w-full text-left text-sm py-2 font-semibold text-primary">
               Войти в систему
             </button>
+            {onOuLogin && (
+              <button onClick={onOuLogin} className="block w-full text-left text-sm py-2 font-semibold text-muted-foreground">
+                Вход для образовательного учреждения
+              </button>
+            )}
           </div>
         )}
       </header>

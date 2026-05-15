@@ -1,5 +1,6 @@
 // API клиент для бэкенда САОУ
 const AUTH_URL = "https://functions.poehali.dev/b08ae7cf-6c0b-4178-acc9-4b62b2c2a61b";
+const INSTITUTION_URL = "https://functions.poehali.dev/4e675776-f4dc-4df7-95ce-0dbf2cfbf6d4";
 const BLANK_URL = "https://functions.poehali.dev/5b4fc8cd-8022-458e-acb6-8606c6c8a4f3";
 const RECOGNIZE_URL = "https://functions.poehali.dev/de6ae337-82d7-4cc2-ae90-3cf97475be59";
 const PRESENTATION_URL = "https://functions.poehali.dev/9aa03e93-715c-41fd-91f4-6d4e79487ed9";
@@ -166,6 +167,72 @@ export const authApi = {
       token,
       body: JSON.stringify({ sections }),
     }),
+};
+
+// ── Institution API ───────────────────────────────────────────────────────────
+
+async function instRequest<T>(action: string, options: { method?: string; body?: object; authLogin?: string; authPassword?: string } = {}): Promise<T> {
+  const { method = "GET", body, authLogin, authPassword } = options;
+  const qs = new URLSearchParams({ action });
+  if (method === "GET" && authLogin) {
+    qs.set("auth_login", authLogin);
+    qs.set("auth_password", authPassword || "");
+  }
+  const res = await fetch(`${INSTITUTION_URL}?${qs.toString()}`, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Ошибка ${res.status}`);
+  return data as T;
+}
+
+export interface InstitutionStaff {
+  id: number;
+  login: string;
+  full_name: string;
+  position: string;
+  position_label: string;
+  subject: string | null;
+  is_active: boolean;
+  created_at: string | null;
+}
+
+export const institutionApi = {
+  register: (payload: {
+    name: string; region: string; inn: string;
+    director_full_name: string; vice_director_full_name: string;
+    admin_login: string; admin_password: string; admin_ou_role: string; email: string;
+  }) => instRequest<{ success: boolean; user_id: number; institution_id: number; login: string; full_name: string; role: string; institution_position: string; institution_name: string; token: string }>(
+    "register-institution", { method: "POST", body: payload }
+  ),
+
+  login: (login: string, password: string) =>
+    instRequest<{ success: boolean; id: number; login: string; full_name: string; first_name?: string; last_name?: string; role: string; institution_id: number; institution_position: string; subject?: string; institution_name: string; token: string; is_manager: boolean }>(
+      "login-institution", { method: "POST", body: { login, password } }
+    ),
+
+  createStaff: (authLogin: string, authPassword: string, payload: {
+    full_name: string; login: string; password: string; position: string; subject?: string;
+  }) => instRequest<{ success: boolean; id: number; login: string; full_name: string; position: string; subject?: string | null }>(
+    "create-staff", { method: "POST", body: { auth_login: authLogin, auth_password: authPassword, ...payload } }
+  ),
+
+  getStaff: (authLogin: string, authPassword: string) =>
+    instRequest<{ staff: InstitutionStaff[]; institution_id: number }>(
+      "staff", { method: "GET", authLogin, authPassword }
+    ),
+
+  deleteStaff: (authLogin: string, authPassword: string, staffId: number) =>
+    instRequest<{ success: boolean }>(
+      "delete-staff", { method: "POST", body: { auth_login: authLogin, auth_password: authPassword, staff_id: staffId } }
+    ),
+
+  getCollective: (authLogin: string, authPassword: string) =>
+    instRequest<{ members: { full_name: string; position: string; position_label: string; subject: string | null }[] }>(
+      "collective", { method: "GET", authLogin, authPassword }
+    ),
 };
 
 const SYNOPSIS_URL = "https://functions.poehali.dev/c757a5f9-12cd-499d-a66f-79b9f9aeb8d1";

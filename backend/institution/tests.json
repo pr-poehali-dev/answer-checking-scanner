@@ -1,0 +1,57 @@
+{
+  "tests": [
+    {
+      "name": "Вход несуществующего пользователя — ошибка",
+      "method": "POST",
+      "path": "/",
+      "body": {
+        "action": "login-institution",
+        "login": "nonexistent_user_xyz",
+        "password": "wrongpass"
+      },
+      "expectedStatus": 401,
+      "expectedBody": { "error": "Неверный логин или пароль" },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Регистрация ОУ — пустые поля",
+      "method": "POST",
+      "path": "/",
+      "body": {
+        "action": "register-institution",
+        "name": "",
+        "region": "",
+        "inn": "",
+        "director_full_name": "",
+        "vice_director_full_name": "",
+        "admin_login": "",
+        "admin_password": "",
+        "admin_ou_role": "director",
+        "email": ""
+      },
+      "expectedStatus": 400,
+      "expectedBody": { "error": "Все поля обязательны" },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Регистрация ОУ — некорректный ИНН",
+      "method": "POST",
+      "path": "/",
+      "body": {
+        "action": "register-institution",
+        "name": "Школа",
+        "region": "Москва",
+        "inn": "123",
+        "director_full_name": "Иванов И.И.",
+        "vice_director_full_name": "Петров П.П.",
+        "admin_login": "test_admin_abc",
+        "admin_password": "password123",
+        "admin_ou_role": "director",
+        "email": "test_abc@mail.ru"
+      },
+      "expectedStatus": 400,
+      "expectedBody": { "error": "ИНН должен содержать 10 или 12 цифр" },
+      "bodyMatcher": "partial"
+    }
+  ]
+}

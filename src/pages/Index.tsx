@@ -14,10 +14,44 @@ import { ChatSection } from "@/components/scanner/ChatSection";
 import LoginPage from "@/pages/LoginPage";
 import LandingPage from "@/pages/LandingPage";
 import AdminPanel from "@/pages/AdminPanel";
+import InstitutionRegisterPage from "@/pages/InstitutionRegisterPage";
+import InstitutionLoginPage from "@/pages/InstitutionLoginPage";
+import InstitutionDashboard from "@/pages/InstitutionDashboard";
 import SubscriptionGate from "@/components/SubscriptionGate";
 import YadiskRequiredGate from "@/components/YadiskRequiredGate";
 import CompanyFooter from "@/components/CompanyFooter";
 import { useAppStore, appStore } from "@/store/appStore";
+
+const OU_SESSION_KEY = "saou_ou_session_v1";
+
+interface OUUser {
+  id: number;
+  login: string;
+  full_name: string;
+  role: string;
+  institution_id: number;
+  institution_position: string;
+  institution_name: string;
+  subject?: string;
+  token: string;
+  is_manager: boolean;
+  password: string;
+}
+
+function saveOUSession(u: OUUser) {
+  try { localStorage.setItem(OU_SESSION_KEY, JSON.stringify(u)); } catch { /* ignore */ }
+}
+function clearOUSession() {
+  try { localStorage.removeItem(OU_SESSION_KEY); } catch { /* ignore */ }
+}
+function loadOUSession(): OUUser | null {
+  try {
+    const raw = localStorage.getItem(OU_SESSION_KEY);
+    if (!raw) return null;
+    const d = JSON.parse(raw);
+    return d.login ? d : null;
+  } catch { return null; }
+}
 
 const SECTION_COMPONENTS: Record<Section, React.FC> = {
   upload: UploadSection,
@@ -45,7 +79,8 @@ const MOBILE_NAV: { id: Section; label: string; icon: string }[] = [
 export default function Index() {
   const [active, setActive]         = useState<Section>("works");
   const [sidebarOpen, setSidebar]   = useState(false);
-  const [authMode, setAuthMode]     = useState<"landing" | "login" | "signup">("landing");
+  const [authMode, setAuthMode]     = useState<"landing" | "login" | "signup" | "ou-login" | "ou-register">("landing");
+  const [ouUser, setOuUser]         = useState<OUUser | null>(() => loadOUSession());
   const { teacher, yadiskConnected, maintenanceSections } = useAppStore();
   const ActiveSection = SECTION_COMPONENTS[active];
 
@@ -73,13 +108,44 @@ export default function Index() {
   // Закрываем сайдбар при смене раздела
   const navigate = (s: Section) => { setActive(s); setSidebar(false); };
 
+  // ── ОУ маршруты ─────────────────────────────────────────────────────────
+  if (ouUser) {
+    return (
+      <InstitutionDashboard
+        user={ouUser}
+        onLogout={() => { clearOUSession(); setOuUser(null); setAuthMode("landing"); }}
+      />
+    );
+  }
+
   if (!teacher) {
+    if (authMode === "ou-login") {
+      return (
+        <InstitutionLoginPage
+          onLogin={(u) => { saveOUSession(u); setOuUser(u); }}
+          onBack={() => setAuthMode("landing")}
+          onRegister={() => setAuthMode("ou-register")}
+        />
+      );
+    }
+    if (authMode === "ou-register") {
+      return (
+        <InstitutionRegisterPage
+          onSuccess={({ login, password, institution_name }) => {
+            alert(`Учреждение "${institution_name}" успешно зарегистрировано!\nЛогин: ${login}\nВойдите в систему.`);
+            setAuthMode("ou-login");
+          }}
+          onBack={() => setAuthMode("landing")}
+        />
+      );
+    }
     if (authMode === "landing") {
       return (
         <LandingPage
           onLogin={() => setAuthMode("login")}
           onRegister={() => setAuthMode("signup")}
           onTrial={() => setAuthMode("signup")}
+          onOuLogin={() => setAuthMode("ou-login")}
         />
       );
     }

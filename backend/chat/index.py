@@ -12,10 +12,12 @@ CORS = {
 }
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-# Бесплатные модели по приоритету (fallback при 404)
+# Бесплатные модели по приоритету (fallback при 404 и 429)
 FREE_MODELS = [
-    "nousresearch/hermes-3-llama-3.1-405b:free",
     "minimax/minimax-m2.5:free",
+    "nousresearch/hermes-3-llama-3.1-405b:free",
+    "mistralai/mistral-7b-instruct:free",
+    "qwen/qwen3-8b:free",
 ]
 
 
@@ -87,7 +89,7 @@ def handler(event: dict, context) -> dict:
             except Exception:
                 err_msg = str(e)
             last_err = f"API error {e.response.status_code}: {err_msg}"
-            if e.response.status_code == 404:
+            if e.response.status_code in (404, 429):
                 continue  # пробуем следующую модель
             return _resp(502, {"error": last_err})
         except Exception as e:

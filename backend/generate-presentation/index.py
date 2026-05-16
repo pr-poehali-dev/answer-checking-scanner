@@ -337,7 +337,7 @@ def gigachat_with_fallback(messages: list, max_tokens: int = 3000) -> str:
     """GigaChat-Lite быстрая (~15-30 сек). Платформа режет функцию через ~100 сек,
     поэтому делаем 2 попытки на Lite (она нестабильна по скорости) и быстрый отказ."""
     last_err = None
-    for model, timeout in (("GigaChat-Lite", 40), ("GigaChat-Lite", 40)):
+    for model, timeout in (("GigaChat-Lite", 70),):
         try:
             return gigachat_chat(messages, max_tokens=max_tokens, model=model, req_timeout=timeout)
         except RuntimeError as e:
@@ -1090,7 +1090,7 @@ def handler(event: dict, context) -> dict:
     qs = event.get("queryStringParameters") or {}
     action = (qs.get("action") or "").strip().lower()
 
-    if method == "GET" and action == "ping":
+    if action in ("ping", "warmup"):
         try:
             get_gigachat_token()
             return _resp(200, {"ok": True, "service": "GigaChat"})

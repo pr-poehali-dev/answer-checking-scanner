@@ -501,6 +501,11 @@ async function fetchWithTimeout(url: string, body: object, timeoutMs: number): P
 }
 
 export const presentationApi = {
+  /** Прогревает GigaChat-токен заранее, чтобы outline-запрос не тратил на него 15-20 сек */
+  warmup: () => {
+    fetch(`${PRESENTATION_URL}?action=warmup`).catch(() => {});
+  },
+
   generate: async (
     params: {
       topic: string;

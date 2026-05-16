@@ -64,6 +64,9 @@ export function PresentationsForm() {
   const [success, setSuccess]         = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Прогреваем GigaChat-токен при открытии вкладки — экономим 15-20 сек на генерации
+  useEffect(() => { presentationApi.warmup(); }, []);
+
   useEffect(() => {
     if (busy) {
       setElapsed(0);

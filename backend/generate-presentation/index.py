@@ -334,9 +334,10 @@ def gigachat_chat(messages: list, max_tokens: int = 3000, temperature: float = 0
 
 
 def gigachat_with_fallback(messages: list, max_tokens: int = 3000) -> str:
-    """Пробует модели по очереди. Без sleep — укладываемся в таймаут платформы."""
+    """GigaChat-Lite быстрая (~15-30 сек), GigaChat-2 умнее но медленнее (~60-100 сек).
+    Сначала Lite — она почти всегда успевает в таймаут."""
     last_err = None
-    for model, timeout in (("GigaChat-2", 100), ("GigaChat-Lite", 15)):
+    for model, timeout in (("GigaChat-Lite", 60), ("GigaChat-2", 50)):
         try:
             return gigachat_chat(messages, max_tokens=max_tokens, model=model, req_timeout=timeout)
         except RuntimeError as e:

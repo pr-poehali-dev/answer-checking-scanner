@@ -334,10 +334,10 @@ def gigachat_chat(messages: list, max_tokens: int = 3000, temperature: float = 0
 
 
 def gigachat_with_fallback(messages: list, max_tokens: int = 3000) -> str:
-    """GigaChat-Lite быстрая (~15-30 сек). Платформа режет функцию через ~100 сек,
-    поэтому делаем 2 попытки на Lite (она нестабильна по скорости) и быстрый отказ."""
+    """GigaChat-2 стабильнее держит соединение чем Lite.
+    Warmup уже получил токен, так что здесь чистое время генерации."""
     last_err = None
-    for model, timeout in (("GigaChat-Lite", 70),):
+    for model, timeout in (("GigaChat-2", 75), ("GigaChat-Lite", 75)):
         try:
             return gigachat_chat(messages, max_tokens=max_tokens, model=model, req_timeout=timeout)
         except RuntimeError as e:

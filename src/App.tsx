@@ -9,12 +9,15 @@ import NotFound from "./pages/NotFound";
 import YadiskCallback from "./pages/YadiskCallback";
 import OfertaPage from "./pages/OfertaPage";
 import PrivacyPage from "./pages/PrivacyPage";
+import TesterLogger from "./components/TesterLogger";
+import { useAppStore } from "./store/appStore";
 
 const queryClient = new QueryClient();
 
-const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
+function AppContent() {
+  const role = useAppStore((s) => s.teacher?.role);
+  return (
+    <>
       <Toaster />
       <Sonner />
       <BrowserRouter>
@@ -27,6 +30,15 @@ const App = () => (
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
+      {role === "tester" && <TesterLogger />}
+    </>
+  );
+}
+
+const App = () => (
+  <QueryClientProvider client={queryClient}>
+    <TooltipProvider>
+      <AppContent />
     </TooltipProvider>
   </QueryClientProvider>
 );

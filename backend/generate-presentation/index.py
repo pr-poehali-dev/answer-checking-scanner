@@ -334,10 +334,10 @@ def gigachat_chat(messages: list, max_tokens: int = 3000, temperature: float = 0
 
 
 def gigachat_with_fallback(messages: list, max_tokens: int = 3000) -> str:
-    """GigaChat-Lite быстрая (~15-30 сек), GigaChat-2 умнее но медленнее (~60-100 сек).
-    Сначала Lite — она почти всегда успевает в таймаут."""
+    """GigaChat-Lite быстрая (~15-30 сек). Платформа режет функцию через ~100 сек,
+    поэтому делаем 2 попытки на Lite (она нестабильна по скорости) и быстрый отказ."""
     last_err = None
-    for model, timeout in (("GigaChat-Lite", 60), ("GigaChat-2", 50)):
+    for model, timeout in (("GigaChat-Lite", 40), ("GigaChat-Lite", 40)):
         try:
             return gigachat_chat(messages, max_tokens=max_tokens, model=model, req_timeout=timeout)
         except RuntimeError as e:
@@ -481,28 +481,19 @@ def generate_outline(topic: str, description: str, slides_count: int, audience: 
     """Генерирует развёрнутую структуру презентации строго по ФГОС."""
     audience_str = audience or "школьники"
 
-    system = (
-        "Ты методист по ФГОС. Создаёшь структуру учебной презентации. "
-        "Требования: факты точные, даты/имена/термины конкретные, тезисы завершённые (10-18 слов), "
-        "заголовки 4-6 слов. Отвечай строго JSON без пояснений."
-    )
+    system = "Методист ФГОС. Делаешь структуру презентации. Только JSON, без текста вокруг."
 
     user = (
         f"Тема: {topic}. Аудитория: {audience_str}. Слайдов: {slides_count}.\n"
-        + (f"Контекст: {description[:1500]}\n" if description else "")
-        + "Верни ТОЛЬКО JSON:\n"
-        '{"subtitle":"подзаголовок 5-8 слов",'
-        '"contents":["раздел 1","раздел 2"],'
-        '"slides":[{"title":"заголовок 4-6 слов",'
-        '"bullets":["тезис 1 10-18 слов","тезис 2","тезис 3","тезис 4"],'
-        '"fact":"интересный факт",'
-        '"image_query":"запрос для фото на русском"}],'
-        '"conclusion":["вывод 1","вывод 2","вывод 3"]}'
-        f"\nslides ровно {slides_count} штук."
+        + (f"Контекст: {description[:600]}\n" if description else "")
+        + "JSON: {\"subtitle\":\"\",\"contents\":[\"\",\"\"],"
+        '"slides":[{"title":"4-6 слов","bullets":["3 тезиса по 10-15 слов"],"fact":"","image_query":"на русском"}],'
+        '"conclusion":["",""]}'
+        f" slides={slides_count}."
     )
 
-    # ~160 токенов на слайд (4 тезиса × ~30 + заголовок + fact + query) + запас
-    max_tok = min(160 * slides_count + 500, 3000)
+    # ~110 токенов на слайд (3 тезиса × ~25 + заголовок + fact + query) + запас
+    max_tok = min(110 * slides_count + 400, 2000)
 
     raw = gigachat_with_fallback(
         [{"role": "system", "content": system}, {"role": "user", "content": user}],

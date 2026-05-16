@@ -72,78 +72,144 @@ CORS = {
 # ─── ДИЗАЙН-ТЕМЫ ────────────────────────────────────────────────────────────
 
 THEMES = [
-    {
+    {   # Глубокий океан — синий с бирюзой
         "name": "ocean",
-        "bg":        RGBColor(0xF4, 0xF7, 0xFA),
-        "title_bg":  RGBColor(0x0D, 0x2B, 0x55),
-        "accent":    RGBColor(0x0D, 0x2B, 0x55),
-        "accent2":   RGBColor(0x1E, 0x9E, 0xD4),
-        "text":      RGBColor(0x1A, 0x24, 0x30),
-        "muted":     RGBColor(0x6B, 0x7C, 0x93),
+        "bg":        RGBColor(0xF0, 0xF6, 0xFC),
+        "title_bg":  RGBColor(0x09, 0x1E, 0x42),
+        "accent":    RGBColor(0x09, 0x1E, 0x42),
+        "accent2":   RGBColor(0x00, 0xB4, 0xD8),
+        "accent3":   RGBColor(0x48, 0xCA, 0xE4),
+        "text":      RGBColor(0x0D, 0x1B, 0x2A),
+        "muted":     RGBColor(0x55, 0x70, 0x8B),
         "white":     RGBColor(0xFF, 0xFF, 0xFF),
-        "title_sub": RGBColor(0xB8, 0xD4, 0xED),
-        "stripe":    RGBColor(0x1E, 0x9E, 0xD4),
+        "title_sub": RGBColor(0x90, 0xC8, 0xF0),
+        "stripe":    RGBColor(0x00, 0xB4, 0xD8),
+        "card_bg":   RGBColor(0xE0, 0xF2, 0xFE),
         "label":     "УРОК · ПРЕЗЕНТАЦИЯ",
+        "layout":    "left_header",   # шапка слева с крупным номером
     },
-    {
+    {   # Тёмный лес — изумрудный с золотом
         "name": "forest",
-        "bg":        RGBColor(0xF3, 0xF7, 0xF3),
-        "title_bg":  RGBColor(0x1B, 0x42, 0x32),
-        "accent":    RGBColor(0x1B, 0x42, 0x32),
-        "accent2":   RGBColor(0x4C, 0xAF, 0x50),
-        "text":      RGBColor(0x1A, 0x28, 0x1E),
-        "muted":     RGBColor(0x5A, 0x72, 0x5C),
+        "bg":        RGBColor(0xF0, 0xF7, 0xF1),
+        "title_bg":  RGBColor(0x0F, 0x2D, 0x1F),
+        "accent":    RGBColor(0x0F, 0x2D, 0x1F),
+        "accent2":   RGBColor(0x2D, 0xC6, 0x5F),
+        "accent3":   RGBColor(0xD4, 0xA0, 0x17),
+        "text":      RGBColor(0x0A, 0x1F, 0x10),
+        "muted":     RGBColor(0x4A, 0x6E, 0x55),
         "white":     RGBColor(0xFF, 0xFF, 0xFF),
-        "title_sub": RGBColor(0xB2, 0xDF, 0xB8),
-        "stripe":    RGBColor(0x4C, 0xAF, 0x50),
-        "label":     "УРОК · ПРЕЗЕНТАЦИЯ",
+        "title_sub": RGBColor(0xA8, 0xDF, 0xB8),
+        "stripe":    RGBColor(0x2D, 0xC6, 0x5F),
+        "card_bg":   RGBColor(0xDC, 0xF5, 0xE7),
+        "label":     "УРОК · ПРИРОДА И НАУКА",
+        "layout":    "split_diagonal",  # диагональная шапка
     },
-    {
+    {   # Закат истории — тёмно-красный с золотом
         "name": "sunset",
-        "bg":        RGBColor(0xFB, 0xF5, 0xEE),
-        "title_bg":  RGBColor(0x5C, 0x1A, 0x1A),
-        "accent":    RGBColor(0x5C, 0x1A, 0x1A),
-        "accent2":   RGBColor(0xD4, 0x8B, 0x00),
-        "text":      RGBColor(0x2A, 0x1A, 0x0E),
-        "muted":     RGBColor(0x7A, 0x60, 0x4A),
+        "bg":        RGBColor(0xFD, 0xF3, 0xE8),
+        "title_bg":  RGBColor(0x3D, 0x0C, 0x02),
+        "accent":    RGBColor(0x3D, 0x0C, 0x02),
+        "accent2":   RGBColor(0xE8, 0x9A, 0x0C),
+        "accent3":   RGBColor(0xC0, 0x39, 0x2B),
+        "text":      RGBColor(0x1F, 0x0A, 0x04),
+        "muted":     RGBColor(0x7A, 0x50, 0x3A),
         "white":     RGBColor(0xFF, 0xFF, 0xFF),
-        "title_sub": RGBColor(0xF0, 0xD0, 0xA0),
-        "stripe":    RGBColor(0xD4, 0x8B, 0x00),
-        "label":     "УРОК · ПРЕЗЕНТАЦИЯ",
+        "title_sub": RGBColor(0xF5, 0xCE, 0x8C),
+        "stripe":    RGBColor(0xE8, 0x9A, 0x0C),
+        "card_bg":   RGBColor(0xFE, 0xE8, 0xCC),
+        "label":     "ИСТОРИЯ И КУЛЬТУРА",
+        "layout":    "top_banner",  # широкий баннер сверху
     },
-    {
+    {   # Квантовый сланец — тёмно-фиолетовый с неоном
         "name": "slate",
-        "bg":        RGBColor(0xF5, 0xF4, 0xF8),
-        "title_bg":  RGBColor(0x2D, 0x27, 0x4B),
-        "accent":    RGBColor(0x2D, 0x27, 0x4B),
-        "accent2":   RGBColor(0x7C, 0x5C, 0xBF),
-        "text":      RGBColor(0x1E, 0x1A, 0x2E),
-        "muted":     RGBColor(0x6E, 0x6A, 0x86),
+        "bg":        RGBColor(0xF4, 0xF2, 0xFF),
+        "title_bg":  RGBColor(0x1A, 0x13, 0x36),
+        "accent":    RGBColor(0x1A, 0x13, 0x36),
+        "accent2":   RGBColor(0x7C, 0x3A, 0xFF),
+        "accent3":   RGBColor(0x00, 0xE5, 0xFF),
+        "text":      RGBColor(0x12, 0x0C, 0x25),
+        "muted":     RGBColor(0x6A, 0x60, 0x90),
         "white":     RGBColor(0xFF, 0xFF, 0xFF),
-        "title_sub": RGBColor(0xC8, 0xC0, 0xE8),
-        "stripe":    RGBColor(0x7C, 0x5C, 0xBF),
-        "label":     "УРОК · ПРЕЗЕНТАЦИЯ",
+        "title_sub": RGBColor(0xC4, 0xB0, 0xFF),
+        "stripe":    RGBColor(0x7C, 0x3A, 0xFF),
+        "card_bg":   RGBColor(0xEA, 0xE5, 0xFF),
+        "label":     "ТОЧНЫЕ НАУКИ",
+        "layout":    "sidebar_dark",  # тёмный сайдбар слева
     },
-    {
+    {   # Лаборатория — тёмный с кораллом и циановым
         "name": "coral",
-        "bg":        RGBColor(0xFB, 0xF7, 0xF5),
-        "title_bg":  RGBColor(0x22, 0x2E, 0x3A),
-        "accent":    RGBColor(0x22, 0x2E, 0x3A),
-        "accent2":   RGBColor(0xCF, 0x55, 0x44),
-        "text":      RGBColor(0x1A, 0x22, 0x2C),
-        "muted":     RGBColor(0x70, 0x7A, 0x84),
+        "bg":        RGBColor(0xF8, 0xF5, 0xF2),
+        "title_bg":  RGBColor(0x18, 0x22, 0x2F),
+        "accent":    RGBColor(0x18, 0x22, 0x2F),
+        "accent2":   RGBColor(0xFF, 0x5E, 0x4B),
+        "accent3":   RGBColor(0x00, 0xD4, 0xC8),
+        "text":      RGBColor(0x10, 0x18, 0x22),
+        "muted":     RGBColor(0x6A, 0x72, 0x7E),
         "white":     RGBColor(0xFF, 0xFF, 0xFF),
-        "title_sub": RGBColor(0xE8, 0xC8, 0xC0),
-        "stripe":    RGBColor(0xCF, 0x55, 0x44),
+        "title_sub": RGBColor(0xF5, 0xBB, 0xB5),
+        "stripe":    RGBColor(0xFF, 0x5E, 0x4B),
+        "card_bg":   RGBColor(0xFE, 0xEC, 0xEA),
+        "label":     "ХИМИЯ И БИОЛОГИЯ",
+        "layout":    "top_banner",
+    },
+    {   # Арктика — холодный белый с синим льдом
+        "name": "arctic",
+        "bg":        RGBColor(0xF5, 0xF9, 0xFF),
+        "title_bg":  RGBColor(0x0A, 0x2A, 0x4A),
+        "accent":    RGBColor(0x0A, 0x2A, 0x4A),
+        "accent2":   RGBColor(0x4F, 0xC3, 0xF7),
+        "accent3":   RGBColor(0xE0, 0xF7, 0xFA),
+        "text":      RGBColor(0x08, 0x20, 0x38),
+        "muted":     RGBColor(0x50, 0x70, 0x90),
+        "white":     RGBColor(0xFF, 0xFF, 0xFF),
+        "title_sub": RGBColor(0xB3, 0xE5, 0xFC),
+        "stripe":    RGBColor(0x4F, 0xC3, 0xF7),
+        "card_bg":   RGBColor(0xE1, 0xF5, 0xFE),
+        "label":     "ГЕОГРАФИЯ И ПРИРОДА",
+        "layout":    "left_header",
+    },
+    {   # Рассвет — тёплый кремовый с индиго
+        "name": "dawn",
+        "bg":        RGBColor(0xFE, 0xF9, 0xF0),
+        "title_bg":  RGBColor(0x2C, 0x17, 0x6E),
+        "accent":    RGBColor(0x2C, 0x17, 0x6E),
+        "accent2":   RGBColor(0xFF, 0x8C, 0x42),
+        "accent3":   RGBColor(0xFF, 0xD1, 0x66),
+        "text":      RGBColor(0x1A, 0x0E, 0x3A),
+        "muted":     RGBColor(0x7A, 0x65, 0x90),
+        "white":     RGBColor(0xFF, 0xFF, 0xFF),
+        "title_sub": RGBColor(0xD4, 0xC0, 0xFF),
+        "stripe":    RGBColor(0xFF, 0x8C, 0x42),
+        "card_bg":   RGBColor(0xFE, 0xF0, 0xDC),
+        "label":     "ЛИТЕРАТУРА И ИСКУССТВО",
+        "layout":    "split_diagonal",
+    },
+    {   # Монохром — элегантный чёрно-белый с акцентом
+        "name": "mono",
+        "bg":        RGBColor(0xFA, 0xFA, 0xFA),
+        "title_bg":  RGBColor(0x10, 0x10, 0x10),
+        "accent":    RGBColor(0x10, 0x10, 0x10),
+        "accent2":   RGBColor(0xE5, 0x3E, 0x3E),
+        "accent3":   RGBColor(0xFF, 0xD7, 0x00),
+        "text":      RGBColor(0x18, 0x18, 0x18),
+        "muted":     RGBColor(0x70, 0x70, 0x70),
+        "white":     RGBColor(0xFF, 0xFF, 0xFF),
+        "title_sub": RGBColor(0xCC, 0xCC, 0xCC),
+        "stripe":    RGBColor(0xE5, 0x3E, 0x3E),
+        "card_bg":   RGBColor(0xF0, 0xF0, 0xF0),
         "label":     "УРОК · ПРЕЗЕНТАЦИЯ",
+        "layout":    "sidebar_dark",
     },
 ]
 
 THEME_KEYWORDS = {
-    "forest": ["биол", "экол", "природ", "животн", "растен", "лес", "море", "зоол", "ботан", "органи", "генет"],
-    "sunset": ["истор", "литер", "обществ", "война", "революц", "культур", "искусств", "философ", "социол", "политол", "граждан"],
-    "slate":  ["физик", "матем", "информат", "програм", "алгебр", "геометр", "вычисл", "алгоритм", "электрон", "квант", "механик"],
-    "coral":  ["хими", "медиц", "здоровь", "биохим", "анатом", "физиол", "лечен", "реакц", "молекул"],
+    "forest":  ["биол", "экол", "природ", "животн", "растен", "лес", "зоол", "ботан", "органи", "генет", "эволюц"],
+    "sunset":  ["истор", "литер", "обществ", "война", "революц", "культур", "философ", "социол", "политол", "граждан", "религ"],
+    "slate":   ["физик", "матем", "информат", "програм", "алгебр", "геометр", "алгоритм", "электрон", "квант", "механик", "тригон"],
+    "coral":   ["хими", "медиц", "здоровь", "биохим", "анатом", "физиол", "реакц", "молекул", "клетк", "микроб"],
+    "arctic":  ["геograph", "геогр", "климат", "страно", "материк", "океан", "река", "горн", "атмосфер", "почв", "ландшафт"],
+    "dawn":    ["искусств", "живопис", "музык", "архитект", "театр", "кино", "скульптур", "поэз", "роман", "пьес"],
+    "mono":    ["правов", "эконом", "финанс", "право", "конституц", "государств", "юрид", "налог"],
 }
 
 
@@ -323,50 +389,97 @@ def extract_json(text: str) -> dict:
 
 # ─── ПОИСК ИЗОБРАЖЕНИЙ ───────────────────────────────────────────────────────
 
-def fetch_image_bytes(query: str, timeout: int = 5) -> bytes | None:
-    """Ищет изображение через Wikimedia Commons. Жёсткий таймаут 5 сек."""
+def fetch_wikimedia(query: str, timeout: int = 5) -> bytes | None:
+    """Ищет изображение через Wikimedia Commons."""
     try:
-        search_q = urllib.parse.quote(query)
-        url = (
-            f"https://commons.wikimedia.org/w/api.php"
-            f"?action=query&generator=search&gsrnamespace=6"
-            f"&gsrsearch={search_q}&gsrlimit=3"
-            f"&prop=imageinfo&iiprop=url|mime|size"
-            f"&iiurlwidth=600&format=json&origin=*"
-        )
-        req = urllib.request.Request(url, headers={"User-Agent": "AOUSPT-Edu-Bot/1.0"})
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            data = json.loads(r.read().decode())
+        # Попробуем сначала английский запрос (Wikimedia лучше по-английски)
+        for q in [query]:
+            search_q = urllib.parse.quote(q)
+            url = (
+                f"https://commons.wikimedia.org/w/api.php"
+                f"?action=query&generator=search&gsrnamespace=6"
+                f"&gsrsearch={search_q}&gsrlimit=5"
+                f"&prop=imageinfo&iiprop=url|mime|size"
+                f"&iiurlwidth=800&format=json&origin=*"
+            )
+            req = urllib.request.Request(url, headers={"User-Agent": "AOUSPT-Edu-Bot/1.0"})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                data = json.loads(r.read().decode())
 
-        pages = (data.get("query") or {}).get("pages") or {}
-        for page in pages.values():
-            ii = (page.get("imageinfo") or [{}])[0]
-            mime = ii.get("mime", "")
-            thumb_url = ii.get("thumburl") or ii.get("url", "")
-            size = ii.get("size", 0)
-            if mime in ("image/jpeg", "image/png") and thumb_url and 5000 < size < 3_000_000:
-                req2 = urllib.request.Request(thumb_url, headers={"User-Agent": "AOUSPT-Edu-Bot/1.0"})
-                with urllib.request.urlopen(req2, timeout=timeout) as r2:
-                    return r2.read()
+            pages = (data.get("query") or {}).get("pages") or {}
+            candidates = []
+            for page in pages.values():
+                ii = (page.get("imageinfo") or [{}])[0]
+                mime = ii.get("mime", "")
+                thumb_url = ii.get("thumburl") or ii.get("url", "")
+                size = ii.get("size", 0)
+                if mime in ("image/jpeg", "image/png") and thumb_url and 8000 < size < 5_000_000:
+                    candidates.append((size, thumb_url))
+
+            # Берём самое «тяжёлое» (крупное) изображение
+            candidates.sort(reverse=True)
+            for _, thumb_url in candidates[:2]:
+                try:
+                    req2 = urllib.request.Request(thumb_url, headers={"User-Agent": "AOUSPT-Edu-Bot/1.0"})
+                    with urllib.request.urlopen(req2, timeout=timeout) as r2:
+                        return r2.read()
+                except Exception:
+                    continue
         return None
     except Exception:
         return None
 
 
+def fetch_image_bytes(query: str, timeout: int = 5) -> bytes | None:
+    """Ищет изображение: сначала Wikimedia, затем Wikipedia featured."""
+    result = fetch_wikimedia(query, timeout)
+    if result:
+        return result
+    # Fallback: ищем через Wikipedia API (статейные изображения)
+    try:
+        search_q = urllib.parse.quote(query)
+        url = (
+            f"https://ru.wikipedia.org/w/api.php"
+            f"?action=query&titles={search_q}&prop=pageimages"
+            f"&pithumbsize=700&format=json&origin=*"
+        )
+        req = urllib.request.Request(url, headers={"User-Agent": "AOUSPT-Edu-Bot/1.0"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            data = json.loads(r.read().decode())
+        pages = (data.get("query") or {}).get("pages") or {}
+        for page in pages.values():
+            thumb = (page.get("thumbnail") or {}).get("source")
+            if thumb:
+                req2 = urllib.request.Request(thumb, headers={"User-Agent": "AOUSPT-Edu-Bot/1.0"})
+                with urllib.request.urlopen(req2, timeout=timeout) as r2:
+                    return r2.read()
+    except Exception:
+        pass
+    return None
+
+
 def fetch_images_parallel(slides: list, topic: str) -> list:
-    """Параллельно загружает изображения для всех слайдов.
-    Каждый запрос ограничен 5 сек, все вместе — не более 15 сек."""
+    """Параллельно загружает изображения для всех слайдов (≤18 сек)."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     def get_img(idx_slide):
         idx, slide = idx_slide
         query = slide.get("image_query") or slide.get("title", "")
-        return idx, fetch_image_bytes(f"{query} {topic}", timeout=5)
+        # Строим разнообразные запросы для уменьшения дублей
+        queries_to_try = [
+            f"{query}",
+            f"{topic} {slide.get('title', '')}",
+        ]
+        for q in queries_to_try:
+            img = fetch_image_bytes(q, timeout=5)
+            if img:
+                return idx, img
+        return idx, None
 
     results = [None] * len(slides)
-    with ThreadPoolExecutor(max_workers=min(len(slides), 4)) as ex:
+    with ThreadPoolExecutor(max_workers=min(len(slides), 5)) as ex:
         futures = {ex.submit(get_img, (i, s)): i for i, s in enumerate(slides)}
-        for future in as_completed(futures, timeout=15):
+        for future in as_completed(futures, timeout=18):
             try:
                 idx, img = future.result()
                 results[idx] = img
@@ -592,19 +705,104 @@ def _footer(slide, teacher_name: str, teacher_school: str, theme: dict):
 
 def _slide_header(slide, title: str, slide_num: int, total: int,
                   teacher_name: str, theme: dict):
-    """Общая шапка для содержательных слайдов."""
-    _add_rect(slide, 0, 0, SLIDE_W, Inches(1.45), theme["accent"])
-    _add_rect(slide, 0, Inches(1.45), Inches(0.18),
-              SLIDE_H - Inches(1.45), theme["accent2"])
-    _add_text(slide, Inches(0.3), Inches(0.28), Inches(2), Inches(0.5),
-              f"{slide_num:02d} / {total:02d}",
-              size=12, bold=True, color=theme["accent2"], align=PP_ALIGN.LEFT)
-    _add_text(slide, Inches(0.55), Inches(0.28), Inches(11.5), Inches(0.9),
-              title, size=26, bold=True, color=theme["white"],
-              align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.MIDDLE)
-    if teacher_name:
-        _add_text(slide, Inches(0.3), Inches(0.28), Inches(12.73), Inches(0.5),
-                  teacher_name, size=11, color=theme["title_sub"], align=PP_ALIGN.RIGHT)
+    """Шапка слайда: стиль зависит от layout темы."""
+    layout = theme.get("layout", "top_banner")
+
+    if layout == "sidebar_dark":
+        # Тёмный вертикальный сайдбар слева с большим номером
+        sidebar_w = Inches(1.8)
+        _add_rect(slide, 0, 0, sidebar_w, SLIDE_H, theme["accent"])
+        _add_rect(slide, sidebar_w, 0, Inches(0.06), SLIDE_H, theme["accent2"])
+        _add_text(slide, 0, Inches(0.3), sidebar_w, Inches(1.0),
+                  f"{slide_num:02d}", size=52, bold=True, color=theme["accent2"],
+                  align=PP_ALIGN.CENTER)
+        _add_text(slide, 0, Inches(1.3), sidebar_w, Inches(0.5),
+                  f"/ {total:02d}", size=14, color=theme["title_sub"],
+                  align=PP_ALIGN.CENTER)
+        # Заголовок в правой части
+        _add_rect(slide, sidebar_w + Inches(0.06), 0,
+                  SLIDE_W - sidebar_w - Inches(0.06), Inches(1.2), theme["accent"])
+        _add_text(slide, sidebar_w + Inches(0.2), Inches(0.15),
+                  SLIDE_W - sidebar_w - Inches(0.4), Inches(0.9),
+                  title, size=24, bold=True, color=theme["white"],
+                  align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.MIDDLE)
+        if teacher_name:
+            _add_text(slide, sidebar_w + Inches(0.2), Inches(0.15),
+                      SLIDE_W - sidebar_w - Inches(0.4), Inches(0.9),
+                      teacher_name, size=10, color=theme["title_sub"],
+                      align=PP_ALIGN.RIGHT, anchor=MSO_ANCHOR.BOTTOM)
+
+    elif layout == "split_diagonal":
+        # Горизонтальная шапка с диагональным акцентом
+        _add_rect(slide, 0, 0, SLIDE_W, Inches(1.5), theme["accent"])
+        # Диагональный декор-прямоугольник
+        _add_rect(slide, Inches(10.5), 0, Inches(2.83), Inches(1.5), theme["accent2"])
+        _add_text(slide, Inches(10.55), 0, Inches(2.7), Inches(1.5),
+                  f"{slide_num:02d}/{total:02d}", size=28, bold=True,
+                  color=theme["accent"], align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+        _add_text(slide, Inches(0.4), Inches(0.15), Inches(10.0), Inches(1.1),
+                  title, size=26, bold=True, color=theme["white"],
+                  align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.MIDDLE)
+        _add_rect(slide, 0, Inches(1.5), Inches(0.14), SLIDE_H - Inches(1.5), theme["accent2"])
+
+    elif layout == "left_header":
+        # Широкая полоса с крупным цветным номером в кружке
+        _add_rect(slide, 0, 0, SLIDE_W, Inches(1.55), theme["accent"])
+        # Цветной блок-нумератор
+        _add_rect(slide, Inches(0.25), Inches(0.22), Inches(0.95), Inches(0.95), theme["accent2"])
+        _add_text(slide, Inches(0.25), Inches(0.22), Inches(0.95), Inches(0.95),
+                  str(slide_num), size=24, bold=True, color=theme["accent"],
+                  align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+        _add_text(slide, Inches(1.35), Inches(0.22), Inches(10.3), Inches(1.05),
+                  title, size=26, bold=True, color=theme["white"],
+                  align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.MIDDLE)
+        _add_text(slide, Inches(1.35), Inches(0.22), Inches(11.6), Inches(1.05),
+                  f"{total}", size=11, color=theme["title_sub"],
+                  align=PP_ALIGN.RIGHT, anchor=MSO_ANCHOR.BOTTOM)
+        _add_rect(slide, 0, Inches(1.55), SLIDE_W, Emu(9144), theme["accent2"])
+
+    else:  # top_banner (default)
+        _add_rect(slide, 0, 0, SLIDE_W, Inches(1.45), theme["accent"])
+        _add_rect(slide, 0, Inches(1.45), Inches(0.18),
+                  SLIDE_H - Inches(1.45), theme["accent2"])
+        _add_text(slide, Inches(0.3), Inches(0.28), Inches(2), Inches(0.5),
+                  f"{slide_num:02d} / {total:02d}",
+                  size=12, bold=True, color=theme["accent2"], align=PP_ALIGN.LEFT)
+        _add_text(slide, Inches(0.55), Inches(0.28), Inches(11.5), Inches(0.9),
+                  title, size=26, bold=True, color=theme["white"],
+                  align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.MIDDLE)
+        if teacher_name:
+            _add_text(slide, Inches(0.3), Inches(0.28), Inches(12.73), Inches(0.5),
+                      teacher_name, size=11, color=theme["title_sub"], align=PP_ALIGN.RIGHT)
+
+
+def _content_area_top(theme: dict) -> float:
+    """Возвращает Y-начало контентной зоны в зависимости от layout."""
+    layout = theme.get("layout", "top_banner")
+    if layout == "sidebar_dark":
+        return Inches(0.2)       # контент начинается сразу, сайдбар слева
+    elif layout == "split_diagonal":
+        return Inches(1.6)
+    elif layout == "left_header":
+        return Inches(1.7)
+    return Inches(1.58)          # top_banner
+
+
+def _content_area_x(theme: dict) -> float:
+    layout = theme.get("layout", "top_banner")
+    if layout == "sidebar_dark":
+        return Inches(2.0)       # после сайдбара
+    return Inches(0.32)
+
+
+def _content_area_w(theme: dict, has_photo: bool) -> float:
+    layout = theme.get("layout", "top_banner")
+    sidebar = layout == "sidebar_dark"
+    base_x = Inches(2.0) if sidebar else Inches(0.32)
+    total_w = SLIDE_W - base_x - Inches(0.2)
+    if has_photo:
+        return total_w - Inches(4.7)
+    return total_w
 
 
 def build_pptx(topic: str, subtitle: str, contents: list, slides_data: list,
@@ -615,58 +813,132 @@ def build_pptx(topic: str, subtitle: str, contents: list, slides_data: list,
     prs.slide_height = SLIDE_H
     blank = prs.slide_layouts[6]
     total_content = len(slides_data)
+    layout = theme.get("layout", "top_banner")
+    parts = [p for p in [teacher_name, teacher_school] if p]
+    footer_text = "   ·   ".join(parts)
 
     # ── 1. Титульный слайд ────────────────────────────────────────────────
     slide = prs.slides.add_slide(blank)
     _add_rect(slide, 0, 0, SLIDE_W, SLIDE_H, theme["title_bg"])
-    _add_rect(slide, 0, Inches(4.6), SLIDE_W, Inches(2.9), theme["accent"])
-    _add_rect(slide, 0, Inches(4.55), SLIDE_W, Inches(0.08), theme["accent2"])
-    _add_rect(slide, 0, 0, Inches(0.45), SLIDE_H, theme["accent2"])
-    _add_text(slide, Inches(0.7), Inches(1.55), Inches(10), Inches(0.4),
-              theme["label"], size=11, bold=True, color=theme["accent2"])
-    _add_text(slide, Inches(0.7), Inches(2.05), Inches(11.8), Inches(2.2),
-              topic, size=42, bold=True, color=theme["white"],
-              align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP)
-    if subtitle:
-        _add_text(slide, Inches(0.7), Inches(4.75), Inches(11.8), Inches(0.8),
-                  subtitle, size=17, color=theme["title_sub"])
-    parts = [p for p in [teacher_name, teacher_school] if p]
-    footer_text = "   ·   ".join(parts)
-    if footer_text:
+
+    if layout == "sidebar_dark":
+        # Вертикальный акцент справа
+        _add_rect(slide, SLIDE_W - Inches(0.55), 0, Inches(0.55), SLIDE_H, theme["accent2"])
+        _add_rect(slide, 0, Inches(3.5), SLIDE_W - Inches(0.55), Inches(0.06), theme["accent2"])
+        _add_text(slide, Inches(0.7), Inches(0.9), Inches(9), Inches(0.45),
+                  theme["label"], size=11, bold=True, color=theme["accent2"])
+        _add_text(slide, Inches(0.7), Inches(1.5), Inches(11.5), Inches(2.1),
+                  topic, size=44, bold=True, color=theme["white"],
+                  align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP)
+        if subtitle:
+            _add_text(slide, Inches(0.7), Inches(3.65), Inches(11.5), Inches(0.9),
+                      subtitle, size=17, color=theme["title_sub"])
+
+    elif layout == "split_diagonal":
+        # Нижний блок с диагональным стыком — визуально через два прямоугольника
+        _add_rect(slide, 0, Inches(4.0), SLIDE_W, Inches(3.5), theme["accent2"])
+        _add_rect(slide, 0, Inches(4.0), Inches(7.0), Inches(3.5), theme["accent"])
+        _add_rect(slide, 0, 0, Inches(0.5), SLIDE_H, theme["accent2"])
+        _add_text(slide, Inches(0.7), Inches(0.8), Inches(9), Inches(0.5),
+                  theme["label"], size=12, bold=True, color=theme["accent2"])
+        _add_text(slide, Inches(0.7), Inches(1.4), Inches(11.8), Inches(2.5),
+                  topic, size=44, bold=True, color=theme["white"],
+                  align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP)
+        if subtitle:
+            _add_text(slide, Inches(0.7), Inches(4.1), Inches(6.5), Inches(0.9),
+                      subtitle, size=16, color=theme["white"])
+
+    elif layout == "left_header":
+        # Крупный цветной блок слева
+        _add_rect(slide, 0, 0, Inches(5.5), SLIDE_H, theme["accent"])
+        _add_rect(slide, Inches(5.5), 0, Inches(0.08), SLIDE_H, theme["accent2"])
+        _add_text(slide, Inches(0.4), Inches(1.0), Inches(5.0), Inches(0.5),
+                  theme["label"], size=11, bold=True, color=theme["accent2"])
+        _add_text(slide, Inches(0.4), Inches(1.6), Inches(4.8), Inches(3.5),
+                  topic, size=36, bold=True, color=theme["white"],
+                  align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP)
+        if subtitle:
+            _add_text(slide, Inches(0.4), Inches(5.5), Inches(4.8), Inches(0.9),
+                      subtitle, size=15, color=theme["title_sub"])
+        # Правая часть — дата и учитель
+        _add_text(slide, Inches(5.8), Inches(2.5), Inches(7.0), Inches(1.5),
+                  datetime.now().strftime("%d.%m.%Y"), size=28,
+                  color=theme["title_sub"], align=PP_ALIGN.LEFT)
+
+    else:  # top_banner
+        _add_rect(slide, 0, Inches(4.6), SLIDE_W, Inches(2.9), theme["accent"])
+        _add_rect(slide, 0, Inches(4.55), SLIDE_W, Inches(0.08), theme["accent2"])
+        _add_rect(slide, 0, 0, Inches(0.45), SLIDE_H, theme["accent2"])
+        _add_text(slide, Inches(0.7), Inches(1.55), Inches(10), Inches(0.4),
+                  theme["label"], size=11, bold=True, color=theme["accent2"])
+        _add_text(slide, Inches(0.7), Inches(2.05), Inches(11.8), Inches(2.2),
+                  topic, size=42, bold=True, color=theme["white"],
+                  align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP)
+        if subtitle:
+            _add_text(slide, Inches(0.7), Inches(4.75), Inches(11.8), Inches(0.8),
+                      subtitle, size=17, color=theme["title_sub"])
+
+    if footer_text and layout != "left_header":
         _add_text(slide, Inches(0.7), SLIDE_H - Inches(0.75),
                   Inches(10), Inches(0.45),
                   footer_text, size=13, color=theme["title_sub"])
-    _add_text(slide, Inches(0.7), SLIDE_H - Inches(0.75),
-              Inches(12.13), Inches(0.45),
-              datetime.now().strftime("%d.%m.%Y"),
-              size=12, color=theme["title_sub"], align=PP_ALIGN.RIGHT)
+        _add_text(slide, Inches(0.7), SLIDE_H - Inches(0.75),
+                  Inches(12.13), Inches(0.45),
+                  datetime.now().strftime("%d.%m.%Y"),
+                  size=12, color=theme["title_sub"], align=PP_ALIGN.RIGHT)
 
     # ── 2. Слайд «Содержание» ────────────────────────────────────────────
     if contents:
         slide = prs.slides.add_slide(blank)
         _add_rect(slide, 0, 0, SLIDE_W, SLIDE_H, theme["bg"])
-        _add_rect(slide, 0, 0, SLIDE_W, Inches(1.45), theme["accent"])
-        _add_rect(slide, 0, Inches(1.45), Inches(0.18),
-                  SLIDE_H - Inches(1.45), theme["accent2"])
-        _add_text(slide, Inches(0.55), Inches(0.28), Inches(11.5), Inches(0.9),
-                  "Содержание урока", size=28, bold=True, color=theme["white"],
-                  align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.MIDDLE)
-        # Два столбца содержания
+
+        if layout == "sidebar_dark":
+            _add_rect(slide, 0, 0, Inches(1.8), SLIDE_H, theme["accent"])
+            _add_rect(slide, Inches(1.8), 0, Inches(0.06), SLIDE_H, theme["accent2"])
+            _add_text(slide, 0, Inches(0.5), Inches(1.8), Inches(1.2),
+                      "СО\nДЕР\nЖА\nНИЕ", size=12, bold=True, color=theme["accent2"],
+                      align=PP_ALIGN.CENTER)
+            cx = Inches(2.1)
+            cw = Inches(10.8)
+            cy = Inches(0.4)
+        else:
+            _add_rect(slide, 0, 0, SLIDE_W, Inches(1.45), theme["accent"])
+            _add_rect(slide, 0, Inches(1.45), Inches(0.18),
+                      SLIDE_H - Inches(1.45), theme["accent2"])
+            _add_text(slide, Inches(0.55), Inches(0.28), Inches(11.5), Inches(0.9),
+                      "Содержание урока", size=28, bold=True, color=theme["white"],
+                      align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.MIDDLE)
+            cx = Inches(0.38)
+            cw = Inches(6.0)
+            cy = Inches(1.65)
+
         mid = (len(contents) + 1) // 2
         left_items = contents[:mid]
         right_items = contents[mid:]
-        _add_bullets(slide, Inches(0.38), Inches(1.65),
-                     Inches(6.0), Inches(5.4),
-                     left_items, size=17, color=theme["text"],
-                     accent2=theme["accent2"], space_after=14)
-        if right_items:
-            _add_bullets(slide, Inches(6.8), Inches(1.65),
-                         Inches(6.0), Inches(5.4),
-                         right_items, size=17, color=theme["text"],
+
+        if layout == "sidebar_dark":
+            # Нумерованный список крупными карточками
+            for i, item in enumerate(contents):
+                card_y = cy + i * Inches(0.75)
+                if card_y + Inches(0.65) > SLIDE_H - Inches(0.3):
+                    break
+                _add_rect(slide, cx, card_y, cw, Inches(0.62), theme["card_bg"])
+                _add_text(slide, cx + Inches(0.1), card_y, Inches(0.6), Inches(0.62),
+                          f"{i+1:02d}", size=14, bold=True, color=theme["accent2"],
+                          anchor=MSO_ANCHOR.MIDDLE)
+                _add_text(slide, cx + Inches(0.75), card_y, cw - Inches(0.85), Inches(0.62),
+                          item, size=15, color=theme["text"], anchor=MSO_ANCHOR.MIDDLE)
+        else:
+            _add_bullets(slide, cx, cy, cw, Inches(5.4),
+                         left_items, size=17, color=theme["text"],
                          accent2=theme["accent2"], space_after=14)
+            if right_items:
+                _add_bullets(slide, Inches(6.8), cy, cw, Inches(5.4),
+                             right_items, size=17, color=theme["text"],
+                             accent2=theme["accent2"], space_after=14)
         _footer(slide, teacher_name, teacher_school, theme)
 
-    # ── 3. Содержательные слайды (двухколоночный layout с фото) ──────────
+    # ── 3. Содержательные слайды ─────────────────────────────────────────
     for idx, s in enumerate(slides_data, start=1):
         slide = prs.slides.add_slide(blank)
         _add_rect(slide, 0, 0, SLIDE_W, SLIDE_H, theme["bg"])
@@ -676,60 +948,77 @@ def build_pptx(topic: str, subtitle: str, contents: list, slides_data: list,
         fact = s.get("fact", "")
         bullets = s["bullets"]
 
-        if img_bytes:
-            # Двухколоночный layout: тезисы слева (8.1"), фото справа (4.7")
-            content_top = Inches(1.58)
-            content_h = SLIDE_H - Inches(1.58) - Inches(0.6)
-            photo_w = Inches(4.55)
-            photo_h = Inches(4.8)
-            photo_x = SLIDE_W - photo_w - Inches(0.25)
-            photo_y = Inches(1.62)
+        ct = _content_area_top(theme)
+        cx = _content_area_x(theme)
+        cw = _content_area_w(theme, bool(img_bytes))
+        content_h = SLIDE_H - ct - Inches(0.6)
 
-            # Рамка под фото
-            _add_rect(slide, photo_x - Emu(76200), photo_y - Emu(76200),
-                      photo_w + Emu(152400), photo_h + Emu(152400), theme["accent"])
+        # Чередуем стиль блока с фото: чётные слева, нечётные справа
+        photo_on_left = (idx % 2 == 0) and layout not in ("sidebar_dark",)
+
+        if img_bytes:
+            photo_w = Inches(4.5)
+            photo_h = Inches(4.8)
+            photo_y = ct + Emu(30000)
+
+            if photo_on_left:
+                photo_x = cx
+                bullets_x = cx + photo_w + Inches(0.2)
+            else:
+                photo_x = SLIDE_W - photo_w - Inches(0.25)
+                bullets_x = cx
+
+            # Акцентная рамка под фото
+            _add_rect(slide, photo_x - Emu(60000), photo_y - Emu(60000),
+                      photo_w + Emu(120000), photo_h + Emu(120000), theme["accent2"])
             _add_image_to_slide(slide, img_bytes, photo_x, photo_y, photo_w, photo_h)
 
-            bullets_w = Inches(8.0)
-            # Тезисы
-            _add_bullets(slide,
-                         Inches(0.32), content_top,
-                         bullets_w, Inches(4.0) if fact else content_h,
-                         bullets, size=16, color=theme["text"],
+            bullets_w = SLIDE_W - bullets_x - Inches(0.3) if not photo_on_left else SLIDE_W - bullets_x - photo_w - Inches(0.5)
+            if layout == "sidebar_dark":
+                bullets_x = Inches(2.0)
+                bullets_w = photo_x - Inches(2.15)
+
+            _add_bullets(slide, bullets_x, ct,
+                         max(bullets_w, Inches(3.0)), Inches(4.0) if fact else content_h,
+                         bullets, size=15, color=theme["text"],
                          accent2=theme["accent2"], space_after=8)
-            # Блок факта под тезисами (если есть)
+
             if fact:
-                fact_y = content_top + Inches(4.1)
+                fact_y = ct + Inches(4.1)
                 fact_h = SLIDE_H - fact_y - Inches(0.62)
-                if fact_h > Inches(0.4):
-                    _add_rect(slide, Inches(0.32), fact_y,
-                              bullets_w, fact_h, theme["accent"])
-                    _add_text(slide, Inches(0.32), fact_y, Inches(1.5), fact_h,
-                              "★ ФАКТ", size=9, bold=True,
+                if fact_h > Inches(0.38):
+                    _add_rect(slide, bullets_x, fact_y,
+                              max(bullets_w, Inches(3.0)), fact_h, theme["accent"])
+                    _add_text(slide, bullets_x + Inches(0.1), fact_y,
+                              Inches(1.3), fact_h,
+                              "★", size=16, bold=True,
                               color=theme["accent2"], anchor=MSO_ANCHOR.MIDDLE)
-                    _add_text(slide, Inches(1.85), fact_y + Emu(50000),
-                              bullets_w - Inches(1.6), fact_h - Emu(100000),
+                    _add_text(slide, bullets_x + Inches(1.4), fact_y + Emu(40000),
+                              max(bullets_w, Inches(3.0)) - Inches(1.5), fact_h - Emu(80000),
                               fact, size=12, color=theme["white"],
                               italic=True, anchor=MSO_ANCHOR.MIDDLE)
         else:
-            # Без фото — тезисы на всю ширину + блок факта справа
             if fact:
-                bullets_w = Inches(8.5)
-                _add_bullets(slide, Inches(0.32), Inches(1.65),
-                             bullets_w, Inches(5.2),
-                             bullets, size=17, color=theme["text"],
-                             accent2=theme["accent2"], space_after=9)
-                _add_rect(slide, Inches(9.1), Inches(1.75),
-                          Inches(3.85), Inches(1.1), theme["accent"])
-                _add_text(slide, Inches(9.25), Inches(1.82), Inches(3.5), Inches(0.3),
-                          "ИНТЕРЕСНЫЙ ФАКТ", size=9, bold=True,
-                          color=theme["accent2"])
-                _add_text(slide, Inches(9.25), Inches(2.14), Inches(3.5), Inches(0.62),
-                          fact, size=12, color=theme["white"],
+                # Карточка факта сбоку
+                fact_card_w = Inches(3.8)
+                fact_card_h = Inches(2.2)
+                fact_x = SLIDE_W - fact_card_w - Inches(0.3)
+                fact_y = ct + Inches(0.2)
+                _add_rect(slide, fact_x, fact_y, fact_card_w, fact_card_h, theme["accent"])
+                _add_rect(slide, fact_x, fact_y, fact_card_w, Emu(120000), theme["accent2"])
+                _add_text(slide, fact_x + Inches(0.15), fact_y + Emu(10000),
+                          fact_card_w - Inches(0.3), Emu(100000),
+                          "ИНТЕРЕСНЫЙ ФАКТ", size=9, bold=True, color=theme["accent"])
+                _add_text(slide, fact_x + Inches(0.15), fact_y + Inches(0.3),
+                          fact_card_w - Inches(0.3), fact_card_h - Inches(0.4),
+                          fact, size=13, color=theme["white"],
                           italic=True, anchor=MSO_ANCHOR.TOP)
+                bullets_w = SLIDE_W - cx - fact_card_w - Inches(0.5)
+                _add_bullets(slide, cx, ct, bullets_w, content_h,
+                             bullets, size=16, color=theme["text"],
+                             accent2=theme["accent2"], space_after=9)
             else:
-                _add_bullets(slide, Inches(0.32), Inches(1.65),
-                             Inches(12.6), Inches(5.3),
+                _add_bullets(slide, cx, ct, SLIDE_W - cx - Inches(0.2), content_h,
                              bullets, size=17, color=theme["text"],
                              accent2=theme["accent2"], space_after=9)
 
@@ -739,30 +1028,75 @@ def build_pptx(topic: str, subtitle: str, contents: list, slides_data: list,
     if conclusion:
         slide = prs.slides.add_slide(blank)
         _add_rect(slide, 0, 0, SLIDE_W, SLIDE_H, theme["bg"])
-        _add_rect(slide, 0, 0, SLIDE_W, Inches(1.45), theme["accent"])
-        _add_rect(slide, 0, Inches(1.45), Inches(0.18),
-                  SLIDE_H - Inches(1.45), theme["accent2"])
-        _add_text(slide, Inches(0.3), Inches(0.28), Inches(3), Inches(0.5),
-                  "ИТОГИ УРОКА", size=11, bold=True, color=theme["accent2"])
-        _add_text(slide, Inches(0.55), Inches(0.28), Inches(11.5), Inches(0.9),
-                  "Ключевые выводы", size=28, bold=True, color=theme["white"],
-                  align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.MIDDLE)
-        _add_bullets(slide, Inches(0.32), Inches(1.65),
-                     Inches(12.6), Inches(5.1),
-                     conclusion, size=19, color=theme["text"],
-                     accent2=theme["accent2"], space_after=12)
+
+        if layout == "sidebar_dark":
+            _add_rect(slide, 0, 0, Inches(1.8), SLIDE_H, theme["accent"])
+            _add_rect(slide, Inches(1.8), 0, Inches(0.06), SLIDE_H, theme["accent2"])
+            _add_text(slide, 0, Inches(0.5), Inches(1.8), Inches(2.0),
+                      "ИТО\nГИ", size=20, bold=True, color=theme["accent2"],
+                      align=PP_ALIGN.CENTER)
+            # Крупные карточки выводов
+            for i, item in enumerate(conclusion[:4]):
+                cy = Inches(0.4) + i * Inches(1.65)
+                _add_rect(slide, Inches(2.1), cy, Inches(10.8), Inches(1.5), theme["card_bg"])
+                _add_rect(slide, Inches(2.1), cy, Inches(0.5), Inches(1.5), theme["accent2"])
+                _add_text(slide, Inches(2.65), cy + Emu(50000), Inches(10.0),
+                          Inches(1.4), item, size=16, color=theme["text"],
+                          anchor=MSO_ANCHOR.MIDDLE)
+        elif layout in ("split_diagonal", "left_header"):
+            # Двухколонная сетка карточек
+            _add_rect(slide, 0, 0, SLIDE_W, Inches(1.3), theme["accent"])
+            _add_rect(slide, 0, Inches(1.3), SLIDE_W, Emu(9144), theme["accent2"])
+            _add_text(slide, Inches(0.4), Inches(0.2), Inches(12.0), Inches(0.9),
+                      "Ключевые выводы урока", size=28, bold=True, color=theme["white"],
+                      align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.MIDDLE)
+            cols = [(Inches(0.3), Inches(6.3)), (Inches(6.8), Inches(6.3))]
+            for i, item in enumerate(conclusion[:4]):
+                col_x, col_w = cols[i % 2]
+                row_y = Inches(1.55) + (i // 2) * Inches(2.8)
+                _add_rect(slide, col_x, row_y, col_w, Inches(2.5), theme["card_bg"])
+                _add_rect(slide, col_x, row_y, col_w, Emu(110000), theme["accent2"])
+                _add_text(slide, col_x + Inches(0.15), row_y + Inches(0.2),
+                          col_w - Inches(0.3), Inches(2.2),
+                          item, size=15, color=theme["text"], anchor=MSO_ANCHOR.TOP)
+        else:
+            _add_rect(slide, 0, 0, SLIDE_W, Inches(1.45), theme["accent"])
+            _add_rect(slide, 0, Inches(1.45), Inches(0.18),
+                      SLIDE_H - Inches(1.45), theme["accent2"])
+            _add_text(slide, Inches(0.3), Inches(0.28), Inches(3), Inches(0.5),
+                      "ИТОГИ УРОКА", size=11, bold=True, color=theme["accent2"])
+            _add_text(slide, Inches(0.55), Inches(0.28), Inches(11.5), Inches(0.9),
+                      "Ключевые выводы", size=28, bold=True, color=theme["white"],
+                      align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.MIDDLE)
+            _add_bullets(slide, Inches(0.32), Inches(1.65),
+                         Inches(12.6), Inches(5.1),
+                         conclusion, size=19, color=theme["text"],
+                         accent2=theme["accent2"], space_after=12)
+
         _footer(slide, teacher_name, teacher_school, theme)
 
     # ── 5. Финальный слайд ───────────────────────────────────────────────
     slide = prs.slides.add_slide(blank)
     _add_rect(slide, 0, 0, SLIDE_W, SLIDE_H, theme["title_bg"])
-    _add_rect(slide, 0, Inches(4.55), SLIDE_W, Inches(0.08), theme["accent2"])
-    _add_rect(slide, 0, 0, Inches(0.45), SLIDE_H, theme["accent2"])
-    _add_text(slide, Inches(0.7), Inches(2.65), Inches(11.8), Inches(1.6),
-              "Спасибо за внимание!", size=50, bold=True,
+
+    if layout == "sidebar_dark":
+        _add_rect(slide, SLIDE_W - Inches(0.55), 0, Inches(0.55), SLIDE_H, theme["accent2"])
+        _add_rect(slide, 0, Inches(3.5), SLIDE_W - Inches(0.55), Inches(0.06), theme["accent2"])
+    elif layout == "split_diagonal":
+        _add_rect(slide, 0, 0, Inches(0.5), SLIDE_H, theme["accent2"])
+        _add_rect(slide, 0, Inches(4.0), SLIDE_W, Inches(0.06), theme["accent2"])
+    elif layout == "left_header":
+        _add_rect(slide, 0, 0, Inches(0.5), SLIDE_H, theme["accent2"])
+        _add_rect(slide, 0, SLIDE_H - Inches(2.0), SLIDE_W, Inches(0.06), theme["accent2"])
+    else:
+        _add_rect(slide, 0, Inches(4.55), SLIDE_W, Inches(0.08), theme["accent2"])
+        _add_rect(slide, 0, 0, Inches(0.45), SLIDE_H, theme["accent2"])
+
+    _add_text(slide, Inches(0.7), Inches(2.5), Inches(11.8), Inches(1.6),
+              "Спасибо за внимание!", size=52, bold=True,
               color=theme["white"], align=PP_ALIGN.CENTER)
-    _add_text(slide, Inches(0.7), Inches(4.35), Inches(11.8), Inches(0.6),
-              "Вопросы и обсуждение", size=20,
+    _add_text(slide, Inches(0.7), Inches(4.2), Inches(11.8), Inches(0.7),
+              "Вопросы и обсуждение", size=22,
               color=theme["title_sub"], align=PP_ALIGN.CENTER)
     if footer_text:
         _add_text(slide, Inches(0.7), SLIDE_H - Inches(0.75),

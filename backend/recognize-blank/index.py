@@ -173,9 +173,14 @@ def _select_corner_anchors(candidates, img_w, img_h):
     return left_top, right_top, left_bot, right_bot
 
 
-# ── Оценка крестика в ячейке ──────────────────────────────────────────────────
+# ── Оценка заполнённости ячейки (darkness score) ─────────────────────────────
 def _cross_score(gray, cx, cy, cell_w, cell_h) -> float:
-    pad = max(2, int(min(cell_w, cell_h) * 0.10))
+    """
+    Возвращает долю тёмных пикселей внутри ячейки.
+    Крестик/закраска = много тёмных пикселей; пустой квадрат с буквой = мало.
+    Победитель в строке определяется по rel_gap (разрыв относительно среднего остальных).
+    """
+    pad = max(2, int(min(cell_w, cell_h) * 0.12))
     x1 = max(0, int(cx - cell_w / 2 + pad))
     y1 = max(0, int(cy - cell_h / 2 + pad))
     x2 = min(gray.shape[1], int(cx + cell_w / 2 - pad))
@@ -183,21 +188,11 @@ def _cross_score(gray, cx, cy, cell_w, cell_h) -> float:
     if x2 <= x1 or y2 <= y1:
         return 0.0
     roi = gray[y1:y2, x1:x2]
-    rh, rw = roi.shape
-    if rh < 3 or rw < 3:
+    if roi.size == 0:
         return 0.0
+    # Адаптивный порог: не зависит от общей яркости листа
     _, bw = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-    c_size = max(2, int(min(rh, rw) * 0.28))
-    corners = [bw[:c_size, :c_size], bw[:c_size, rw-c_size:],
-               bw[rh-c_size:, :c_size], bw[rh-c_size:, rw-c_size:]]
-    corner_fill = float(np.mean([np.mean(z > 0) for z in corners]))
-    mc = max(1, int(min(rh, rw) * 0.22))
-    cy_r, cx_r = rh // 2, rw // 2
-    center = bw[max(0, cy_r-mc):cy_r+mc, max(0, cx_r-mc):cx_r+mc]
-    center_fill = float(np.mean(center > 0)) if center.size > 0 else 0.0
-    total_fill = float(np.mean(bw > 0))
-    score = corner_fill * 0.55 + total_fill * 0.35 - center_fill * 0.15
-    return float(np.clip(score, 0, 1))
+    return float(np.mean(bw > 0))
 
 
 # ── Кластеризация по строкам ──────────────────────────────────────────────────
@@ -381,9 +376,12 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
             dbg_fills.append({"row": row_i, "fills": [round(f, 4) for f in fills],
                                "max": round(max_f, 4), "gap": round(gap, 4),
                                "rel_gap": round(rel_gap, 4), "chosen": chosen})
-        if max_f > 0.10 and rel_gap > 0.04:
+        # Победитель: тёмных пикселей на 25% больше чем у второго
+        second_f = sorted_f[1] if len(sorted_f) > 1 else 0.0
+        norm_gap = (max_f - second_f) / max(max_f, 0.01)
+        if max_f > 0.08 and norm_gap > 0.18:
             answers.append(opts[idx] if idx < len(opts) else "")
-            confidences.append(round(min(0.99, rel_gap / 0.25 + 0.35), 2))
+            confidences.append(round(min(0.99, norm_gap * 0.8 + 0.3), 2))
         else:
             answers.append("")
             confidences.append(0.0)

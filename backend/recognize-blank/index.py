@@ -3,7 +3,7 @@
 POST / — { image: base64, questionsCount?: 20, optionsCount?: 4, answerKey?: "АБВГ..." }
 -> { studentCode, answers[], confidence[], analysis }
 """
-# v31: detect answer cells directly from contours, no geometry guessing
+# v32: adaptive threshold + code anchors
 import json, base64, math
 import numpy as np
 import cv2
@@ -185,20 +185,27 @@ def _find_answer_cells(gray, zone_y0, zone_y1, options_count):
 
 
 # ── Тёмность ROI ──────────────────────────────────────────────────────────────
-def _darkness(gray, cx, cy, cw, ch) -> float:
-    """Доля тёмных пикселей внутри ROI ячейки."""
-    pad = max(2, int(min(cw, ch) * 0.10))
-    x1 = max(0, cx - cw // 2 + pad)
-    y1 = max(0, cy - ch // 2 + pad)
-    x2 = min(gray.shape[1], cx + cw // 2 - pad)
-    y2 = min(gray.shape[0], cy + ch // 2 - pad)
+def _darkness(gray, cx, cy, cw, ch, thr_value: int = 100) -> float:
+    """
+    Средняя яркость инвертированная (1.0 = чёрное, 0.0 = белое).
+    Берём ТОЛЬКО центральные 50% ячейки — без рамки квадрата и буквы-подписи.
+    Используем ФИКСИРОВАННЫЙ порог (не Otsu) — чтобы пустые ячейки давали 0.
+    """
+    # Берём центральные 50% по обеим осям — это сердцевина крестика
+    sz = int(min(cw, ch) * 0.50)
+    sz = max(4, sz)
+    x1 = max(0, cx - sz // 2)
+    y1 = max(0, cy - sz // 2)
+    x2 = min(gray.shape[1], cx + sz // 2)
+    y2 = min(gray.shape[0], cy + sz // 2)
     if x2 <= x1 or y2 <= y1:
         return 0.0
     roi = gray[y1:y2, x1:x2]
     if roi.size == 0:
         return 0.0
-    _, bw = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-    return float(np.mean(bw > 0))
+    # Фиксированный порог: пиксель тёмнее thr_value → "чёрный"
+    bw = (roi < thr_value).astype(np.uint8)
+    return float(np.mean(bw))
 
 
 # ── Распознавание кружков кода ────────────────────────────────────────────────
@@ -290,15 +297,17 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
         n_blank_cols = 1 if questions_count <= 15 else (2 if questions_count <= 40 else 3)
         rows_per_col = math.ceil(questions_count / n_blank_cols)
         section_w    = grid_w / n_blank_cols
-        # num_w/col_w из generate-blank: 7.5mm / ((bw-2*4mm)/n_cols)
-        # bw_inner≈grid_w, col_w=grid_w/n_cols → num_frac≈7.5/(bw_mm/n_cols)
-        # Используем фиксированное: квадраты занимают правые 85% колонки
-        num_frac  = 0.15
+        # Точные пропорции из generate-blank:
+        # col_w=(bw-2P)/n_cols, P=4mm, num_w=7.5mm, cell_w=(col_w-num_w)/n_opts
+        # Для 20 вопр, 2 кол на A4 (~180mm): col_w=86mm, num_w=7.5mm → num_frac=0.087
+        num_frac  = 0.087
         sq_area_w = section_w * (1 - num_frac)
         sq_step   = sq_area_w / options_count
         row_step  = grid_h / rows_per_col
-        cell_w    = int(sq_step * 0.80)
-        cell_h    = int(row_step * 0.70)
+        # Квадрат ответа = 5.5mm, шаг ячейки ≈ 9.8mm → доля 0.56
+        # Но для центрирования ROI берём 70% шага
+        cell_w    = int(sq_step * 0.70)
+        cell_h    = int(row_step * 0.75)
         answer_rows_cells = []
         for sec in range(n_blank_cols):
             sec_x0     = grid_x0 + sec * section_w
@@ -316,10 +325,17 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
 
     answer_rows_cells = answer_rows_cells[:questions_count]
 
-    # 3. Читаем ответы
+    # 3. Адаптивный порог по медианной яркости фона зоны ответов
+    # Помеченные крестики и заливки темнее ~80, фон бланка ~200, буквы ~120
+    zone_pixels = gray[grid_y0:grid_y1, grid_x0:grid_x1]
+    bg_median = float(np.median(zone_pixels))   # ≈ 200 для белого фона
+    # Порог = середина между чёрным (0) и фоном
+    thr_value = max(60, min(140, int(bg_median * 0.45)))
+
+    # 4. Читаем ответы
     answers, confidences, dbg_fills = [], [], []
     for row_i, row in enumerate(answer_rows_cells):
-        fills = [_darkness(gray, c[0], c[1], c[2], c[3]) for c in row]
+        fills = [_darkness(gray, c[0], c[1], c[2], c[3], thr_value) for c in row]
         if not fills:
             answers.append(""); confidences.append(0.0); continue
         idx      = int(np.argmax(fills))
@@ -335,63 +351,99 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
                                "max": round(max_f, 4),
                                "gap": round(gap, 4),
                                "norm_gap": round(norm_gap, 4),
+                               "thr": thr_value,
                                "chosen": chosen})
-        if max_f > 0.07 and norm_gap > 0.12:
+        # Помеченный квадрат: ≥10% тёмных пикселей в центре И разрыв ≥30%
+        if max_f > 0.10 and gap > 0.04:
             answers.append(opts[idx] if idx < len(opts) else "")
-            confidences.append(round(min(0.99, norm_gap * 0.8 + 0.3), 2))
+            confidences.append(round(min(0.99, gap * 3 + 0.3), 2))
         else:
             answers.append(""); confidences.append(0.0)
 
     while len(answers) < questions_count:
         answers.append(""); confidences.append(0.0)
 
-    # 4. Код ученика: кружки под сеткой ответов
-    # Зона кода: от нижнего якоря до конца изображения (но не более 40% высоты)
-    code_y0 = grid_y1
-    code_y1 = min(h - 5, code_y0 + int(grid_h * 0.55))
-
-    circles = _find_circles(gray, code_y0, code_y1)
+    # 5. Код ученика: 4 ОТДЕЛЬНЫХ якоря вокруг зоны кода
+    # Ищем якоря НИЖЕ нижних якорей сетки ответов
     code = ""
     code_confs = []
-    dbg_code: dict = {"circles_found": len(circles), "zone": [code_y0, code_y1]}
+    code_zone_y0 = grid_y1 + int(grid_h * 0.03)   # отступ от сетки ответов
+    code_zone_y1 = min(h - 2, grid_y1 + int(grid_h * 0.55))
 
-    if circles:
-        cr_items = [(cx, cy, r, r * 2) for cx, cy, r in circles]
-        med_r    = float(np.median([c[2] for c in circles]))
-        row_tol  = med_r * 2.5
-        cr_rows  = _cluster_rows(cr_items, tol=row_tol)
-        # Берём строки с 8-12 кружками (0-9)
-        code_rows = [r for r in cr_rows if 7 <= len(r) <= 13][:5]
-        dbg_code["code_rows_found"] = len(code_rows)
+    # Ищем якоря в зоне кода
+    code_cands = _find_anchors(gray[code_zone_y0:code_zone_y1, :])
+    # Корректируем Y координаты
+    code_cands = [(cx, cy + code_zone_y0, cw, ch, sd) for cx, cy, cw, ch, sd in code_cands]
+    code_anchors = _select_corner_anchors(code_cands, w, h - code_zone_y0)
 
-        for row in code_rows:
-            row10 = sorted(row, key=lambda i: i[0])[:10]
-            # Для каждого кружка меряем тёмность (закрашенный = много тёмных пикселей)
+    dbg_code: dict = {
+        "code_zone": [code_zone_y0, code_zone_y1],
+        "code_anchors_found": len(code_cands),
+    }
+
+    if code_anchors:
+        c_tl, c_tr, c_bl, c_br = code_anchors
+        # Зона кружков между якорями кода
+        c_x0 = c_tl[0] + c_tl[2] // 2
+        c_x1 = c_tr[0] - c_tr[2] // 2
+        c_y0 = c_tl[1]
+        c_y1 = c_bl[1]
+        c_w  = c_x1 - c_x0
+        c_h  = c_y1 - c_y0
+
+        # Структура: 5 строк × 10 кружков (0-9), номер строки слева
+        # В generate-blank: nw2=5mm (номер), затем 10 кружков с шагом 3.5mm
+        # nw2/всё = 5/(5+10*3.5) = 5/40 = 0.125 → но нужна реальная пропорция
+        # Лучше — попробуем разные num_frac и выберем где fills дают чёткий разрыв
+        n_rows_code = 5
+        n_cols_code = 10
+
+        # Берём фиксированный num_frac=0.13 (5mm из ~38mm зоны)
+        num_frac_c = 0.13
+        circ_x0 = c_x0 + c_w * num_frac_c
+        circ_w  = c_w * (1.0 - num_frac_c)
+        step_x  = circ_w / n_cols_code
+        step_y  = c_h / n_rows_code
+        r_est   = int(min(step_x, step_y) * 0.40)
+
+        dbg_code["circ_x0"] = int(circ_x0)
+        dbg_code["circ_y0"] = c_y0
+        dbg_code["step_x"]  = round(step_x, 1)
+        dbg_code["step_y"]  = round(step_y, 1)
+        dbg_code["r_est"]   = r_est
+
+        for row_i in range(n_rows_code):
+            cy_c = int(c_y0 + row_i * step_y + step_y / 2)
             d_vals = []
-            for cx, cy, r, _ in row10:
-                r2 = max(2, int(r * 0.70))
-                x1 = max(0, cx - r2); y1 = max(0, cy - r2)
-                x2 = min(w, cx + r2); y2 = min(h, cy + r2)
+            for col_i in range(n_cols_code):
+                cx_c = int(circ_x0 + col_i * step_x + step_x / 2)
+                # Меряем центр кружка с фикс. порогом
+                rsz = max(3, int(r_est * 0.7))
+                x1 = max(0, cx_c - rsz); y1 = max(0, cy_c - rsz)
+                x2 = min(w, cx_c + rsz); y2 = min(h, cy_c + rsz)
                 if x2 > x1 and y2 > y1:
                     roi = gray[y1:y2, x1:x2]
-                    _, bw_r = cv2.threshold(roi, 0, 255,
-                                            cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-                    d_vals.append(float(np.mean(bw_r > 0)))
+                    bw_r = (roi < thr_value).astype(np.uint8)
+                    d_vals.append(float(np.mean(bw_r)))
                 else:
                     d_vals.append(0.0)
             if not d_vals:
                 code += "?"; code_confs.append(0.0); continue
-            best_i  = int(np.argmax(d_vals))
-            best_f  = d_vals[best_i]
-            second  = sorted(d_vals, reverse=True)[1] if len(d_vals) > 1 else 0.0
-            ng      = (best_f - second) / max(best_f, 0.01)
-            if best_f > 0.08 and ng > 0.12:
+            best_i = int(np.argmax(d_vals))
+            best_f = d_vals[best_i]
+            sorted_d = sorted(d_vals, reverse=True)
+            second = sorted_d[1] if len(sorted_d) > 1 else 0.0
+            gap_c = best_f - second
+            # Закрашенный кружок: ≥30% тёмных пикселей и разрыв ≥10%
+            if best_f > 0.30 and gap_c > 0.10:
                 code += str(best_i)
-                code_confs.append(round(min(0.99, ng * 0.8 + 0.3), 2))
+                code_confs.append(round(min(0.99, gap_c * 2 + 0.3), 2))
             else:
                 code += "?"; code_confs.append(0.0)
+            if row_i == 0:
+                dbg_code["row0_fills"] = [round(v, 3) for v in d_vals]
     else:
-        dbg_code["code_rows_found"] = 0
+        dbg_code["error"] = "no_code_anchors"
 
     code = (code + "?????")[:5]
     code_confs = (code_confs + [0.0] * 5)[:5]

@@ -315,45 +315,30 @@ def _gigachat_call_once(messages: list, max_tokens: int, temperature: float,
 
 
 def gigachat_chat(messages: list, max_tokens: int = 3000, temperature: float = 0.2,
-                  model: str = "GigaChat-2", req_timeout: int = 300,
-                  max_retries: int = 3) -> str:
-    last_err = None
-    for attempt in range(1, max_retries + 1):
+                  model: str = "GigaChat-2", req_timeout: int = 95) -> str:
+    """Один вызов GigaChat без ретраев — функция ограничена 120 сек платформой."""
+    try:
+        return _gigachat_call_once(messages, max_tokens, temperature, model, req_timeout)
+    except urllib.error.HTTPError as e:
         try:
-            return _gigachat_call_once(messages, max_tokens, temperature, model, req_timeout)
-        except urllib.error.HTTPError as e:
-            try:
-                err_text = e.read().decode(errors="ignore")[:300]
-            except Exception:
-                err_text = str(e)
-            if e.code in (401, 403):
-                raise RuntimeError(f"GigaChat auth HTTP {e.code}: {err_text}")
-            if e.code == 404:
-                raise RuntimeError(f"MODEL_NOT_FOUND: {err_text}")
-            wait = 4.0 if e.code == 429 else 3.0
-            last_err = RuntimeError(f"GigaChat HTTP {e.code}: {err_text}")
-            if attempt < max_retries:
-                time.sleep(wait)
-                continue
-            raise last_err
-        except Exception as e:
-            last_err = RuntimeError(f"GigaChat недоступен: {e}")
-            if attempt < max_retries:
-                time.sleep(3.0)
-                _TOKEN_CACHE["token"] = None
-                _TOKEN_CACHE["expires_at"] = None
-                continue
-            raise last_err
-    raise last_err if last_err else RuntimeError("GigaChat: не удалось получить ответ")
+            err_text = e.read().decode(errors="ignore")[:300]
+        except Exception:
+            err_text = str(e)
+        if e.code in (401, 403):
+            raise RuntimeError(f"GigaChat auth HTTP {e.code}: {err_text}")
+        if e.code == 404:
+            raise RuntimeError(f"MODEL_NOT_FOUND: {err_text}")
+        raise RuntimeError(f"GigaChat HTTP {e.code}: {err_text}")
+    except Exception as e:
+        raise RuntimeError(f"GigaChat недоступен: {e}")
 
 
 def gigachat_with_fallback(messages: list, max_tokens: int = 3000) -> str:
-    """Пробует модели по очереди: GigaChat → GigaChat-2 → GigaChat-Lite.
-    GigaChat быстрее (20-40 сек), GigaChat-2 умнее но медленнее (60-90 сек)."""
+    """Пробует модели: GigaChat (быстрый, 20-50 сек) → GigaChat-Lite (запасной).
+    Без sleep между попытками — суммарно укладываемся в 120 сек таймаут платформы."""
     last_err = None
-    for model in ("GigaChat", "GigaChat-2", "GigaChat-Lite"):
+    for model, timeout in (("GigaChat", 85), ("GigaChat-Lite", 30)):
         try:
-            timeout = 90 if model == "GigaChat" else 300
             return gigachat_chat(messages, max_tokens=max_tokens, model=model, req_timeout=timeout)
         except RuntimeError as e:
             last_err = e
@@ -361,14 +346,11 @@ def gigachat_with_fallback(messages: list, max_tokens: int = 3000) -> str:
             if "MODEL_NOT_FOUND" in msg or "404" in msg or "401" in msg or "403" in msg:
                 continue
             if "timed out" in msg.lower() or "timeout" in msg.lower():
-                # При таймауте пробуем следующую модель
                 continue
-            # RemoteDisconnected / connection reset — пробуем следующую модель
             if "remote end closed" in msg.lower() or "remotedisconnected" in msg.lower() \
                     or "connection reset" in msg.lower() or "недоступен" in msg.lower():
                 _TOKEN_CACHE["token"] = None
                 _TOKEN_CACHE["expires_at"] = None
-                time.sleep(2.0)
                 continue
             raise
     raise last_err if last_err else RuntimeError("Все модели GigaChat недоступны")
@@ -471,15 +453,15 @@ def fetch_images_parallel(slides: list, topic: str) -> list:
             f"{topic} {slide.get('title', '')}",
         ]
         for q in queries_to_try:
-            img = fetch_image_bytes(q, timeout=5)
+            img = fetch_image_bytes(q, timeout=3)
             if img:
                 return idx, img
         return idx, None
 
     results = [None] * len(slides)
-    with ThreadPoolExecutor(max_workers=min(len(slides), 5)) as ex:
+    with ThreadPoolExecutor(max_workers=min(len(slides), 6)) as ex:
         futures = {ex.submit(get_img, (i, s)): i for i, s in enumerate(slides)}
-        for future in as_completed(futures, timeout=18):
+        for future in as_completed(futures, timeout=10):
             try:
                 idx, img = future.result()
                 results[idx] = img

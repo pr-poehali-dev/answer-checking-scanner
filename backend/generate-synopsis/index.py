@@ -158,10 +158,12 @@ def gigachat_chat(messages: list, max_tokens: int = 4000, temperature: float = 0
 
 
 def gigachat_with_fallback(messages: list, max_tokens: int = 4000) -> str:
+    """Lite(50с) → Lite(50с) → GigaChat-2(400с). Без sleep — экономим время функции."""
     last_err = None
-    for model in ("GigaChat-2", "GigaChat", "GigaChat-Lite"):
+    for model, timeout in (("GigaChat-Lite", 50), ("GigaChat-Lite", 50), ("GigaChat-2", 400)):
         try:
-            return gigachat_chat(messages, max_tokens=max_tokens, model=model, req_timeout=300)
+            return gigachat_chat(messages, max_tokens=max_tokens, model=model,
+                                 req_timeout=timeout, max_retries=1)
         except RuntimeError as e:
             last_err = e
             msg = str(e)
@@ -173,7 +175,6 @@ def gigachat_with_fallback(messages: list, max_tokens: int = 4000) -> str:
                     or "connection reset" in msg.lower() or "недоступен" in msg.lower():
                 _TOKEN_CACHE["token"] = None
                 _TOKEN_CACHE["expires_at"] = None
-                time.sleep(2.0)
                 continue
             raise
     raise last_err or RuntimeError("Все модели GigaChat недоступны")

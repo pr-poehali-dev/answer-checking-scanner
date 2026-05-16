@@ -1,5 +1,5 @@
 """
-Генерация PPTX-презентации по теме урока через GigaChat.
+Генерация PPTX-презентации по теме урока через GigaChat. v2
 POST / body: {topic, description, slidesCount, audience?, teacherName, teacherSchool}
 Возвращает: {pptx_b64, filename, outline}.
 

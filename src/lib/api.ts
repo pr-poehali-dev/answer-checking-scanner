@@ -484,6 +484,22 @@ export interface PresentationResponse {
   outline: PresentationOutline;
 }
 
+async function fetchWithTimeout(url: string, body: object, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    return res;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export const presentationApi = {
   generate: async (
     params: {
@@ -495,74 +511,69 @@ export const presentationApi = {
       teacherSchool: string;
       login?: string;
     },
-    onRetry?: (attempt: number) => void,
+    onStage?: (stage: string) => void,
   ): Promise<PresentationResponse> => {
-    const MAX_ATTEMPTS = 2;
-    const TIMEOUT_MS = 420_000; // 7 минут — GigaChat может работать долго
+    const topic = params.topic;
+    const commonBody = {
+      topic,
+      description: params.description ?? "",
+      audience: params.audience ?? "",
+      slidesCount: params.slidesCount ?? 8,
+      teacherName: params.teacherName,
+      teacherSchool: params.teacherSchool,
+      login: params.login ?? "",
+    };
 
-    let lastError: Error = new Error("Не удалось создать презентацию");
-
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-      if (attempt > 1 && onRetry) onRetry(attempt);
-
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-
-      try {
-        const res = await fetch(PRESENTATION_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            topic: params.topic,
-            description: params.description ?? "",
-            audience: params.audience ?? "",
-            slidesCount: params.slidesCount ?? 8,
-            teacherName: params.teacherName,
-            teacherSchool: params.teacherSchool,
-            login: params.login ?? "",
-          }),
-          signal: controller.signal,
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          const msg = data.error || `Ошибка генерации (${res.status})`;
-          // 429 и 5xx — ретраим один раз
-          if (res.status === 429 || res.status === 504 || res.status === 502 || res.status === 503) {
-            lastError = new Error(msg);
-            if (attempt < MAX_ATTEMPTS) {
-              await new Promise(r => setTimeout(r, 4000));
-              continue;
-            }
-          }
-          throw new Error(msg);
+    // ── Шаг 1: получаем структуру от GigaChat (до 85 сек) ────────────────
+    onStage?.("ИИ генерирует структуру презентации…");
+    let outlineData: { outline: object; theme_name: string; topic: string };
+    try {
+      const res1 = await fetchWithTimeout(
+        `${PRESENTATION_URL}?action=outline`,
+        commonBody,
+        88_000, // 88 сек — чуть меньше таймаута платформы
+      );
+      const d1 = await res1.json().catch(() => ({}));
+      if (!res1.ok) {
+        const msg = d1.error || `Ошибка генерации структуры (${res1.status})`;
+        if (res1.status === 504 || res1.status === 502 || res1.status === 503) {
+          throw new Error("ИИ-сервис GigaChat не успел ответить. Попробуйте ещё раз или уменьшите количество слайдов.");
         }
-        return data as PresentationResponse;
-      } catch (e) {
-        const err = e as Error;
-        if (err.name === "AbortError") {
-          // Таймаут 7 минут — бэкенд не ответил, пробуем ещё раз
-          lastError = new Error("ИИ-сервис не успел ответить за 7 минут — пробуем ещё раз…");
-          if (attempt < MAX_ATTEMPTS) {
-            await new Promise(r => setTimeout(r, 2000));
-            continue;
-          }
-          throw new Error("ИИ-сервис GigaChat не отвечает. Попробуйте через несколько минут или уменьшите количество слайдов.");
-        }
-        if (err.message.includes("Failed to fetch") || err.message.includes("NetworkError")) {
-          lastError = new Error("Сетевая ошибка — проверьте подключение к интернету.");
-          if (attempt < MAX_ATTEMPTS) {
-            await new Promise(r => setTimeout(r, 2000));
-            continue;
-          }
-          throw lastError;
-        }
-        throw err;
-      } finally {
-        clearTimeout(timer);
+        throw new Error(msg);
       }
+      outlineData = d1;
+    } catch (e) {
+      const err = e as Error;
+      if (err.name === "AbortError" || err.message.includes("Failed to fetch")) {
+        throw new Error("ИИ-сервис не ответил. Попробуйте ещё раз или уменьшите количество слайдов.");
+      }
+      throw err;
     }
 
-    throw lastError;
+    // ── Шаг 2: скачиваем фото и собираем PPTX (до 25 сек) ───────────────
+    onStage?.("Подбираем фотографии и собираем файл…");
+    try {
+      const res2 = await fetchWithTimeout(
+        `${PRESENTATION_URL}?action=build`,
+        {
+          topic,
+          teacherName: params.teacherName,
+          teacherSchool: params.teacherSchool,
+          outline: outlineData.outline,
+          theme_name: outlineData.theme_name,
+        },
+        30_000, // 30 сек — фото + сборка PPTX
+      );
+      const d2 = await res2.json().catch(() => ({}));
+      if (!res2.ok) throw new Error(d2.error || `Ошибка сборки PPTX (${res2.status})`);
+      return d2 as PresentationResponse;
+    } catch (e) {
+      const err = e as Error;
+      if (err.name === "AbortError" || err.message.includes("Failed to fetch")) {
+        throw new Error("Не удалось собрать файл презентации. Попробуйте ещё раз.");
+      }
+      throw err;
+    }
   },
 };
 

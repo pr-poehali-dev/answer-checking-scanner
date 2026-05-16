@@ -1098,26 +1098,7 @@ def safe_filename(s: str, max_len: int = 60) -> str:
 
 # ─── HANDLER ─────────────────────────────────────────────────────────────────
 
-def handler(event: dict, context) -> dict:
-    """Генерирует PPTX-презентацию по теме урока строго по ФГОС и программе Минпросвещения РФ, с фотографиями."""
-    if event.get("httpMethod") == "OPTIONS":
-        return {"statusCode": 200, "headers": CORS, "body": ""}
-
-    method = event.get("httpMethod", "POST")
-    qs = event.get("queryStringParameters") or {}
-    action = (qs.get("action") or "").strip().lower()
-
-    if method == "GET" and action == "ping":
-        try:
-            get_gigachat_token()
-            return _resp(200, {"ok": True, "service": "GigaChat-2"})
-        except Exception as e:
-            return _resp(500, {"ok": False, "error": str(e)})
-
-    if method != "POST":
-        return _resp(405, {"error": "Метод не поддерживается"})
-
-    body = {}
+def _parse_body(event: dict) -> dict:
     raw = event.get("body") or ""
     if event.get("isBase64Encoded"):
         try:
@@ -1128,9 +1109,147 @@ def handler(event: dict, context) -> dict:
         body = json.loads(raw) if raw else {}
         if isinstance(body, str):
             body = json.loads(body)
+        return body
     except Exception:
-        body = {}
+        return {}
 
+
+def handler(event: dict, context) -> dict:
+    """
+    Генерация PPTX разбита на 2 шага, чтобы уложиться в таймаут платформы:
+    POST ?action=outline  — запрос к GigaChat, возвращает JSON-структуру (~60 сек)
+    POST ?action=build    — скачивает фото и собирает PPTX из готовой структуры (~15 сек)
+    POST (без action)     — legacy: оба шага вместе (для совместимости)
+    """
+    if event.get("httpMethod") == "OPTIONS":
+        return {"statusCode": 200, "headers": CORS, "body": ""}
+
+    method = event.get("httpMethod", "POST")
+    qs = event.get("queryStringParameters") or {}
+    action = (qs.get("action") or "").strip().lower()
+
+    if method == "GET" and action == "ping":
+        try:
+            get_gigachat_token()
+            return _resp(200, {"ok": True, "service": "GigaChat"})
+        except Exception as e:
+            return _resp(500, {"ok": False, "error": str(e)})
+
+    if method != "POST":
+        return _resp(405, {"error": "Метод не поддерживается"})
+
+    body = _parse_body(event)
+
+    # ── ШАГ 1: outline — только GigaChat (~60 сек) ──────────────────────────
+    if action == "outline":
+        login = (body.get("login") or "").strip()
+        topic = (body.get("topic") or "").strip()
+        description = (body.get("description") or "").strip()
+        audience = (body.get("audience") or "").strip()
+
+        try:
+            slides_count = int(body.get("slidesCount") or 8)
+        except (TypeError, ValueError):
+            slides_count = 8
+        slides_count = max(3, min(slides_count, 16))
+
+        if not topic:
+            return _resp(400, {"error": "Укажите тему урока"})
+
+        # Списываем токены перед генерацией
+        ok, tok_err = spend_ai_tokens(login, TOKENS_COST_PRESENTATION)
+        if not ok:
+            return _resp(402, {"error": tok_err})
+
+        # Проверяем лимит AI-запросов для trial-пользователей
+        if login:
+            try:
+                limit_req = urllib.request.Request(
+                    f"{AUTH_URL}?action=check-ai-limit",
+                    data=json.dumps({"login": login}).encode("utf-8"),
+                    method="POST",
+                    headers={"Content-Type": "application/json"},
+                )
+                with urllib.request.urlopen(limit_req, timeout=10) as r:
+                    limit_data = json.loads(r.read().decode())
+                if not limit_data.get("allowed"):
+                    return _resp(429, {"error": limit_data.get("error", "Достигнут лимит ИИ-запросов")})
+            except urllib.error.HTTPError as e:
+                err_body = json.loads(e.read().decode() or "{}")
+                if e.code == 429:
+                    return _resp(429, {"error": err_body.get("error", "Достигнут лимит ИИ-запросов на сегодня")})
+            except Exception:
+                pass
+
+        try:
+            outline = generate_outline(topic, description, slides_count, audience)
+        except Exception as e:
+            msg = str(e)
+            if "timed out" in msg.lower() or "timeout" in msg.lower():
+                return _resp(504, {"error": "ИИ-сервис не успел ответить — попробуйте ещё раз."})
+            if "429" in msg or "rate" in msg.lower():
+                return _resp(429, {"error": "Слишком много запросов к ИИ-сервису — подождите 30 секунд."})
+            return _resp(500, {"error": f"Ошибка генерации структуры: {msg}"})
+
+        theme = pick_theme(topic)
+        return _resp(200, {
+            "outline": outline,
+            "theme_name": theme["name"],
+            "topic": topic,
+        })
+
+    # ── ШАГ 2: build — фото + PPTX (~15 сек) ───────────────────────────────
+    if action == "build":
+        topic = (body.get("topic") or "").strip()
+        teacher_name = (body.get("teacherName") or "").strip()
+        teacher_school = (body.get("teacherSchool") or "").strip()
+        outline = body.get("outline")
+        theme_name = (body.get("theme_name") or "").strip()
+
+        if not topic or not outline:
+            return _resp(400, {"error": "Укажите topic и outline"})
+
+        # Восстанавливаем тему
+        theme = next((t for t in THEMES if t["name"] == theme_name), None) or pick_theme(topic)
+
+        # Скачиваем фото параллельно
+        images = {}
+        try:
+            img_list = fetch_images_parallel(outline.get("slides", []), topic)
+            for idx, img in enumerate(img_list, start=1):
+                if img:
+                    images[idx] = img
+        except Exception:
+            pass
+
+        try:
+            pptx_bytes = build_pptx(
+                topic=topic,
+                subtitle=outline.get("subtitle", ""),
+                contents=outline.get("contents", []),
+                slides_data=outline.get("slides", []),
+                conclusion=outline.get("conclusion", []),
+                teacher_name=teacher_name,
+                teacher_school=teacher_school,
+                theme=theme,
+                images=images,
+            )
+        except Exception as e:
+            return _resp(500, {"error": f"Ошибка сборки PPTX: {e}"})
+
+        filename = f"{safe_filename(topic)}.pptx"
+        return _resp(200, {
+            "pptx_b64": base64.b64encode(pptx_bytes).decode(),
+            "filename": filename,
+            "size": len(pptx_bytes),
+            "outline": {
+                "subtitle": outline.get("subtitle", ""),
+                "slides": [{"title": s["title"], "bullets": s["bullets"]} for s in outline.get("slides", [])],
+                "conclusion": outline.get("conclusion", []),
+            },
+        })
+
+    # ── Legacy: оба шага вместе (action="" или не указан) ───────────────────
     login = (body.get("login") or "").strip()
     topic = (body.get("topic") or "").strip()
     description = (body.get("description") or "").strip()
@@ -1147,12 +1266,10 @@ def handler(event: dict, context) -> dict:
     if not topic:
         return _resp(400, {"error": "Укажите тему урока"})
 
-    # Списываем токены
     ok, tok_err = spend_ai_tokens(login, TOKENS_COST_PRESENTATION)
     if not ok:
         return _resp(402, {"error": tok_err})
 
-    # Проверяем лимит AI-запросов для trial-пользователей
     if login:
         try:
             limit_req = urllib.request.Request(
@@ -1174,7 +1291,6 @@ def handler(event: dict, context) -> dict:
 
     theme = pick_theme(topic)
 
-    # Шаг 1: генерируем структуру через GigaChat-2
     try:
         outline = generate_outline(topic, description, slides_count, audience)
     except Exception as e:
@@ -1185,7 +1301,6 @@ def handler(event: dict, context) -> dict:
             return _resp(429, {"error": "Слишком много запросов к ИИ-сервису — подождите 30 секунд."})
         return _resp(500, {"error": f"Ошибка генерации структуры: {msg}"})
 
-    # Шаг 2: загружаем фотографии ПАРАЛЛЕЛЬНО, все вместе ≤15 сек
     images = {}
     try:
         img_list = fetch_images_parallel(outline["slides"], topic)
@@ -1193,9 +1308,8 @@ def handler(event: dict, context) -> dict:
             if img:
                 images[idx] = img
     except Exception:
-        pass  # Без фото лучше, чем без презентации
+        pass
 
-    # Шаг 3: собираем PPTX
     try:
         pptx_bytes = build_pptx(
             topic=topic,

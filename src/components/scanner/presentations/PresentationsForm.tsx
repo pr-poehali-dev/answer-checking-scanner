@@ -35,11 +35,11 @@ function downloadBase64(b64: string, filename: string) {
 const STAGE_HINTS: [number, string][] = [
   [0,  "Подключаемся к ИИ…"],
   [5,  "ИИ изучает тему урока…"],
-  [20, "Формируем структуру слайдов…"],
-  [45, "Генерируем содержание…"],
-  [60, "Подбираем фотографии…"],
-  [75, "Собираем PPTX-файл…"],
-  [88, "Финальная обработка…"],
+  [15, "Формируем структуру слайдов…"],
+  [40, "Генерируем содержание слайдов…"],
+  [80, "Подбираем фотографии…"],
+  [90, "Собираем PPTX-файл…"],
+  [96, "Финальная обработка…"],
 ];
 
 export function PresentationsForm() {
@@ -96,11 +96,10 @@ export function PresentationsForm() {
     setBusy(true);
 
     try {
-      setStage("ИИ готовит структуру презентации…");
       const result = await presentationApi.generate(
         { topic: topic.trim(), description: description.trim(), audience, slidesCount,
           teacherName: teacher.name, teacherSchool: teacher.school, login: teacher.login },
-        (attempt) => setStage(`Повторная попытка ${attempt} из 3 — ИИ-сервис занят…`),
+        (s) => setStage(s),
       );
 
       let yadiskPath: string | null = null;
@@ -290,12 +289,12 @@ export function PresentationsForm() {
                 </div>
               </div>
               <p className="text-[10px] text-primary/50 mt-1.5">
-                GigaChat работает над содержанием — обычно 2–5 минут. Не закрывайте страницу.
+                Шаг 1: ИИ генерирует структуру (~60 сек) → Шаг 2: фото и сборка файла (~15 сек). Не закрывайте страницу.
               </p>
             </div>
             <div className="px-4 py-2 border-t border-primary/10 flex gap-4">
               {["Структура", "Содержание", "Фото", "PPTX"].map((step, i) => {
-                const pct = [5, 45, 65, 80][i];
+                const pct = [5, 40, 80, 90][i];
                 const done = progress >= pct;
                 return (
                   <div key={step} className="flex items-center gap-1">

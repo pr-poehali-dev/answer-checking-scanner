@@ -23,6 +23,7 @@ import InstitutionDashboard from "@/pages/InstitutionDashboard";
 import SubscriptionGate from "@/components/SubscriptionGate";
 import YadiskRequiredGate from "@/components/YadiskRequiredGate";
 import CompanyFooter from "@/components/CompanyFooter";
+import TesterLogger from "@/components/TesterLogger";
 import { useAppStore, appStore } from "@/store/appStore";
 
 const OU_SESSION_KEY = "saou_ou_session_v1";
@@ -318,14 +319,17 @@ export default function Index() {
             </p>
           </div>
 
-          <button
-            onClick={() => navigate("upload")}
-            className="inline-flex items-center gap-1.5 px-3 py-2 bg-primary text-primary-foreground text-xs font-semibold rounded-sm hover:opacity-90 transition-opacity whitespace-nowrap"
-          >
-            <Icon name="Plus" size={13} />
-            <span className="hidden sm:inline">Новая проверка</span>
-            <span className="sm:hidden">Проверка</span>
-          </button>
+          <div className="flex items-center gap-2">
+            {isTester && <TesterLogger />}
+            <button
+              onClick={() => navigate("upload")}
+              className="inline-flex items-center gap-1.5 px-3 py-2 bg-primary text-primary-foreground text-xs font-semibold rounded-sm hover:opacity-90 transition-opacity whitespace-nowrap"
+            >
+              <Icon name="Plus" size={13} />
+              <span className="hidden sm:inline">Новая проверка</span>
+              <span className="sm:hidden">Проверка</span>
+            </button>
+          </div>
         </header>
 
         {/* Контент */}

@@ -328,17 +328,19 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
 
         section_w = grid_w / n_blank_cols
 
-        # num_w в бланке = 7.5mm, P = 4mm, бланк занимает ~85% ширины страницы
-        # Оцениваем num_w как долю от section_w:
-        # В generate-blank: col_w = (bw-2P)/n_cols, num_w=7.5mm → num_w/col_w ≈ 0.14
-        num_frac = 0.14   # доля section_w под номер вопроса
-        sq_area_frac = 1.0 - num_frac  # остаток — под квадраты ответов
+        # Точные пропорции из generate-blank:
+        # col_w = (bw-2P)/n_cols, num_w=7.5mm
+        # При bw=180mm, P=4mm: col_w=(180-8)/2=86mm → num_frac=7.5/86≈0.087
+        # cell_w=(col_w-num_w)/n_opts → шаг = cell_w
+        num_frac = 7.5 / 86.0   # ≈ 0.087
 
         for sec in range(n_blank_cols):
             sec_x0 = grid_x0 + sec * section_w
-            sq_area_w = section_w * sq_area_frac
+            num_px  = section_w * num_frac
+            sq_area_w = section_w - num_px
             sq_step = sq_area_w / options_count
-            sq_x_start = sec_x0 + section_w * num_frac + sq_step / 2
+            # Центр первого квадрата: после num_w + полшага
+            sq_x_start = sec_x0 + num_px + sq_step / 2
 
             row_step = grid_h / rows_per_col
             sq_y_start = grid_y0 + row_step / 2
@@ -352,7 +354,7 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
                 for oi in range(options_count):
                     cx_cell = sq_x_start + oi * sq_step
                     row.append((int(cx_cell), int(cy_cell),
-                                int(sq_step * 0.82), int(row_step * 0.72)))
+                                int(sq_step * 0.75), int(row_step * 0.70)))
                 answer_rows.append(row)
 
         dbg_rows_dist = [f"anchors_ok", len(answer_rows),
@@ -408,52 +410,66 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
     code = ""
     code_confs = []
 
+    dbg_code = {}
     if anchors:
         tl, tr, bl, br = anchors
-        # Зона кода: от нижнего якоря вниз до ~конца бланка
-        # В бланке: под сеткой ответов → линия → заголовок 0-9 → 5 строк кружков
-        code_y_start = bl[1]   # Y нижнего якоря = граница между ответами и кодом
-        code_y_end   = int(h * 0.97)
+        # Точные пропорции из generate-blank (в мм):
+        # P=4, nw2=5, cr2=1.5, gap_x=cr2*2+0.5=3.5, gap_y=cr2*2+0.8=3.8
+        # Заголовок "0-9": высота 2.8mm над кружками
+        # Зона кода: от bl[1] вниз
+        # X первого кружка от левого края бланка: P + nw2 + cr2 = 10.5mm
+        # Ширина бланка ≈ grid_w + 2*(P/2) ≈ grid_w + P
+        # Пересчитываем мм → пиксели через grid_w:
+        # bw_mm ≈ 172mm (A4 с полями), grid_w_px = 659 → px_per_mm = 659/164 ≈ 4.02
+        bw_est_mm = 172.0
+        px_per_mm = grid_w / (bw_est_mm - 8.0)   # grid_w / (bw-2P) в мм
 
-        # X зоны кода совпадает примерно с шириной сетки ответов
-        # но кружки начинаются правее (есть num_w под "1 2 3 4 5")
-        code_x_start = grid_x0 + (grid_w * 0.08)   # небольшой отступ под номер строки
-        code_x_end   = grid_x0 + (grid_w * 0.85)   # кружки 0-9 не занимают всю ширину
+        # Левый край бланка в пикселях
+        blank_x0 = grid_x0 - int(8.0 / 2 * px_per_mm)   # grid_x0 минус P пикселей
 
-        code_zone_h = code_y_end - code_y_start
-        # Заголовок "0 1 2 ... 9" занимает верхние ~15% зоны кода
-        circ_y0 = code_y_start + int(code_zone_h * 0.20)
-        circ_h  = code_y_end - circ_y0
+        P_px   = 4.0  * px_per_mm
+        nw2_px = 5.0  * px_per_mm
+        cr2_px = 1.5  * px_per_mm
+        gap_x  = (1.5*2 + 0.5) * px_per_mm   # 3.5mm
+        gap_y  = (1.5*2 + 0.8) * px_per_mm   # 3.8mm
+        hdr_h  = 2.8  * px_per_mm             # заголовок "0-9"
 
-        n_rows_code = 5
-        n_cols_code = 10
-        step_x = (code_x_end - code_x_start) / n_cols_code
-        step_y = circ_h / n_rows_code
-        r_est  = int(min(step_x, step_y) * 0.38)
+        # Y начала кружков: нижний якорь + отступы (линия ~2mm + заголовок)
+        code_y_line = bl[1]
+        circ_y0 = code_y_line + int((2.0 + 2.8) * px_per_mm) + int(cr2_px)
 
-        for row_i in range(n_rows_code):
-            cy_c = int(circ_y0 + row_i * step_y + step_y / 2)
+        # X первого кружка
+        circ_x0 = blank_x0 + int(P_px + nw2_px + cr2_px)
+
+        r_est = max(3, int(cr2_px * 0.85))
+
+        dbg_code = {
+            "px_per_mm": round(px_per_mm, 2),
+            "circ_x0": circ_x0, "circ_y0": circ_y0,
+            "gap_x": round(gap_x, 1), "gap_y": round(gap_y, 1),
+            "r_est": r_est, "blank_x0": blank_x0,
+        }
+
+        for row_i in range(5):
+            cy_c = int(circ_y0 + row_i * gap_y)
             fills_c = []
-            for col_i in range(n_cols_code):
-                cx_c = int(code_x_start + col_i * step_x + step_x / 2)
-                # Замеряем тёмность ROI кружка (закрашенный = темнее)
-                pad = max(1, int(r_est * 0.15))
+            for col_i in range(10):
+                cx_c = int(circ_x0 + col_i * gap_x)
+                pad = max(1, int(r_est * 0.1))
                 x1 = max(0, cx_c - r_est + pad)
                 y1 = max(0, cy_c - r_est + pad)
                 x2 = min(w, cx_c + r_est - pad)
                 y2 = min(h, cy_c + r_est - pad)
                 if x2 > x1 and y2 > y1:
-                    roi = gray[y1:y2, x1:x2]
-                    _, bw_r = cv2.threshold(roi, 0, 255,
+                    roi_c = gray[y1:y2, x1:x2]
+                    _, bw_r = cv2.threshold(roi_c, 0, 255,
                                             cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
                     fills_c.append(float(np.mean(bw_r > 0)))
                 else:
                     fills_c.append(0.0)
 
             if not fills_c:
-                code += "?"
-                code_confs.append(0.0)
-                continue
+                code += "?"; code_confs.append(0.0); continue
 
             best_idx = int(np.argmax(fills_c))
             best_f   = fills_c[best_idx]
@@ -465,8 +481,7 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
                 code += str(best_idx)
                 code_confs.append(round(min(0.99, ng * 0.8 + 0.3), 2))
             else:
-                code += "?"
-                code_confs.append(0.0)
+                code += "?"; code_confs.append(0.0)
     else:
         # Fallback: Hough + яркость
         code_zone_start = int(h * 0.65)
@@ -500,6 +515,7 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
         "code_rows":     len(code),
         "dbg_fills":     dbg_fills,
         "dbg_rows_dist": dbg_rows_dist,
+        "dbg_code":      dbg_code,
     }
 
 

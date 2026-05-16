@@ -536,7 +536,7 @@ export const presentationApi = {
       const res1 = await fetchWithTimeout(
         `${PRESENTATION_URL}?action=outline`,
         commonBody,
-        115_000, // 115 сек — с запасом над таймаутом платформы 120 сек
+        580_000, // 580 сек — таймаут платформы 600 сек
       );
       const d1 = await res1.json().catch(() => ({}));
       if (!res1.ok) {

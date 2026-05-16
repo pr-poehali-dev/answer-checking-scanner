@@ -11,6 +11,7 @@ interface Props {
   onToggle: (login: string) => void;
   onDelete: (login: string) => void;
   onSetRole: (login: string, role: "teacher" | "tester") => void;
+  onTokens: (u: UserRow) => void;
 }
 
 export default function AdminUsersTable({
@@ -23,16 +24,17 @@ export default function AdminUsersTable({
   onToggle,
   onDelete,
   onSetRole,
+  onTokens,
 }: Props) {
   return (
     <div className="border border-border rounded-sm bg-white overflow-hidden overflow-x-auto">
-      <table className="w-full text-xs min-w-[700px]">
+      <table className="w-full text-xs min-w-[800px]">
         <thead className="bg-muted">
           <tr>
             <th className="px-3 py-2 text-left font-semibold">Логин / Роль</th>
             <th className="px-3 py-2 text-left font-semibold">ФИО</th>
-            <th className="px-3 py-2 text-left font-semibold">Email</th>
             <th className="px-3 py-2 text-left font-semibold">Подписка / Trial</th>
+            <th className="px-3 py-2 text-left font-semibold">Токены ИИ</th>
             <th className="px-3 py-2 text-left font-semibold">Был в сети</th>
             <th className="px-3 py-2 text-left font-semibold">Статус</th>
             <th className="px-3 py-2 text-right font-semibold">Действия</th>
@@ -43,7 +45,7 @@ export default function AdminUsersTable({
             <tr><td colSpan={7} className="px-3 py-8 text-center text-muted-foreground">Учителей пока нет. Добавьте первого.</td></tr>
           )}
           {users.map(u => (
-            <tr key={u.id} className="border-t border-border">
+            <tr key={u.id} className="border-t border-border hover:bg-muted/30 transition-colors">
               <td className="px-3 py-2">
                 <span className="font-mono text-xs">{u.login}</span>
                 {u.role === "admin" && (
@@ -53,8 +55,10 @@ export default function AdminUsersTable({
                   <span className="ml-1.5 px-1.5 py-0.5 rounded-sm text-[9px] font-bold bg-purple-100 text-purple-700">TESTER</span>
                 )}
               </td>
-              <td className="px-3 py-2">{u.full_name}</td>
-              <td className="px-3 py-2 text-muted-foreground">{u.email || "—"}</td>
+              <td className="px-3 py-2">
+                <p className="font-medium">{u.full_name}</p>
+                <p className="text-muted-foreground">{u.email || ""}</p>
+              </td>
               <td className="px-3 py-2">
                 {u.role === "admin" || u.role === "tester" ? (
                   <span className="inline-flex items-center gap-1 text-purple-600">
@@ -87,6 +91,19 @@ export default function AdminUsersTable({
                     нет
                   </span>
                 )}
+              </td>
+              <td className="px-3 py-2">
+                <button
+                  onClick={() => onTokens(u)}
+                  title="Начислить токены ИИ"
+                  className="inline-flex items-center gap-1.5 px-2 py-1 rounded-sm border border-border hover:border-primary/40 hover:bg-primary/5 transition-colors group"
+                >
+                  <Icon name="Coins" size={11} className="text-muted-foreground group-hover:text-primary transition-colors" />
+                  <span className={`font-semibold tabular-nums ${(u.ai_tokens_balance ?? 0) > 0 ? "text-primary" : "text-muted-foreground"}`}>
+                    {(u.ai_tokens_balance ?? 0).toLocaleString("ru-RU")}
+                  </span>
+                  <Icon name="Plus" size={10} className="text-muted-foreground/50 group-hover:text-primary transition-colors" />
+                </button>
               </td>
               <td className="px-3 py-2 text-muted-foreground">
                 {formatLastSeen(u.last_seen_at)}

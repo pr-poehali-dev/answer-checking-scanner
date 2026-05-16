@@ -8,6 +8,7 @@ import AdminUsersTable from "@/pages/admin/AdminUsersTable";
 import AdminSubscriptionModal from "@/pages/admin/AdminSubscriptionModal";
 import AdminResetPasswordModal from "@/pages/admin/AdminResetPasswordModal";
 import AdminMaintenancePanel from "@/pages/admin/AdminMaintenancePanel";
+import AdminTokensModal from "@/pages/admin/AdminTokensModal";
 
 type Tab = "users" | "maintenance";
 
@@ -32,6 +33,9 @@ export default function AdminPanel() {
   const [subFor, setSubFor]       = useState<UserRow | null>(null);
   const [subMonths, setSubMonths] = useState<number>(1);
   const [subBusy, setSubBusy]     = useState(false);
+
+  const [tokensFor, setTokensFor] = useState<UserRow | null>(null);
+  const [tokensBusy, setTokensBusy] = useState(false);
 
   const loadUsers = async () => {
     setLoading(true);
@@ -110,6 +114,16 @@ export default function AdminPanel() {
       await authApi.setRole(token, login, role);
       await loadUsers();
     } catch (e) { setError((e as Error).message); }
+  };
+
+  const handleAddTokens = async (login: string, amount: number) => {
+    setTokensBusy(true); setError("");
+    try {
+      await authApi.addTokens(token, login, amount);
+      setTokensFor(null);
+      await loadUsers();
+    } catch (e) { setError((e as Error).message); }
+    finally { setTokensBusy(false); }
   };
 
   const formatSubUntil = (iso: string | null) => {
@@ -263,6 +277,7 @@ export default function AdminPanel() {
               onToggle={handleToggle}
               onDelete={handleDelete}
               onSetRole={handleSetRole}
+              onTokens={u => setTokensFor(u)}
             />
           </>
         )}
@@ -282,6 +297,15 @@ export default function AdminPanel() {
           setSubMonths={setSubMonths}
           onGrant={handleGrantSubscription}
           onClose={() => setSubFor(null)}
+        />
+      )}
+
+      {tokensFor && (
+        <AdminTokensModal
+          user={tokensFor}
+          busy={tokensBusy}
+          onAdd={handleAddTokens}
+          onClose={() => setTokensFor(null)}
         />
       )}
 

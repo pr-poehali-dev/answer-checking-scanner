@@ -45,6 +45,7 @@ export interface UserRow extends SubscriptionInfo {
   created_at: string;
   subscription_plan?: string | null;
   last_seen_at?: string | null;
+  ai_tokens_balance?: number;
 }
 
 async function request<T>(action: string, options: RequestInit & { token?: string } = {}): Promise<T> {
@@ -156,6 +157,13 @@ export const authApi = {
       method: "POST",
       token,
       body: JSON.stringify({ login, role }),
+    }),
+
+  addTokens: (token: string, login: string, amount: number) =>
+    request<{ ok: boolean; balance: number }>("add-tokens", {
+      method: "POST",
+      token,
+      body: JSON.stringify({ login, amount }),
     }),
 
   getMaintenance: () =>

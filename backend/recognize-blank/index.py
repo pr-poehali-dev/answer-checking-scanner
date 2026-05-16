@@ -5,8 +5,8 @@
 POST / — { image: base64, questionsCount?: 20, optionsCount?: 4, answerKey?: "АБВГ..." }
 -> { studentCode, answers[], confidence[], analysis }
 """
-# v26: smarter anchor selection
-import json, base64
+# v27: geometry-based grid + code recognition
+import json, base64, math
 import numpy as np
 import cv2
 
@@ -324,26 +324,35 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
         grid_h  = grid_y1 - grid_y0
 
         n_blank_cols = 1 if questions_count <= 15 else (2 if questions_count <= 40 else 3)
-        rows_per_col = questions_count // n_blank_cols
+        rows_per_col = math.ceil(questions_count / n_blank_cols)
 
         section_w = grid_w / n_blank_cols
 
+        # num_w в бланке = 7.5mm, P = 4mm, бланк занимает ~85% ширины страницы
+        # Оцениваем num_w как долю от section_w:
+        # В generate-blank: col_w = (bw-2P)/n_cols, num_w=7.5mm → num_w/col_w ≈ 0.14
+        num_frac = 0.14   # доля section_w под номер вопроса
+        sq_area_frac = 1.0 - num_frac  # остаток — под квадраты ответов
+
         for sec in range(n_blank_cols):
             sec_x0 = grid_x0 + sec * section_w
-            sq_area_w = section_w * 0.80
+            sq_area_w = section_w * sq_area_frac
             sq_step = sq_area_w / options_count
-            sq_x_start = sec_x0 + section_w * 0.20 + sq_step / 2
+            sq_x_start = sec_x0 + section_w * num_frac + sq_step / 2
 
             row_step = grid_h / rows_per_col
             sq_y_start = grid_y0 + row_step / 2
 
             for ri in range(rows_per_col):
+                q_idx = sec * rows_per_col + ri
+                if q_idx >= questions_count:
+                    break
                 row = []
                 cy_cell = sq_y_start + ri * row_step
                 for oi in range(options_count):
                     cx_cell = sq_x_start + oi * sq_step
                     row.append((int(cx_cell), int(cy_cell),
-                                int(sq_step * 0.8), int(row_step * 0.75)))
+                                int(sq_step * 0.82), int(row_step * 0.72)))
                 answer_rows.append(row)
 
         dbg_rows_dist = [f"anchors_ok", len(answer_rows),
@@ -376,10 +385,11 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
             dbg_fills.append({"row": row_i, "fills": [round(f, 4) for f in fills],
                                "max": round(max_f, 4), "gap": round(gap, 4),
                                "rel_gap": round(rel_gap, 4), "chosen": chosen})
-        # Победитель: тёмных пикселей на 25% больше чем у второго
+        # Победитель: тёмных пикселей заметно больше чем у второго
         second_f = sorted_f[1] if len(sorted_f) > 1 else 0.0
         norm_gap = (max_f - second_f) / max(max_f, 0.01)
-        if max_f > 0.08 and norm_gap > 0.18:
+        # Принимаем ответ если победитель на ≥12% выше второго
+        if max_f > 0.06 and norm_gap > 0.12:
             answers.append(opts[idx] if idx < len(opts) else "")
             confidences.append(round(min(0.99, norm_gap * 0.8 + 0.3), 2))
         else:
@@ -390,41 +400,92 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
         answers.append("")
         confidences.append(0.0)
 
-    code_zone_start = int(h * 0.65)
-    circles = _find_circles_in_zone(gray, code_zone_start, h)
-    if len(circles) < 10:
-        zone = gray[code_zone_start:, :]
-        blurred2 = cv2.GaussianBlur(zone, (3, 3), 0)
-        h_z, w_z = zone.shape
-        min_r2 = max(4, int(min(h_z, w_z) * 0.008))
-        max_r2 = max(25, int(min(h_z, w_z) * 0.06))
-        c2 = cv2.HoughCircles(blurred2, cv2.HOUGH_GRADIENT, dp=1.0,
-                               minDist=int(min_r2 * 1.2), param1=40, param2=14,
-                               minRadius=min_r2, maxRadius=max_r2)
-        if c2 is not None:
-            circles = [(int(x), int(y) + code_zone_start, int(r)) for x, y, r in c2[0]]
-
-    cr_rows_all = _cluster_rows([(cx, cy, r, r * 2) for cx, cy, r in circles], tol_ratio=1.2)
-    cr_rows_all.sort(key=lambda row: np.mean([it[1] for it in row]))
-    code_rows = [row for row in cr_rows_all if 7 <= len(row) <= 13][:5]
-
+    # ── Код ученика: геометрическая сетка 5×10 ────────────────────────────────
+    # В бланке сетка кода начинается сразу под сеткой ответов.
+    # Используем якоря для вычисления координат зоны кода.
+    # Структура: 5 строк (цифры 1-5), 10 столбцов (0-9).
+    # Зона кода занимает нижнюю ~30% высоты бланка от нижнего якоря.
     code = ""
     code_confs = []
-    for row in code_rows:
-        row10 = sorted(row, key=lambda i: i[0])[:10]
-        bright = [_circle_brightness(gray, cx, cy, r) for cx, cy, r, _ in row10]
-        if not bright:
-            code += "?"
-            code_confs.append(0.0)
-            continue
-        idx = int(np.argmin(bright))
-        spread = max(bright) - bright[idx]
-        if spread > 18:
-            code += str(idx)
-            code_confs.append(round(min(0.99, spread / 80), 2))
-        else:
-            code += "?"
-            code_confs.append(0.0)
+
+    if anchors:
+        tl, tr, bl, br = anchors
+        # Зона кода: от нижнего якоря вниз до ~конца бланка
+        # В бланке: под сеткой ответов → линия → заголовок 0-9 → 5 строк кружков
+        code_y_start = bl[1]   # Y нижнего якоря = граница между ответами и кодом
+        code_y_end   = int(h * 0.97)
+
+        # X зоны кода совпадает примерно с шириной сетки ответов
+        # но кружки начинаются правее (есть num_w под "1 2 3 4 5")
+        code_x_start = grid_x0 + (grid_w * 0.08)   # небольшой отступ под номер строки
+        code_x_end   = grid_x0 + (grid_w * 0.85)   # кружки 0-9 не занимают всю ширину
+
+        code_zone_h = code_y_end - code_y_start
+        # Заголовок "0 1 2 ... 9" занимает верхние ~15% зоны кода
+        circ_y0 = code_y_start + int(code_zone_h * 0.20)
+        circ_h  = code_y_end - circ_y0
+
+        n_rows_code = 5
+        n_cols_code = 10
+        step_x = (code_x_end - code_x_start) / n_cols_code
+        step_y = circ_h / n_rows_code
+        r_est  = int(min(step_x, step_y) * 0.38)
+
+        for row_i in range(n_rows_code):
+            cy_c = int(circ_y0 + row_i * step_y + step_y / 2)
+            fills_c = []
+            for col_i in range(n_cols_code):
+                cx_c = int(code_x_start + col_i * step_x + step_x / 2)
+                # Замеряем тёмность ROI кружка (закрашенный = темнее)
+                pad = max(1, int(r_est * 0.15))
+                x1 = max(0, cx_c - r_est + pad)
+                y1 = max(0, cy_c - r_est + pad)
+                x2 = min(w, cx_c + r_est - pad)
+                y2 = min(h, cy_c + r_est - pad)
+                if x2 > x1 and y2 > y1:
+                    roi = gray[y1:y2, x1:x2]
+                    _, bw_r = cv2.threshold(roi, 0, 255,
+                                            cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+                    fills_c.append(float(np.mean(bw_r > 0)))
+                else:
+                    fills_c.append(0.0)
+
+            if not fills_c:
+                code += "?"
+                code_confs.append(0.0)
+                continue
+
+            best_idx = int(np.argmax(fills_c))
+            best_f   = fills_c[best_idx]
+            sorted_c = sorted(fills_c, reverse=True)
+            second_c = sorted_c[1] if len(sorted_c) > 1 else 0.0
+            ng = (best_f - second_c) / max(best_f, 0.01)
+
+            if best_f > 0.08 and ng > 0.12:
+                code += str(best_idx)
+                code_confs.append(round(min(0.99, ng * 0.8 + 0.3), 2))
+            else:
+                code += "?"
+                code_confs.append(0.0)
+    else:
+        # Fallback: Hough + яркость
+        code_zone_start = int(h * 0.65)
+        circles = _find_circles_in_zone(gray, code_zone_start, h)
+        cr_rows_all = _cluster_rows([(cx, cy, r, r * 2) for cx, cy, r in circles], tol_ratio=1.2)
+        cr_rows_all.sort(key=lambda row: np.mean([it[1] for it in row]))
+        hough_rows = [row for row in cr_rows_all if 7 <= len(row) <= 13][:5]
+        for row in hough_rows:
+            row10 = sorted(row, key=lambda i: i[0])[:10]
+            bright = [_circle_brightness(gray, cx, cy, r) for cx, cy, r, _ in row10]
+            if not bright:
+                code += "?"; code_confs.append(0.0); continue
+            idx = int(np.argmin(bright))
+            spread = max(bright) - bright[idx]
+            if spread > 18:
+                code += str(idx)
+                code_confs.append(round(min(0.99, spread / 80), 2))
+            else:
+                code += "?"; code_confs.append(0.0)
 
     code = (code + "?????")[:5]
     code_confs = (code_confs + [0.0] * 5)[:5]

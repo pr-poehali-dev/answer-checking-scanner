@@ -334,10 +334,10 @@ def gigachat_chat(messages: list, max_tokens: int = 3000, temperature: float = 0
 
 
 def gigachat_with_fallback(messages: list, max_tokens: int = 3000) -> str:
-    """GigaChat-2 стабильнее держит соединение чем Lite.
-    Warmup уже получил токен, так что здесь чистое время генерации."""
+    """3 попытки: Lite(50с) → Lite(50с) → GigaChat-2(120с).
+    Lite быстрее, но иногда обрывает — поэтому 2 попытки на неё, потом тяжёлая модель."""
     last_err = None
-    for model, timeout in (("GigaChat-2", 75), ("GigaChat-Lite", 75)):
+    for model, timeout in (("GigaChat-Lite", 50), ("GigaChat-Lite", 50), ("GigaChat-2", 120)):
         try:
             return gigachat_chat(messages, max_tokens=max_tokens, model=model, req_timeout=timeout)
         except RuntimeError as e:
@@ -510,8 +510,8 @@ def generate_outline(topic: str, description: str, slides_count: int, audience: 
         f"Ровно {slides_count} слайдов. bullets — ровно 5 штук на каждый слайд. image_queries — 3 разных запроса."
     )
 
-    # ~220 токенов на слайд (5 тезисов × ~30 + заголовок + fact + 3 queries) + запас
-    max_tok = min(220 * slides_count + 600, 4000)
+    # ~180 токенов на слайд (5 тезисов × ~25 + заголовок + fact + 3 queries) + запас
+    max_tok = min(180 * slides_count + 500, 3500)
 
     raw = gigachat_with_fallback(
         [{"role": "system", "content": system}, {"role": "user", "content": user}],

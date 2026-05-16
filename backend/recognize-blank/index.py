@@ -40,27 +40,27 @@ def _load(image_b64: str):
 def _find_anchors(gray):
     """Якоря — полностью залитые чёрные квадраты в полях бланка."""
     h, w = gray.shape
-    min_s = int(min(h, w) * 0.010)
-    max_s = int(min(h, w) * 0.075)
+    min_s = int(min(h, w) * 0.008)   # чуть меньше — ловим маленькие якоря
+    max_s = int(min(h, w) * 0.090)   # чуть больше — ловим якоря крупных бланков
 
     seen = set()
     candidates = []
     k = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
 
-    # Пробуем несколько методов бинаризации
     thresh_list = []
     # 1. Otsu глобальный
     _, bw_otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     thresh_list.append(cv2.morphologyEx(bw_otsu, cv2.MORPH_CLOSE, k, iterations=2))
-    # 2. Фиксированный порог (для светлых фото)
-    for thr in [80, 100, 130]:
+    # 2. Фиксированный порог
+    for thr in [60, 80, 100, 130, 160]:
         _, bw_fix = cv2.threshold(gray, thr, 255, cv2.THRESH_BINARY_INV)
         thresh_list.append(cv2.morphologyEx(bw_fix, cv2.MORPH_CLOSE, k, iterations=1))
-    # 3. Адаптивный
+    # 3. Адаптивный (несколько размеров окна)
     blurred = cv2.GaussianBlur(gray, (3, 3), 0)
-    bw_adp = cv2.adaptiveThreshold(blurred, 255,
-                cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 25, 8)
-    thresh_list.append(cv2.morphologyEx(bw_adp, cv2.MORPH_CLOSE, k, iterations=2))
+    for bs, C in [(25, 8), (35, 10), (51, 12)]:
+        bw_adp = cv2.adaptiveThreshold(blurred, 255,
+                    cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, bs, C)
+        thresh_list.append(cv2.morphologyEx(bw_adp, cv2.MORPH_CLOSE, k, iterations=2))
 
     for bw in thresh_list:
         contours, _ = cv2.findContours(bw, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -70,14 +70,14 @@ def _find_anchors(gray):
             if not (min_s < side < max_s):
                 continue
             ratio = cw / ch if ch > 0 else 0
-            if not (0.45 < ratio < 2.2):
+            if not (0.40 < ratio < 2.5):
                 continue
             area = cv2.contourArea(cnt)
             fill = area / (cw * ch) if cw * ch > 0 else 0
-            if fill < 0.55:
+            if fill < 0.45:   # было 0.55 — смягчаем для сжатых фото
                 continue
             roi = gray[y:y+ch, x:x+cw]
-            if float(np.mean(roi)) > 130:
+            if float(np.mean(roi)) > 150:   # было 130 — смягчаем
                 continue
             cx = x + cw // 2
             cy = y + ch // 2
@@ -93,48 +93,81 @@ def _find_anchors(gray):
 # ── Выбираем 4 угловых якоря ──────────────────────────────────────────────────
 def _select_corner_anchors(candidates, img_w, img_h):
     """
-    Из кандидатов ищем 4 квадрата одинакового размера, образующих прямоугольник:
-    два слева (маленький X) + два справа (большой X), на одной горизонтали.
-    Якоря у нас в левом и правом полях бланка — X маленький, X большой.
+    Из кандидатов ищем 4 квадрата одинакового размера, образующих прямоугольник.
+    Если нашли 2-3 якоря — восстанавливаем недостающие геометрически.
+    Якоря у нас в левом и правом полях бланка.
     """
-    if len(candidates) < 4:
+    if len(candidates) < 2:
         return None
 
     # Медианный размер якоря
     sizes = sorted([c[4] for c in candidates])
     med_size = float(np.median(sizes))
 
-    # Оставляем только кандидатов близкого размера (±40% от медианы)
-    same_size = [c for c in candidates if abs(c[4] - med_size) / max(med_size, 1) < 0.4]
-
-    if len(same_size) < 4:
-        # Смягчаем — берём всех
+    # Оставляем только кандидатов близкого размера (±50% от медианы)
+    same_size = [c for c in candidates if abs(c[4] - med_size) / max(med_size, 1) < 0.5]
+    if len(same_size) < 2:
         same_size = candidates
 
-    # Сортируем по X: левые (малый X) и правые (большой X)
+    # Сортируем по X: левые и правые
     same_size.sort(key=lambda c: c[0])
-    n = len(same_size)
 
-    # Левые кандидаты — первая треть по X
-    left  = [c for c in same_size if c[0] < img_w * 0.35]
-    right = [c for c in same_size if c[0] > img_w * 0.65]
+    left  = [c for c in same_size if c[0] < img_w * 0.40]
+    right = [c for c in same_size if c[0] > img_w * 0.60]
 
-    if len(left) < 2 or len(right) < 2:
-        # Fallback: просто берём 2 самых левых и 2 самых правых
-        left  = same_size[:2]
-        right = same_size[-2:]
+    if len(left) < 1 or len(right) < 1:
+        left  = same_size[:max(1, len(same_size)//2)]
+        right = same_size[max(1, len(same_size)//2):]
 
-    # Из левых берём самый верхний и самый нижний
+    # Из левых берём самый верхний и нижний
     left_top = min(left, key=lambda c: c[1])
     left_bot = max(left, key=lambda c: c[1])
-    # Из правых — самый верхний и самый нижний
+    # Из правых берём самый верхний и нижний
     right_top = min(right, key=lambda c: c[1])
     right_bot = max(right, key=lambda c: c[1])
 
-    # Проверяем что образуют разумный прямоугольник
-    grid_h = left_bot[1] - left_top[1]
-    grid_w = right_top[0] - left_top[0]
-    if grid_h < img_h * 0.05 or grid_w < img_w * 0.3:
+    # Если слева только 1 — левый верх = левый низ (один якорь)
+    # Если справа только 1 — аналогично
+    # Восстанавливаем недостающие из пары противоположной стороны
+    have_left_pair  = left_top[1] != left_bot[1]
+    have_right_pair = right_top[1] != right_bot[1]
+
+    if not have_left_pair and have_right_pair:
+        # Нет левой пары — восстанавливаем из правой
+        dy_top = right_top[1] - left_top[1]
+        dy_bot = right_bot[1] - left_bot[1]
+        left_top = (left_top[0], right_top[1] - (right_top[1] - right_bot[1]) // 1,
+                    left_top[2], left_top[3], left_top[4])
+        left_bot = (left_top[0], right_bot[1],
+                    left_top[2], left_top[3], left_top[4])
+    elif not have_right_pair and have_left_pair:
+        right_top = (right_top[0], left_top[1],
+                     right_top[2], right_top[3], right_top[4])
+        right_bot = (right_top[0], left_bot[1],
+                     right_top[2], right_top[3], right_top[4])
+
+    # Проверяем разумность прямоугольника
+    grid_h = abs(left_bot[1] - left_top[1])
+    grid_w = abs(right_top[0] - left_top[0])
+
+    # Если grid_h слишком мал — один якорь сверху, один снизу не нашли
+    # Пробуем восстановить Y по соотношению бланка: сетка ≈ 50% высоты
+    if grid_h < img_h * 0.05:
+        if have_right_pair:
+            grid_h_ref = abs(right_bot[1] - right_top[1])
+            left_top = (left_top[0], right_top[1], left_top[2], left_top[3], left_top[4])
+            left_bot = (left_top[0], right_bot[1], left_top[2], left_top[3], left_top[4])
+            grid_h = grid_h_ref
+        elif have_left_pair:
+            grid_h_ref = abs(left_bot[1] - left_top[1])
+            right_top = (right_top[0], left_top[1], right_top[2], right_top[3], right_top[4])
+            right_bot = (right_top[0], left_bot[1], right_top[2], right_top[3], right_top[4])
+            grid_h = grid_h_ref
+        else:
+            # Только 2 якоря на одной стороне — не можем восстановить
+            return None
+
+    if grid_w < img_w * 0.25:
         return None
 
     return left_top, right_top, left_bot, right_bot

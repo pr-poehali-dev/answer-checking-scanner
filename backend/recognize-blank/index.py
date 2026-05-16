@@ -497,7 +497,7 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
         "code_confs":    code_confs,
         "squares_found": dbg_anchors,
         "answer_rows":   len(answer_rows),
-        "code_rows":     len(code_rows),
+        "code_rows":     len(code),
         "dbg_fills":     dbg_fills,
         "dbg_rows_dist": dbg_rows_dist,
     }

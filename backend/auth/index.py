@@ -831,7 +831,17 @@ def handler(event: dict, context) -> dict:
             if not row:
                 return _resp(404, {"error": "Пользователь не найден"})
             balance, role = row[0] or 0, row[1]
-            if role == "tester":
+            # Tester и активная подписка — токены не тратятся
+            now = datetime.utcnow()
+            if role in ("tester", "admin"):
+                return _resp(200, {"ok": True, "balance": balance})
+            cur.execute(
+                f"SELECT subscription_until FROM {SCHEMA}.users WHERE login = %s",
+                (login,)
+            )
+            sub_row = cur.fetchone()
+            sub_until = sub_row[0] if sub_row else None
+            if sub_until and isinstance(sub_until, datetime) and sub_until > now:
                 return _resp(200, {"ok": True, "balance": balance})
             if balance < amount:
                 return _resp(402, {"error": f"Недостаточно токенов. Баланс: {balance}, нужно: {amount}. Пополните баланс в личном кабинете."})

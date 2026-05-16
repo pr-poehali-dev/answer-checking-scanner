@@ -358,6 +358,9 @@ export function PresentationsSection() {
                     <div className="absolute inset-0 bg-white/20 animate-pulse" />
                   </div>
                 </div>
+                <p className="text-[10px] text-primary/50 mt-1.5">
+                  GigaChat работает над содержанием — обычно 2–5 минут. Не закрывайте страницу.
+                </p>
               </div>
               <div className="px-4 py-2 border-t border-primary/10 flex gap-4">
                 {["Структура", "Содержание", "Фото", "PPTX"].map((step, i) => {

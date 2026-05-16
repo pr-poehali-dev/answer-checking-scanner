@@ -489,8 +489,8 @@ export const presentationApi = {
     },
     onRetry?: (attempt: number) => void,
   ): Promise<PresentationResponse> => {
-    const MAX_ATTEMPTS = 3;
-    const TIMEOUT_MS = 240_000; // 4 минуты на попытку
+    const MAX_ATTEMPTS = 2;
+    const TIMEOUT_MS = 420_000; // 7 минут — GigaChat может работать долго
 
     let lastError: Error = new Error("Не удалось создать презентацию");
 
@@ -518,11 +518,11 @@ export const presentationApi = {
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
           const msg = data.error || `Ошибка генерации (${res.status})`;
-          // 429 и 504 — ретраим, остальные — сразу бросаем
+          // 429 и 5xx — ретраим один раз
           if (res.status === 429 || res.status === 504 || res.status === 502 || res.status === 503) {
             lastError = new Error(msg);
             if (attempt < MAX_ATTEMPTS) {
-              await new Promise(r => setTimeout(r, 3000));
+              await new Promise(r => setTimeout(r, 4000));
               continue;
             }
           }
@@ -531,14 +531,22 @@ export const presentationApi = {
         return data as PresentationResponse;
       } catch (e) {
         const err = e as Error;
-        // AbortError (наш таймаут 4 мин) или сетевая ошибка — ретраим
-        if (err.name === "AbortError" || err.message.includes("Failed to fetch") || err.message.includes("NetworkError")) {
-          lastError = new Error("ИИ-сервис не успел ответить — пробуем ещё раз…");
+        if (err.name === "AbortError") {
+          // Таймаут 7 минут — бэкенд не ответил, пробуем ещё раз
+          lastError = new Error("ИИ-сервис не успел ответить за 7 минут — пробуем ещё раз…");
           if (attempt < MAX_ATTEMPTS) {
             await new Promise(r => setTimeout(r, 2000));
             continue;
           }
-          throw new Error("ИИ-сервис не отвечает. Попробуйте ещё раз через несколько минут.");
+          throw new Error("ИИ-сервис GigaChat не отвечает. Попробуйте через несколько минут или уменьшите количество слайдов.");
+        }
+        if (err.message.includes("Failed to fetch") || err.message.includes("NetworkError")) {
+          lastError = new Error("Сетевая ошибка — проверьте подключение к интернету.");
+          if (attempt < MAX_ATTEMPTS) {
+            await new Promise(r => setTimeout(r, 2000));
+            continue;
+          }
+          throw lastError;
         }
         throw err;
       } finally {

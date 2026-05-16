@@ -41,7 +41,7 @@ export function PresentationsHero() {
           <span className="text-xs font-bold uppercase tracking-widest opacity-70">ИИ-генератор презентаций</span>
         </div>
         <h2 className="text-xl font-bold mb-1 max-w-md">
-          Красивые презентации за 60 секунд
+          Красивые презентации за 10 минут
         </h2>
         <p className="text-xs opacity-65 max-w-sm leading-relaxed">
           8 уникальных дизайн-тем, реальные фотографии, структура по ФГОС.

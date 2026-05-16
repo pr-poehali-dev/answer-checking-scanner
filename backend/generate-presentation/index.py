@@ -441,30 +441,38 @@ def fetch_image_bytes(query: str, timeout: int = 5) -> bytes | None:
 
 
 def fetch_images_parallel(slides: list, topic: str) -> list:
-    """Параллельно загружает изображения для всех слайдов (≤18 сек)."""
+    """Параллельно загружает до 3 изображений для каждого слайда.
+    Возвращает list[list[bytes]] — список фото для каждого слайда."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    def get_img(idx_slide):
+    def get_imgs_for_slide(idx_slide):
         idx, slide = idx_slide
-        query = slide.get("image_query") or slide.get("title", "")
-        # Строим разнообразные запросы для уменьшения дублей
-        queries_to_try = [
-            f"{query}",
-            f"{topic} {slide.get('title', '')}",
-        ]
-        for q in queries_to_try:
-            img = fetch_image_bytes(q, timeout=3)
-            if img:
-                return idx, img
-        return idx, None
+        queries = slide.get("image_queries") or []
+        if not queries:
+            old_q = slide.get("image_query") or slide.get("title", "")
+            queries = [old_q, f"{topic} {slide.get('title', '')}", slide.get("title", "")]
+        queries = [q for q in queries if q][:3]
 
-    results = [None] * len(slides)
-    with ThreadPoolExecutor(max_workers=min(len(slides), 6)) as ex:
-        futures = {ex.submit(get_img, (i, s)): i for i, s in enumerate(slides)}
-        for future in as_completed(futures, timeout=10):
+        imgs = []
+        seen_hashes = set()
+        for q in queries:
+            if len(imgs) >= 3:
+                break
+            img = fetch_image_bytes(q, timeout=4)
+            if img:
+                h = hash(img[:64])
+                if h not in seen_hashes:
+                    seen_hashes.add(h)
+                    imgs.append(img)
+        return idx, imgs
+
+    results = [[] for _ in slides]
+    with ThreadPoolExecutor(max_workers=min(len(slides) * 2, 12)) as ex:
+        futures = {ex.submit(get_imgs_for_slide, (i, s)): i for i, s in enumerate(slides)}
+        for future in as_completed(futures, timeout=20):
             try:
-                idx, img = future.result()
-                results[idx] = img
+                idx, imgs = future.result()
+                results[idx] = imgs
             except Exception:
                 pass
     return results
@@ -481,19 +489,29 @@ def generate_outline(topic: str, description: str, slides_count: int, audience: 
     """Генерирует развёрнутую структуру презентации строго по ФГОС."""
     audience_str = audience or "школьники"
 
-    system = "Методист ФГОС. Делаешь структуру презентации. Только JSON, без текста вокруг."
+    system = (
+        "Ты опытный методист и дизайнер учебных презентаций по ФГОС. "
+        "Создаёшь насыщенный, информативный контент с конкретными фактами, датами, именами. "
+        "Отвечаешь ТОЛЬКО валидным JSON без пояснений и markdown-блоков."
+    )
 
     user = (
         f"Тема: {topic}. Аудитория: {audience_str}. Слайдов: {slides_count}.\n"
-        + (f"Контекст: {description[:600]}\n" if description else "")
-        + "JSON: {\"subtitle\":\"\",\"contents\":[\"\",\"\"],"
-        '"slides":[{"title":"4-6 слов","bullets":["3 тезиса по 10-15 слов"],"fact":"","image_query":"на русском"}],'
-        '"conclusion":["",""]}'
-        f" slides={slides_count}."
+        + (f"Контекст учителя: {description[:800]}\n" if description else "")
+        + 'Верни JSON строго в формате:\n'
+        '{"subtitle":"развёрнутый подзаголовок 6-10 слов",'
+        '"contents":["название раздела 1","название раздела 2","..."],'
+        '"slides":[{'
+        '"title":"заголовок слайда 4-7 слов",'
+        '"bullets":["Развёрнутый тезис 1 — 15-25 слов с конкретным фактом","Тезис 2 — 15-25 слов","Тезис 3","Тезис 4","Тезис 5"],'
+        '"fact":"Интересный факт или цитата эксперта — 15-25 слов",'
+        '"image_queries":["конкретный запрос фото 1 на русском","конкретный запрос фото 2","конкретный запрос фото 3"]}],'
+        '"conclusion":["Вывод 1 — 10-20 слов","Вывод 2","Вывод 3"]}\n'
+        f"Ровно {slides_count} слайдов. bullets — ровно 5 штук на каждый слайд. image_queries — 3 разных запроса."
     )
 
-    # ~110 токенов на слайд (3 тезиса × ~25 + заголовок + fact + query) + запас
-    max_tok = min(110 * slides_count + 400, 2000)
+    # ~220 токенов на слайд (5 тезисов × ~30 + заголовок + fact + 3 queries) + запас
+    max_tok = min(220 * slides_count + 600, 4000)
 
     raw = gigachat_with_fallback(
         [{"role": "system", "content": system}, {"role": "user", "content": user}],
@@ -515,15 +533,22 @@ def generate_outline(topic: str, description: str, slides_count: int, audience: 
         bullets = s.get("bullets") or []
         if not isinstance(bullets, list):
             bullets = []
-        bullets = [str(b).strip() for b in bullets if str(b).strip()][:5]
+        bullets = [str(b).strip() for b in bullets if str(b).strip()][:7]
         fact = (s.get("fact") or "").strip()
-        image_query = (s.get("image_query") or title).strip()
+        # Поддерживаем оба формата: новый image_queries (список) и старый image_query (строка)
+        image_queries = s.get("image_queries") or []
+        if not isinstance(image_queries, list) or not image_queries:
+            single = (s.get("image_query") or title).strip()
+            image_queries = [single, f"{topic} {title}", title] if single else [title, title, title]
+        image_queries = [str(q).strip() for q in image_queries if str(q).strip()][:3]
+        if not image_queries:
+            image_queries = [title, topic, title]
         if title and bullets:
             norm_slides.append({
                 "title": title,
                 "bullets": bullets,
                 "fact": fact,
-                "image_query": image_query,
+                "image_queries": image_queries,
             })
 
     if not norm_slides:
@@ -882,89 +907,134 @@ def build_pptx(topic: str, subtitle: str, contents: list, slides_data: list,
                              accent2=theme["accent2"], space_after=14)
         _footer(slide, teacher_name, teacher_school, theme)
 
-    # ── 3. Содержательные слайды ─────────────────────────────────────────
+    # ── 3. Содержательные слайды (современный layout) ────────────────────
     for idx, s in enumerate(slides_data, start=1):
         slide = prs.slides.add_slide(blank)
         _add_rect(slide, 0, 0, SLIDE_W, SLIDE_H, theme["bg"])
         _slide_header(slide, s["title"], idx, total_content, teacher_name, theme)
 
-        img_bytes = images.get(idx)
+        slide_imgs = images.get(idx) or []  # list[bytes], до 3 штук
         fact = s.get("fact", "")
         bullets = s["bullets"]
-
         ct = _content_area_top(theme)
         cx = _content_area_x(theme)
-        cw = _content_area_w(theme, bool(img_bytes))
         content_h = SLIDE_H - ct - Inches(0.6)
 
-        # Чередуем стиль блока с фото: чётные слева, нечётные справа
-        photo_on_left = (idx % 2 == 0) and layout not in ("sidebar_dark",)
+        # ── Layout выбирается по количеству фото и чётности слайда ─────
+        n_imgs = len(slide_imgs)
 
-        if img_bytes:
-            photo_w = Inches(4.5)
-            photo_h = Inches(4.8)
-            photo_y = ct + Emu(30000)
-
-            if photo_on_left:
-                photo_x = cx
-                bullets_x = cx + photo_w + Inches(0.2)
-            else:
-                photo_x = SLIDE_W - photo_w - Inches(0.25)
-                bullets_x = cx
-
-            # Акцентная рамка под фото
-            _add_rect(slide, photo_x - Emu(60000), photo_y - Emu(60000),
-                      photo_w + Emu(120000), photo_h + Emu(120000), theme["accent2"])
-            _add_image_to_slide(slide, img_bytes, photo_x, photo_y, photo_w, photo_h)
-
-            bullets_w = SLIDE_W - bullets_x - Inches(0.3) if not photo_on_left else SLIDE_W - bullets_x - photo_w - Inches(0.5)
-            if layout == "sidebar_dark":
-                bullets_x = Inches(2.0)
-                bullets_w = photo_x - Inches(2.15)
-
-            _add_bullets(slide, bullets_x, ct,
-                         max(bullets_w, Inches(3.0)), Inches(4.0) if fact else content_h,
-                         bullets, size=15, color=theme["text"],
-                         accent2=theme["accent2"], space_after=8)
-
+        if n_imgs == 0:
+            # Нет фото: текст + карточка факта справа
             if fact:
-                fact_y = ct + Inches(4.1)
-                fact_h = SLIDE_H - fact_y - Inches(0.62)
-                if fact_h > Inches(0.38):
-                    _add_rect(slide, bullets_x, fact_y,
-                              max(bullets_w, Inches(3.0)), fact_h, theme["accent"])
-                    _add_text(slide, bullets_x + Inches(0.1), fact_y,
-                              Inches(1.3), fact_h,
-                              "★", size=16, bold=True,
+                fact_card_w = Inches(4.0)
+                fact_card_x = SLIDE_W - fact_card_w - Inches(0.25)
+                fact_card_y = ct + Inches(0.1)
+                fact_card_h = Inches(2.8)
+                _add_rect(slide, fact_card_x, fact_card_y, fact_card_w, fact_card_h, theme["accent"])
+                _add_rect(slide, fact_card_x, fact_card_y, fact_card_w, Emu(130000), theme["accent2"])
+                _add_text(slide, fact_card_x + Inches(0.15), fact_card_y + Emu(15000),
+                          fact_card_w - Inches(0.3), Emu(110000),
+                          "ИНТЕРЕСНЫЙ ФАКТ", size=9, bold=True, color=theme["accent2"])
+                _add_text(slide, fact_card_x + Inches(0.15), fact_card_y + Inches(0.28),
+                          fact_card_w - Inches(0.3), fact_card_h - Inches(0.35),
+                          fact, size=13, color=theme["white"], italic=True, anchor=MSO_ANCHOR.TOP)
+                text_w = fact_card_x - cx - Inches(0.3)
+            else:
+                text_w = SLIDE_W - cx - Inches(0.25)
+            _add_bullets(slide, cx, ct, text_w, content_h,
+                         bullets, size=16, color=theme["text"],
+                         accent2=theme["accent2"], space_after=10)
+
+        elif n_imgs == 1:
+            # 1 фото: крупное справа/слева, текст по другой стороне
+            photo_on_right = (idx % 2 != 0)
+            photo_w = Inches(5.2)
+            photo_h = min(content_h - Inches(0.1), Inches(5.0))
+            photo_y = ct + Emu(20000)
+
+            if photo_on_right:
+                photo_x = SLIDE_W - photo_w - Inches(0.2)
+                text_x = cx
+                text_w = photo_x - cx - Inches(0.2)
+            else:
+                photo_x = cx
+                text_x = cx + photo_w + Inches(0.25)
+                text_w = SLIDE_W - text_x - Inches(0.2)
+
+            # Рамка-акцент под фото
+            _add_rect(slide, photo_x - Emu(55000), photo_y - Emu(55000),
+                      photo_w + Emu(110000), photo_h + Emu(110000), theme["accent2"])
+            _add_image_to_slide(slide, slide_imgs[0], photo_x, photo_y, photo_w, photo_h)
+
+            # Текст-тезисы
+            bullets_h = Inches(3.8) if fact else content_h
+            _add_bullets(slide, text_x, ct, max(text_w, Inches(3.5)), bullets_h,
+                         bullets, size=15, color=theme["text"],
+                         accent2=theme["accent2"], space_after=9)
+            # Карточка факта под тезисами
+            if fact:
+                fact_y = ct + Inches(3.9)
+                fact_h = SLIDE_H - fact_y - Inches(0.55)
+                if fact_h > Inches(0.4):
+                    _add_rect(slide, text_x, fact_y, max(text_w, Inches(3.5)), fact_h, theme["accent"])
+                    _add_text(slide, text_x + Inches(0.12), fact_y + Emu(25000),
+                              Inches(1.1), fact_h, "★", size=18, bold=True,
                               color=theme["accent2"], anchor=MSO_ANCHOR.MIDDLE)
-                    _add_text(slide, bullets_x + Inches(1.4), fact_y + Emu(40000),
-                              max(bullets_w, Inches(3.0)) - Inches(1.5), fact_h - Emu(80000),
+                    _add_text(slide, text_x + Inches(1.25), fact_y + Emu(30000),
+                              max(text_w, Inches(3.5)) - Inches(1.35), fact_h - Emu(60000),
                               fact, size=12, color=theme["white"],
                               italic=True, anchor=MSO_ANCHOR.MIDDLE)
-        else:
+
+        elif n_imgs == 2:
+            # 2 фото: левая колонка текст, правая — два фото вертикально
+            text_w = Inches(6.8)
+            col2_x = cx + text_w + Inches(0.25)
+            col2_w = SLIDE_W - col2_x - Inches(0.2)
+            ph = (content_h - Inches(0.15)) / 2
+
+            _add_rect(slide, col2_x - Emu(50000), ct - Emu(30000),
+                      col2_w + Emu(100000), ph + Emu(60000), theme["accent2"])
+            _add_image_to_slide(slide, slide_imgs[0], col2_x, ct, col2_w, ph)
+
+            _add_rect(slide, col2_x - Emu(50000), ct + ph + Inches(0.15) - Emu(30000),
+                      col2_w + Emu(100000), ph + Emu(60000), theme["accent2"])
+            _add_image_to_slide(slide, slide_imgs[1], col2_x, ct + ph + Inches(0.15), col2_w, ph)
+
+            bullets_h = Inches(3.8) if fact else content_h
+            _add_bullets(slide, cx, ct, text_w, bullets_h,
+                         bullets, size=15, color=theme["text"],
+                         accent2=theme["accent2"], space_after=9)
             if fact:
-                # Карточка факта сбоку
-                fact_card_w = Inches(3.8)
-                fact_card_h = Inches(2.2)
-                fact_x = SLIDE_W - fact_card_w - Inches(0.3)
-                fact_y = ct + Inches(0.2)
-                _add_rect(slide, fact_x, fact_y, fact_card_w, fact_card_h, theme["accent"])
-                _add_rect(slide, fact_x, fact_y, fact_card_w, Emu(120000), theme["accent2"])
-                _add_text(slide, fact_x + Inches(0.15), fact_y + Emu(10000),
-                          fact_card_w - Inches(0.3), Emu(100000),
-                          "ИНТЕРЕСНЫЙ ФАКТ", size=9, bold=True, color=theme["accent"])
-                _add_text(slide, fact_x + Inches(0.15), fact_y + Inches(0.3),
-                          fact_card_w - Inches(0.3), fact_card_h - Inches(0.4),
-                          fact, size=13, color=theme["white"],
-                          italic=True, anchor=MSO_ANCHOR.TOP)
-                bullets_w = SLIDE_W - cx - fact_card_w - Inches(0.5)
-                _add_bullets(slide, cx, ct, bullets_w, content_h,
-                             bullets, size=16, color=theme["text"],
-                             accent2=theme["accent2"], space_after=9)
-            else:
-                _add_bullets(slide, cx, ct, SLIDE_W - cx - Inches(0.2), content_h,
-                             bullets, size=17, color=theme["text"],
-                             accent2=theme["accent2"], space_after=9)
+                fact_y = ct + Inches(3.9)
+                fact_h = SLIDE_H - fact_y - Inches(0.55)
+                if fact_h > Inches(0.35):
+                    _add_rect(slide, cx, fact_y, text_w, fact_h, theme["accent"])
+                    _add_text(slide, cx + Inches(0.12), fact_y + Emu(25000),
+                              Inches(0.9), fact_h, "★", size=16, bold=True,
+                              color=theme["accent2"], anchor=MSO_ANCHOR.MIDDLE)
+                    _add_text(slide, cx + Inches(1.05), fact_y + Emu(30000),
+                              text_w - Inches(1.15), fact_h - Emu(60000),
+                              fact, size=12, color=theme["white"],
+                              italic=True, anchor=MSO_ANCHOR.MIDDLE)
+
+        else:
+            # 3 фото: верхняя половина — текст, нижняя — полоса из 3 фото
+            text_area_h = content_h * 0.52
+            photo_strip_y = ct + text_area_h + Inches(0.15)
+            photo_strip_h = SLIDE_H - photo_strip_y - Inches(0.55)
+            pw = (SLIDE_W - cx - Inches(0.5)) / 3
+            gap = Inches(0.12)
+
+            for pi, img in enumerate(slide_imgs[:3]):
+                px = cx + pi * (pw + gap)
+                _add_rect(slide, px - Emu(40000), photo_strip_y - Emu(40000),
+                          pw + Emu(80000), photo_strip_h + Emu(80000), theme["accent2"])
+                _add_image_to_slide(slide, img, px, photo_strip_y, pw, photo_strip_h)
+
+            # Тезисы над полосой фото
+            _add_bullets(slide, cx, ct, SLIDE_W - cx - Inches(0.25), text_area_h,
+                         bullets, size=14, color=theme["text"],
+                         accent2=theme["accent2"], space_after=7)
 
         _footer(slide, teacher_name, teacher_school, theme)
 
@@ -1174,13 +1244,13 @@ def handler(event: dict, context) -> dict:
         # Восстанавливаем тему
         theme = next((t for t in THEMES if t["name"] == theme_name), None) or pick_theme(topic)
 
-        # Скачиваем фото параллельно
+        # Скачиваем до 3 фото на слайд параллельно
         images = {}
         try:
             img_list = fetch_images_parallel(outline.get("slides", []), topic)
-            for idx, img in enumerate(img_list, start=1):
-                if img:
-                    images[idx] = img
+            for idx, imgs in enumerate(img_list, start=1):
+                if imgs:
+                    images[idx] = imgs  # list[bytes]
         except Exception:
             pass
 
@@ -1266,9 +1336,9 @@ def handler(event: dict, context) -> dict:
     images = {}
     try:
         img_list = fetch_images_parallel(outline["slides"], topic)
-        for idx, img in enumerate(img_list, start=1):
-            if img:
-                images[idx] = img
+        for idx, imgs in enumerate(img_list, start=1):
+            if imgs:
+                images[idx] = imgs  # list[bytes]
     except Exception:
         pass
 

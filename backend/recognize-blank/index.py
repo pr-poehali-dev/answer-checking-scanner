@@ -1,11 +1,9 @@
 """
 Распознавание бланка ответов через OpenCV.
-Алгоритм: находим 4 жирных якорных квадрата → вычисляем точную сетку ответов → распознаём крестики.
-
 POST / — { image: base64, questionsCount?: 20, optionsCount?: 4, answerKey?: "АБВГ..." }
 -> { studentCode, answers[], confidence[], analysis }
 """
-# v27: geometry-based grid + code recognition
+# v31: detect answer cells directly from contours, no geometry guessing
 import json, base64, math
 import numpy as np
 import cv2
@@ -36,179 +34,18 @@ def _load(image_b64: str):
     return img, gray
 
 
-# ── Поиск якорных квадратов ───────────────────────────────────────────────────
-def _find_anchors(gray):
-    """Якоря — полностью залитые чёрные квадраты в полях бланка."""
-    h, w = gray.shape
-    min_s = int(min(h, w) * 0.008)   # чуть меньше — ловим маленькие якоря
-    max_s = int(min(h, w) * 0.090)   # чуть больше — ловим якоря крупных бланков
-
-    seen = set()
-    candidates = []
-    k = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-
-    thresh_list = []
-    # 1. Otsu глобальный
-    _, bw_otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-    thresh_list.append(cv2.morphologyEx(bw_otsu, cv2.MORPH_CLOSE, k, iterations=2))
-    # 2. Фиксированный порог
-    for thr in [60, 80, 100, 130, 160]:
-        _, bw_fix = cv2.threshold(gray, thr, 255, cv2.THRESH_BINARY_INV)
-        thresh_list.append(cv2.morphologyEx(bw_fix, cv2.MORPH_CLOSE, k, iterations=1))
-    # 3. Адаптивный (несколько размеров окна)
-    blurred = cv2.GaussianBlur(gray, (3, 3), 0)
-    for bs, C in [(25, 8), (35, 10), (51, 12)]:
-        bw_adp = cv2.adaptiveThreshold(blurred, 255,
-                    cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, bs, C)
-        thresh_list.append(cv2.morphologyEx(bw_adp, cv2.MORPH_CLOSE, k, iterations=2))
-
-    for bw in thresh_list:
-        contours, _ = cv2.findContours(bw, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        for cnt in contours:
-            x, y, cw, ch = cv2.boundingRect(cnt)
-            side = (cw + ch) / 2
-            if not (min_s < side < max_s):
-                continue
-            ratio = cw / ch if ch > 0 else 0
-            if not (0.40 < ratio < 2.5):
-                continue
-            area = cv2.contourArea(cnt)
-            fill = area / (cw * ch) if cw * ch > 0 else 0
-            if fill < 0.45:   # было 0.55 — смягчаем для сжатых фото
-                continue
-            roi = gray[y:y+ch, x:x+cw]
-            if float(np.mean(roi)) > 150:   # было 130 — смягчаем
-                continue
-            cx = x + cw // 2
-            cy = y + ch // 2
-            key = (cx // 8, cy // 8)
-            if key in seen:
-                continue
-            seen.add(key)
-            candidates.append((cx, cy, cw, ch, side))
-
-    return candidates
-
-
-# ── Выбираем 4 угловых якоря ──────────────────────────────────────────────────
-def _select_corner_anchors(candidates, img_w, img_h):
-    """
-    Из кандидатов ищем 4 квадрата одинакового размера, образующих прямоугольник.
-    Если нашли 2-3 якоря — восстанавливаем недостающие геометрически.
-    Якоря у нас в левом и правом полях бланка.
-    """
-    if len(candidates) < 2:
-        return None
-
-    # Медианный размер якоря
-    sizes = sorted([c[4] for c in candidates])
-    med_size = float(np.median(sizes))
-
-    # Оставляем только кандидатов близкого размера (±50% от медианы)
-    same_size = [c for c in candidates if abs(c[4] - med_size) / max(med_size, 1) < 0.5]
-    if len(same_size) < 2:
-        same_size = candidates
-
-    # Сортируем по X: левые и правые
-    same_size.sort(key=lambda c: c[0])
-
-    left  = [c for c in same_size if c[0] < img_w * 0.40]
-    right = [c for c in same_size if c[0] > img_w * 0.60]
-
-    if len(left) < 1 or len(right) < 1:
-        left  = same_size[:max(1, len(same_size)//2)]
-        right = same_size[max(1, len(same_size)//2):]
-
-    # Из левых берём самый верхний и нижний
-    left_top = min(left, key=lambda c: c[1])
-    left_bot = max(left, key=lambda c: c[1])
-    # Из правых берём самый верхний и нижний
-    right_top = min(right, key=lambda c: c[1])
-    right_bot = max(right, key=lambda c: c[1])
-
-    # Если слева только 1 — левый верх = левый низ (один якорь)
-    # Если справа только 1 — аналогично
-    # Восстанавливаем недостающие из пары противоположной стороны
-    have_left_pair  = left_top[1] != left_bot[1]
-    have_right_pair = right_top[1] != right_bot[1]
-
-    if not have_left_pair and have_right_pair:
-        # Нет левой пары — восстанавливаем из правой
-        dy_top = right_top[1] - left_top[1]
-        dy_bot = right_bot[1] - left_bot[1]
-        left_top = (left_top[0], right_top[1] - (right_top[1] - right_bot[1]) // 1,
-                    left_top[2], left_top[3], left_top[4])
-        left_bot = (left_top[0], right_bot[1],
-                    left_top[2], left_top[3], left_top[4])
-    elif not have_right_pair and have_left_pair:
-        right_top = (right_top[0], left_top[1],
-                     right_top[2], right_top[3], right_top[4])
-        right_bot = (right_top[0], left_bot[1],
-                     right_top[2], right_top[3], right_top[4])
-
-    # Проверяем разумность прямоугольника
-    grid_h = abs(left_bot[1] - left_top[1])
-    grid_w = abs(right_top[0] - left_top[0])
-
-    # Если grid_h слишком мал — один якорь сверху, один снизу не нашли
-    # Пробуем восстановить Y по соотношению бланка: сетка ≈ 50% высоты
-    if grid_h < img_h * 0.05:
-        if have_right_pair:
-            grid_h_ref = abs(right_bot[1] - right_top[1])
-            left_top = (left_top[0], right_top[1], left_top[2], left_top[3], left_top[4])
-            left_bot = (left_top[0], right_bot[1], left_top[2], left_top[3], left_top[4])
-            grid_h = grid_h_ref
-        elif have_left_pair:
-            grid_h_ref = abs(left_bot[1] - left_top[1])
-            right_top = (right_top[0], left_top[1], right_top[2], right_top[3], right_top[4])
-            right_bot = (right_top[0], left_bot[1], right_top[2], right_top[3], right_top[4])
-            grid_h = grid_h_ref
-        else:
-            # Только 2 якоря на одной стороне — не можем восстановить
-            return None
-
-    if grid_w < img_w * 0.25:
-        return None
-
-    return left_top, right_top, left_bot, right_bot
-
-
-# ── Оценка заполнённости ячейки (darkness score) ─────────────────────────────
-def _cross_score(gray, cx, cy, cell_w, cell_h) -> float:
-    """
-    Возвращает долю тёмных пикселей внутри ячейки.
-    Крестик/закраска = много тёмных пикселей; пустой квадрат с буквой = мало.
-    Победитель в строке определяется по rel_gap (разрыв относительно среднего остальных).
-    """
-    pad = max(2, int(min(cell_w, cell_h) * 0.12))
-    x1 = max(0, int(cx - cell_w / 2 + pad))
-    y1 = max(0, int(cy - cell_h / 2 + pad))
-    x2 = min(gray.shape[1], int(cx + cell_w / 2 - pad))
-    y2 = min(gray.shape[0], int(cy + cell_h / 2 - pad))
-    if x2 <= x1 or y2 <= y1:
-        return 0.0
-    roi = gray[y1:y2, x1:x2]
-    if roi.size == 0:
-        return 0.0
-    # Адаптивный порог: не зависит от общей яркости листа
-    _, bw = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-    return float(np.mean(bw > 0))
-
-
 # ── Кластеризация по строкам ──────────────────────────────────────────────────
-def _cluster_rows(items, tol_ratio=1.2):
+def _cluster_rows(items, tol):
+    """items: список (cx, cy, ...). tol: макс. отклонение по Y для одной строки."""
     if not items:
         return []
     sorted_i = sorted(items, key=lambda i: i[1])
-    sizes = [i[3] if len(i) > 3 else i[2] for i in items]
-    tol = float(np.median(sizes)) * tol_ratio
     rows = []
     for item in sorted_i:
-        cy = item[1]
         placed = False
         for row in rows:
             row_y = np.mean([it[1] for it in row])
-            if abs(cy - row_y) <= tol:
+            if abs(item[1] - row_y) <= tol:
                 row.append(item)
                 placed = True
                 break
@@ -219,72 +56,167 @@ def _cluster_rows(items, tol_ratio=1.2):
     return rows
 
 
-# ── Поиск кружков ─────────────────────────────────────────────────────────────
-def _find_circles_in_zone(gray, y_start, y_end):
-    zone = gray[y_start:y_end, :]
-    blurred = cv2.GaussianBlur(zone, (5, 5), 1)
-    h_z, w_z = zone.shape
-    min_r = max(5, int(min(h_z, w_z) * 0.012))
-    max_r = max(20, int(min(h_z, w_z) * 0.055))
-    circles = cv2.HoughCircles(blurred, cv2.HOUGH_GRADIENT, dp=1.2,
-                               minDist=int(min_r * 1.4), param1=55, param2=18,
-                               minRadius=min_r, maxRadius=max_r)
-    if circles is None:
-        return []
-    return [(int(x), int(y) + y_start, int(r)) for x, y, r in circles[0]]
-
-
-def _circle_brightness(gray, cx, cy, r) -> float:
+# ── Поиск якорей (залитые чёрные квадраты) ───────────────────────────────────
+def _find_anchors(gray):
     h, w = gray.shape
-    mask = np.zeros((h, w), dtype=np.uint8)
-    cv2.circle(mask, (cx, cy), max(1, int(r * 0.62)), 255, -1)
-    pixels = gray[mask == 255]
-    return float(np.mean(pixels)) if len(pixels) > 0 else 255.0
-
-
-# ── Fallback без якорей ───────────────────────────────────────────────────────
-def _fallback_detect(gray, questions_count, options_count):
-    h, w = gray.shape
-    min_s = int(min(h, w) * 0.015)
+    min_s = int(min(h, w) * 0.008)
     max_s = int(min(h, w) * 0.090)
-    blurred = cv2.GaussianBlur(gray, (3, 3), 0)
-    rects = []
     seen = set()
-    for block_size, C in [(15, 4), (21, 6)]:
-        thresh = cv2.adaptiveThreshold(blurred, 255,
-                    cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, block_size, C)
-        k = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
-        thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, k)
-        contours, _ = cv2.findContours(thresh, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-        for cnt in contours:
+    candidates = []
+    k = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+    thresh_list = []
+    _, t1 = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    thresh_list.append(cv2.morphologyEx(t1, cv2.MORPH_CLOSE, k, iterations=2))
+    for thr in [60, 80, 100, 130]:
+        _, tf = cv2.threshold(gray, thr, 255, cv2.THRESH_BINARY_INV)
+        thresh_list.append(cv2.morphologyEx(tf, cv2.MORPH_CLOSE, k, iterations=1))
+    bl = cv2.GaussianBlur(gray, (3, 3), 0)
+    for bs, C in [(25, 8), (35, 10)]:
+        ta = cv2.adaptiveThreshold(bl, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                   cv2.THRESH_BINARY_INV, bs, C)
+        thresh_list.append(cv2.morphologyEx(ta, cv2.MORPH_CLOSE, k, iterations=2))
+    for bw in thresh_list:
+        cnts, _ = cv2.findContours(bw, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for cnt in cnts:
             x, y, cw, ch = cv2.boundingRect(cnt)
             side = (cw + ch) / 2
             if not (min_s < side < max_s):
                 continue
-            ratio = cw / ch if ch > 0 else 0
-            if not (0.45 < ratio < 2.2):
+            if not (0.40 < cw / max(ch, 1) < 2.5):
                 continue
-            area = cv2.contourArea(cnt)
-            if area < min_s * min_s * 0.25:
+            fill = cv2.contourArea(cnt) / max(cw * ch, 1)
+            if fill < 0.45:
+                continue
+            if float(np.mean(gray[y:y+ch, x:x+cw])) > 150:
+                continue
+            cx, cy_ = x + cw // 2, y + ch // 2
+            key = (cx // 8, cy_ // 8)
+            if key in seen:
+                continue
+            seen.add(key)
+            candidates.append((cx, cy_, cw, ch, side))
+    return candidates
+
+
+def _select_corner_anchors(cands, img_w, img_h):
+    if len(cands) < 2:
+        return None
+    med = float(np.median([c[4] for c in cands]))
+    same = [c for c in cands if abs(c[4] - med) / max(med, 1) < 0.5] or cands
+    same.sort(key=lambda c: c[0])
+    left  = [c for c in same if c[0] < img_w * 0.40] or same[:len(same)//2]
+    right = [c for c in same if c[0] > img_w * 0.60] or same[len(same)//2:]
+    if not left or not right:
+        return None
+    lt = min(left,  key=lambda c: c[1])
+    lb = max(left,  key=lambda c: c[1])
+    rt = min(right, key=lambda c: c[1])
+    rb = max(right, key=lambda c: c[1])
+    has_l = lt[1] != lb[1]
+    has_r = rt[1] != rb[1]
+    if not has_l and has_r:
+        lb = (lt[0], rb[1], lt[2], lt[3], lt[4])
+    elif not has_r and has_l:
+        rb = (rt[0], lb[1], rt[2], rt[3], rt[4])
+    gh = abs(lb[1] - lt[1])
+    gw = abs(rt[0] - lt[0])
+    if gh < img_h * 0.05:
+        ref_h = abs(rb[1] - rt[1]) if has_r else abs(lb[1] - lt[1])
+        if ref_h > img_h * 0.05:
+            lt = (lt[0], rt[1], lt[2], lt[3], lt[4])
+            lb = (lt[0], rb[1], lt[2], lt[3], lt[4])
+            gh = ref_h
+        else:
+            return None
+    if gw < img_w * 0.25:
+        return None
+    return lt, rt, lb, rb
+
+
+# ── Детектирование квадратов ответов прямо с изображения ─────────────────────
+def _find_answer_cells(gray, zone_y0, zone_y1, options_count):
+    """
+    Ищем квадраты ответов (незалитые, с буквой внутри) в зоне zone_y0..zone_y1.
+    Возвращает список (cx, cy, side) всех найденных квадратов.
+    """
+    zone = gray[zone_y0:zone_y1, :]
+    h_z, w_z = zone.shape
+    min_s = int(min(h_z, w_z) * 0.012)
+    max_s = int(min(h_z, w_z) * 0.070)
+
+    seen = set()
+    cells = []
+    k = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+
+    bl = cv2.GaussianBlur(zone, (3, 3), 0)
+    thresh_list = []
+    for bs, C in [(15, 4), (21, 6), (31, 8)]:
+        t = cv2.adaptiveThreshold(bl, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                  cv2.THRESH_BINARY_INV, bs, C)
+        thresh_list.append(cv2.morphologyEx(t, cv2.MORPH_OPEN, k))
+    for thr in [80, 110, 140]:
+        _, tf = cv2.threshold(zone, thr, 255, cv2.THRESH_BINARY_INV)
+        thresh_list.append(tf)
+
+    for bw in thresh_list:
+        cnts, _ = cv2.findContours(bw, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+        for cnt in cnts:
+            x, y, cw, ch = cv2.boundingRect(cnt)
+            side = (cw + ch) / 2
+            if not (min_s < side < max_s):
+                continue
+            ratio = cw / max(ch, 1)
+            if not (0.55 < ratio < 1.8):
+                continue
+            # Квадрат ответа — незалитый (светлый внутри)
+            roi = zone[y:y+ch, x:x+cw]
+            mean_brightness = float(np.mean(roi))
+            if mean_brightness < 80:   # слишком тёмный — якорь или закрашенный
                 continue
             cx = x + cw // 2
-            cy = y + ch // 2
+            cy = y + zone_y0 + ch // 2
             key = (cx // 6, cy // 6)
             if key in seen:
                 continue
             seen.add(key)
-            rects.append((cx, cy, int(cw), int(ch)))
-    if not rects:
+            cells.append((cx, cy, cw, ch, side))
+
+    return cells
+
+
+# ── Тёмность ROI ──────────────────────────────────────────────────────────────
+def _darkness(gray, cx, cy, cw, ch) -> float:
+    """Доля тёмных пикселей внутри ROI ячейки."""
+    pad = max(2, int(min(cw, ch) * 0.10))
+    x1 = max(0, cx - cw // 2 + pad)
+    y1 = max(0, cy - ch // 2 + pad)
+    x2 = min(gray.shape[1], cx + cw // 2 - pad)
+    y2 = min(gray.shape[0], cy + ch // 2 - pad)
+    if x2 <= x1 or y2 <= y1:
+        return 0.0
+    roi = gray[y1:y2, x1:x2]
+    if roi.size == 0:
+        return 0.0
+    _, bw = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    return float(np.mean(bw > 0))
+
+
+# ── Распознавание кружков кода ────────────────────────────────────────────────
+def _find_circles(gray, zone_y0, zone_y1):
+    """Ищем кружки 0-9 в зоне кода ученика."""
+    zone = gray[zone_y0:zone_y1, :]
+    h_z, w_z = zone.shape
+    min_r = max(4, int(min(h_z, w_z) * 0.010))
+    max_r = max(15, int(min(h_z, w_z) * 0.045))
+    bl = cv2.GaussianBlur(zone, (5, 5), 1)
+    circles = cv2.HoughCircles(bl, cv2.HOUGH_GRADIENT, dp=1.1,
+                               minDist=int(min_r * 1.5),
+                               param1=50, param2=15,
+                               minRadius=min_r, maxRadius=max_r)
+    if circles is None:
         return []
-    rows_raw = _cluster_rows(rects, tol_ratio=0.8)
-    result = []
-    for row in rows_raw:
-        n = len(row)
-        if n == options_count:
-            result.append(row)
-        elif abs(n - options_count) == 1 and n >= 2:
-            result.append(row[:options_count])
-    return result
+    return [(int(x), int(y) + zone_y0, int(r))
+            for x, y, r in circles[0]]
 
 
 # ── Главная функция ───────────────────────────────────────────────────────────
@@ -293,214 +225,173 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
     h, w = gray.shape
     opts = RU_OPTS[:options_count]
 
-    answer_zone_h = int(h * 0.78)
-    gray_ans = gray[:answer_zone_h, :]
+    # 1. Найти якоря
+    ans_zone_h = int(h * 0.80)
+    cands = _find_anchors(gray[:ans_zone_h, :])
+    anchors = _select_corner_anchors(cands, w, ans_zone_h)
+    if not anchors:
+        cands = _find_anchors(gray)
+        anchors = _select_corner_anchors(cands, w, h)
 
-    # Ищем якоря по всей высоте зоны ответов
-    anchor_cands = _find_anchors(gray_ans)
-    anchors = _select_corner_anchors(anchor_cands, w, answer_zone_h)
-
-    # Если не нашли — пробуем по всему изображению (якоря могут быть ниже)
-    if not anchors and len(anchor_cands) < 4:
-        anchor_cands_full = _find_anchors(gray)
-        anchors = _select_corner_anchors(anchor_cands_full, w, h)
-        if anchors:
-            anchor_cands = anchor_cands_full
-
-    dbg_anchors = len(anchor_cands)
-    answer_rows = []
+    dbg_anchors = len(cands)
     dbg_rows_dist = []
 
-    if anchors:
-        tl, tr, bl, br = anchors
-        # Якоря расположены СНАРУЖИ сетки (в полях бланка).
-        # Сетка ответов находится между якорями, чуть внутрь от них.
-        anchor_half = tl[2] // 2
-        grid_x0 = tl[0] + anchor_half + 2   # правее левого якоря
-        grid_x1 = tr[0] - anchor_half - 2   # левее правого якоря
-        grid_y0 = tl[1]                     # Y верхних якорей = верх сетки
-        grid_y1 = bl[1]                     # Y нижних якорей = низ сетки
-        grid_w  = grid_x1 - grid_x0
-        grid_h  = grid_y1 - grid_y0
+    if not anchors:
+        return {
+            "answers": [""] * questions_count,
+            "confidences": [0.0] * questions_count,
+            "code": "?????",
+            "code_confs": [0.0] * 5,
+            "squares_found": dbg_anchors,
+            "answer_rows": 0,
+            "code_rows": 0,
+            "dbg_fills": [],
+            "dbg_rows_dist": ["no_anchors"],
+            "dbg_code": {},
+        }
 
+    tl, tr, bl_a, br = anchors
+    grid_x0 = tl[0] + tl[2] // 2
+    grid_x1 = tr[0] - tr[2] // 2
+    grid_y0 = tl[1]
+    grid_y1 = bl_a[1]
+    grid_w  = grid_x1 - grid_x0
+    grid_h  = grid_y1 - grid_y0
+
+    # 2. Детектировать квадраты ответов напрямую
+    raw_cells = _find_answer_cells(gray, grid_y0, grid_y1, options_count)
+
+    # Фильтруем: оставляем только квадраты внутри X-диапазона сетки
+    raw_cells = [c for c in raw_cells
+                 if grid_x0 - 20 <= c[0] <= grid_x1 + 20]
+
+    # Кластеризуем по строкам
+    if raw_cells:
+        med_side = float(np.median([c[4] for c in raw_cells]))
+        row_tol  = med_side * 0.7
+        rows_all = _cluster_rows(raw_cells, tol=row_tol)
+        # Оставляем только строки с нужным числом ячеек
+        answer_rows_cells = [r for r in rows_all if len(r) == options_count]
+
+        # Если не хватает строк — смягчаем
+        if len(answer_rows_cells) < questions_count // 2:
+            answer_rows_cells = [r for r in rows_all
+                                 if abs(len(r) - options_count) <= 1]
+            answer_rows_cells = [r[:options_count] for r in answer_rows_cells]
+
+        dbg_rows_dist = ["cells_detected", len(answer_rows_cells),
+                         f"raw={len(raw_cells)}", f"grid={int(grid_w)}x{int(grid_h)}"]
+    else:
+        answer_rows_cells = []
+        dbg_rows_dist = ["no_cells_found", f"grid={int(grid_w)}x{int(grid_h)}"]
+
+    # Если детектор не нашёл достаточно строк — строим геометрическую сетку
+    if len(answer_rows_cells) < questions_count * 0.5:
         n_blank_cols = 1 if questions_count <= 15 else (2 if questions_count <= 40 else 3)
         rows_per_col = math.ceil(questions_count / n_blank_cols)
-
-        section_w = grid_w / n_blank_cols
-
-        # Точные пропорции из generate-blank:
-        # col_w = (bw-2P)/n_cols, num_w=7.5mm
-        # При bw=180mm, P=4mm: col_w=(180-8)/2=86mm → num_frac=7.5/86≈0.087
-        # cell_w=(col_w-num_w)/n_opts → шаг = cell_w
-        num_frac = 7.5 / 86.0   # ≈ 0.087
-
+        section_w    = grid_w / n_blank_cols
+        # num_w/col_w из generate-blank: 7.5mm / ((bw-2*4mm)/n_cols)
+        # bw_inner≈grid_w, col_w=grid_w/n_cols → num_frac≈7.5/(bw_mm/n_cols)
+        # Используем фиксированное: квадраты занимают правые 85% колонки
+        num_frac  = 0.15
+        sq_area_w = section_w * (1 - num_frac)
+        sq_step   = sq_area_w / options_count
+        row_step  = grid_h / rows_per_col
+        cell_w    = int(sq_step * 0.80)
+        cell_h    = int(row_step * 0.70)
+        answer_rows_cells = []
         for sec in range(n_blank_cols):
-            sec_x0 = grid_x0 + sec * section_w
-            num_px  = section_w * num_frac
-            sq_area_w = section_w - num_px
-            sq_step = sq_area_w / options_count
-            # Центр первого квадрата: после num_w + полшага
-            sq_x_start = sec_x0 + num_px + sq_step / 2
-
-            row_step = grid_h / rows_per_col
-            sq_y_start = grid_y0 + row_step / 2
-
+            sec_x0     = grid_x0 + sec * section_w
+            sq_x_start = sec_x0 + section_w * num_frac + sq_step / 2
             for ri in range(rows_per_col):
                 q_idx = sec * rows_per_col + ri
                 if q_idx >= questions_count:
                     break
-                row = []
-                cy_cell = sq_y_start + ri * row_step
-                for oi in range(options_count):
-                    cx_cell = sq_x_start + oi * sq_step
-                    row.append((int(cx_cell), int(cy_cell),
-                                int(sq_step * 0.75), int(row_step * 0.70)))
-                answer_rows.append(row)
+                cy_cell = grid_y0 + ri * row_step + row_step / 2
+                row = [(int(sq_x_start + oi * sq_step), int(cy_cell),
+                        cell_w, cell_h, sq_step)
+                       for oi in range(options_count)]
+                answer_rows_cells.append(row)
+        dbg_rows_dist.append("fallback_geometry")
 
-        dbg_rows_dist = [f"anchors_ok", len(answer_rows),
-                         f"grid={int(grid_w)}x{int(grid_h)}",
-                         f"tl=({tl[0]},{tl[1]})", f"br=({br[0]},{br[1]})"]
-    else:
-        answer_rows = _fallback_detect(gray_ans, questions_count, options_count)
-        dbg_rows_dist = [f"fallback", f"cands={dbg_anchors}_need4", len(answer_rows)]
+    answer_rows_cells = answer_rows_cells[:questions_count]
 
-    answer_rows = answer_rows[:questions_count]
-
-    answers     = []
-    confidences = []
-    dbg_fills   = []
-
-    for row_i, row in enumerate(answer_rows):
-        fills = [_cross_score(gray, cx, cy, cw, ch) for cx, cy, cw, ch in row]
+    # 3. Читаем ответы
+    answers, confidences, dbg_fills = [], [], []
+    for row_i, row in enumerate(answer_rows_cells):
+        fills = [_darkness(gray, c[0], c[1], c[2], c[3]) for c in row]
         if not fills:
-            answers.append("")
-            confidences.append(0.0)
-            continue
+            answers.append(""); confidences.append(0.0); continue
         idx      = int(np.argmax(fills))
         max_f    = fills[idx]
         sorted_f = sorted(fills, reverse=True)
-        gap      = sorted_f[0] - (sorted_f[1] if len(sorted_f) > 1 else 0)
-        mean_oth = (sum(fills) - max_f) / (len(fills) - 1) if len(fills) > 1 else 0
-        rel_gap  = max_f - mean_oth
+        second_f = sorted_f[1] if len(sorted_f) > 1 else 0.0
+        gap      = max_f - second_f
+        norm_gap = gap / max(max_f, 0.01)
         chosen   = opts[idx] if idx < len(opts) else "?"
         if row_i < 5:
-            dbg_fills.append({"row": row_i, "fills": [round(f, 4) for f in fills],
-                               "max": round(max_f, 4), "gap": round(gap, 4),
-                               "rel_gap": round(rel_gap, 4), "chosen": chosen})
-        # Победитель: тёмных пикселей заметно больше чем у второго
-        second_f = sorted_f[1] if len(sorted_f) > 1 else 0.0
-        norm_gap = (max_f - second_f) / max(max_f, 0.01)
-        # Принимаем ответ если победитель на ≥12% выше второго
-        if max_f > 0.06 and norm_gap > 0.12:
+            dbg_fills.append({"row": row_i,
+                               "fills": [round(f, 4) for f in fills],
+                               "max": round(max_f, 4),
+                               "gap": round(gap, 4),
+                               "norm_gap": round(norm_gap, 4),
+                               "chosen": chosen})
+        if max_f > 0.07 and norm_gap > 0.12:
             answers.append(opts[idx] if idx < len(opts) else "")
             confidences.append(round(min(0.99, norm_gap * 0.8 + 0.3), 2))
         else:
-            answers.append("")
-            confidences.append(0.0)
+            answers.append(""); confidences.append(0.0)
 
     while len(answers) < questions_count:
-        answers.append("")
-        confidences.append(0.0)
+        answers.append(""); confidences.append(0.0)
 
-    # ── Код ученика: геометрическая сетка 5×10 ────────────────────────────────
-    # В бланке сетка кода начинается сразу под сеткой ответов.
-    # Используем якоря для вычисления координат зоны кода.
-    # Структура: 5 строк (цифры 1-5), 10 столбцов (0-9).
-    # Зона кода занимает нижнюю ~30% высоты бланка от нижнего якоря.
+    # 4. Код ученика: кружки под сеткой ответов
+    # Зона кода: от нижнего якоря до конца изображения (но не более 40% высоты)
+    code_y0 = grid_y1
+    code_y1 = min(h - 5, code_y0 + int(grid_h * 0.55))
+
+    circles = _find_circles(gray, code_y0, code_y1)
     code = ""
     code_confs = []
+    dbg_code: dict = {"circles_found": len(circles), "zone": [code_y0, code_y1]}
 
-    dbg_code = {}
-    if anchors:
-        tl, tr, bl, br = anchors
-        # Точные пропорции из generate-blank (в мм):
-        # P=4, nw2=5, cr2=1.5, gap_x=cr2*2+0.5=3.5, gap_y=cr2*2+0.8=3.8
-        # Заголовок "0-9": высота 2.8mm над кружками
-        # Зона кода: от bl[1] вниз
-        # X первого кружка от левого края бланка: P + nw2 + cr2 = 10.5mm
-        # Ширина бланка ≈ grid_w + 2*(P/2) ≈ grid_w + P
-        # Пересчитываем мм → пиксели через grid_w:
-        # bw_mm ≈ 172mm (A4 с полями), grid_w_px = 659 → px_per_mm = 659/164 ≈ 4.02
-        bw_est_mm = 172.0
-        px_per_mm = grid_w / (bw_est_mm - 8.0)   # grid_w / (bw-2P) в мм
+    if circles:
+        cr_items = [(cx, cy, r, r * 2) for cx, cy, r in circles]
+        med_r    = float(np.median([c[2] for c in circles]))
+        row_tol  = med_r * 2.5
+        cr_rows  = _cluster_rows(cr_items, tol=row_tol)
+        # Берём строки с 8-12 кружками (0-9)
+        code_rows = [r for r in cr_rows if 7 <= len(r) <= 13][:5]
+        dbg_code["code_rows_found"] = len(code_rows)
 
-        # Левый край бланка в пикселях
-        blank_x0 = grid_x0 - int(8.0 / 2 * px_per_mm)   # grid_x0 минус P пикселей
-
-        P_px   = 4.0  * px_per_mm
-        nw2_px = 5.0  * px_per_mm
-        cr2_px = 1.5  * px_per_mm
-        gap_x  = (1.5*2 + 0.5) * px_per_mm   # 3.5mm
-        gap_y  = (1.5*2 + 0.8) * px_per_mm   # 3.8mm
-        hdr_h  = 2.8  * px_per_mm             # заголовок "0-9"
-
-        # Y начала кружков: нижний якорь + отступы (линия ~2mm + заголовок)
-        code_y_line = bl[1]
-        circ_y0 = code_y_line + int((2.0 + 2.8) * px_per_mm) + int(cr2_px)
-
-        # X первого кружка
-        circ_x0 = blank_x0 + int(P_px + nw2_px + cr2_px)
-
-        r_est = max(3, int(cr2_px * 0.85))
-
-        dbg_code = {
-            "px_per_mm": round(px_per_mm, 2),
-            "circ_x0": circ_x0, "circ_y0": circ_y0,
-            "gap_x": round(gap_x, 1), "gap_y": round(gap_y, 1),
-            "r_est": r_est, "blank_x0": blank_x0,
-        }
-
-        for row_i in range(5):
-            cy_c = int(circ_y0 + row_i * gap_y)
-            fills_c = []
-            for col_i in range(10):
-                cx_c = int(circ_x0 + col_i * gap_x)
-                pad = max(1, int(r_est * 0.1))
-                x1 = max(0, cx_c - r_est + pad)
-                y1 = max(0, cy_c - r_est + pad)
-                x2 = min(w, cx_c + r_est - pad)
-                y2 = min(h, cy_c + r_est - pad)
+        for row in code_rows:
+            row10 = sorted(row, key=lambda i: i[0])[:10]
+            # Для каждого кружка меряем тёмность (закрашенный = много тёмных пикселей)
+            d_vals = []
+            for cx, cy, r, _ in row10:
+                r2 = max(2, int(r * 0.70))
+                x1 = max(0, cx - r2); y1 = max(0, cy - r2)
+                x2 = min(w, cx + r2); y2 = min(h, cy + r2)
                 if x2 > x1 and y2 > y1:
-                    roi_c = gray[y1:y2, x1:x2]
-                    _, bw_r = cv2.threshold(roi_c, 0, 255,
+                    roi = gray[y1:y2, x1:x2]
+                    _, bw_r = cv2.threshold(roi, 0, 255,
                                             cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-                    fills_c.append(float(np.mean(bw_r > 0)))
+                    d_vals.append(float(np.mean(bw_r > 0)))
                 else:
-                    fills_c.append(0.0)
-
-            if not fills_c:
+                    d_vals.append(0.0)
+            if not d_vals:
                 code += "?"; code_confs.append(0.0); continue
-
-            best_idx = int(np.argmax(fills_c))
-            best_f   = fills_c[best_idx]
-            sorted_c = sorted(fills_c, reverse=True)
-            second_c = sorted_c[1] if len(sorted_c) > 1 else 0.0
-            ng = (best_f - second_c) / max(best_f, 0.01)
-
+            best_i  = int(np.argmax(d_vals))
+            best_f  = d_vals[best_i]
+            second  = sorted(d_vals, reverse=True)[1] if len(d_vals) > 1 else 0.0
+            ng      = (best_f - second) / max(best_f, 0.01)
             if best_f > 0.08 and ng > 0.12:
-                code += str(best_idx)
+                code += str(best_i)
                 code_confs.append(round(min(0.99, ng * 0.8 + 0.3), 2))
             else:
                 code += "?"; code_confs.append(0.0)
     else:
-        # Fallback: Hough + яркость
-        code_zone_start = int(h * 0.65)
-        circles = _find_circles_in_zone(gray, code_zone_start, h)
-        cr_rows_all = _cluster_rows([(cx, cy, r, r * 2) for cx, cy, r in circles], tol_ratio=1.2)
-        cr_rows_all.sort(key=lambda row: np.mean([it[1] for it in row]))
-        hough_rows = [row for row in cr_rows_all if 7 <= len(row) <= 13][:5]
-        for row in hough_rows:
-            row10 = sorted(row, key=lambda i: i[0])[:10]
-            bright = [_circle_brightness(gray, cx, cy, r) for cx, cy, r, _ in row10]
-            if not bright:
-                code += "?"; code_confs.append(0.0); continue
-            idx = int(np.argmin(bright))
-            spread = max(bright) - bright[idx]
-            if spread > 18:
-                code += str(idx)
-                code_confs.append(round(min(0.99, spread / 80), 2))
-            else:
-                code += "?"; code_confs.append(0.0)
+        dbg_code["code_rows_found"] = 0
 
     code = (code + "?????")[:5]
     code_confs = (code_confs + [0.0] * 5)[:5]
@@ -511,7 +402,7 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
         "code":          code,
         "code_confs":    code_confs,
         "squares_found": dbg_anchors,
-        "answer_rows":   len(answer_rows),
+        "answer_rows":   len(answer_rows_cells),
         "code_rows":     len(code),
         "dbg_fills":     dbg_fills,
         "dbg_rows_dist": dbg_rows_dist,
@@ -528,117 +419,113 @@ def _normalize_key(answer_key: str) -> list:
 
 
 def _analyze(answers: list, answer_key: str) -> dict:
-    dbg_answers = [{"i": i, "val": repr(a), "hex": a.encode("utf-8").hex()} for i, a in enumerate(answers[:5])]
+    dbg_answers = [{"i": i, "val": repr(a), "hex": a.encode("utf-8").hex(),
+                    "a_up": repr(a.upper()), "a_up_hex": a.upper().encode("utf-8").hex()}
+                   for i, a in enumerate(answers[:5])]
     if not answer_key:
-        return {"total": len(answers), "correct": 0, "wrong": 0, "percent": 0, "details": [],
-                "_dbg": {"reason": "no_key", "answers": dbg_answers}}
+        return {"total": len(answers), "correct": 0, "wrong": 0, "percent": 0,
+                "details": [], "_dbg": {"reason": "no_key", "answers": dbg_answers}}
     key = _normalize_key(answer_key)
+    dbg_key_raw = repr("".join(key[:20]))
+    dbg_key_hex = "".join(key[:5]).encode("utf-8").hex()
     details, correct = [], 0
-    dbg = []
+    dbg_cmp = []
     for i, a in enumerate(answers):
         ka = key[i] if i < len(key) else ""
         ok = a.upper() == ka and ka != ""
         if ok:
             correct += 1
-        details.append({"q": i + 1, "student": a, "key": ka, "correct": ok})
+        details.append({"q": i + 1, "answer": a, "correct": ka, "ok": ok})
         if i < 3:
-            dbg.append({"q": i + 1, "a_repr": repr(a), "a_hex": a.encode("utf-8").hex(),
-                        "a_up": repr(a.upper()), "a_up_hex": a.upper().encode("utf-8").hex(),
-                        "ka_repr": repr(ka), "ka_hex": ka.encode("utf-8").hex(),
-                        "eq": a.upper() == ka})
-    total = len(answers)
+            dbg_cmp.append({
+                "q": i + 1,
+                "a_repr": repr(a), "a_hex": a.encode("utf-8").hex(),
+                "a_up": repr(a.upper()), "a_up_hex": a.upper().encode("utf-8").hex(),
+                "ka_repr": repr(ka), "ka_hex": ka.encode("utf-8").hex(),
+                "eq": ok,
+            })
+    total   = len(answers)
+    wrong   = total - correct
+    percent = round(correct / total * 100) if total > 0 else 0
     return {
-        "total": total, "correct": correct, "wrong": total - correct,
-        "percent": round(correct / total * 100, 1) if total else 0,
+        "total": total, "correct": correct, "wrong": wrong, "percent": percent,
         "details": details,
-        "_dbg": {"cmp": dbg, "key_raw": repr(answer_key),
-                 "key_hex": answer_key.encode("utf-8").hex()[:20],
-                 "answers_raw": dbg_answers},
+        "_dbg": {
+            "key_raw": dbg_key_raw, "key_hex": dbg_key_hex,
+            "answers_raw": dbg_answers, "cmp": dbg_cmp,
+        },
     }
 
 
-def _resp(status, body):
-    return {"statusCode": status, "headers": {**CORS, "Content-Type": "application/json"},
-            "body": json.dumps(body, ensure_ascii=False)}
-
-
+# ── Handler ───────────────────────────────────────────────────────────────────
 def handler(event: dict, context) -> dict:
-    """
-    Распознавание бланка: якоря → сетка → крестики + кружки кода.
-    POST { image: base64, questionsCount?: 20, optionsCount?: 4, answerKey?: "..." }
-    """
+    """Распознавание бланка ответов: находит якоря, детектирует квадраты, читает ответы и код ученика."""
     if event.get("httpMethod") == "OPTIONS":
         return {"statusCode": 200, "headers": CORS, "body": ""}
     if event.get("httpMethod") != "POST":
-        return _resp(405, {"error": "Method not allowed"})
+        return {"statusCode": 405, "headers": CORS,
+                "body": json.dumps({"error": "Метод не поддерживается"})}
 
-    try:
-        body = json.loads(event.get("body") or "{}")
-        if isinstance(body, str):
-            body = json.loads(body)
-    except Exception:
-        return _resp(400, {"error": "Некорректный JSON"})
+    body = {}
+    if event.get("body"):
+        try:
+            body = json.loads(event["body"])
+            if isinstance(body, str):
+                body = json.loads(body)
+        except Exception:
+            return {"statusCode": 400, "headers": CORS,
+                    "body": json.dumps({"error": "Некорректный JSON"})}
 
-    if body.get("answers") and not body.get("image"):
-        raw_answers = body["answers"]
-        answer_key  = str(body.get("answerKey", ""))
-        if not isinstance(raw_answers, list):
-            return _resp(400, {"error": "answers должен быть массивом"})
-        analysis = _analyze(raw_answers, answer_key)
-        return _resp(200, {
-            "studentCode": "", "codeConfidence": [],
-            "answers": raw_answers, "answersConfidence": [],
-            "averageConfidence": 0, "questionsCount": len(raw_answers),
-            "analysis": analysis,
-        })
-
-    image_b64 = body.get("image", "")
+    image_b64 = body.get("image") or body.get("image_b64") or ""
     if not image_b64:
-        return _resp(400, {"error": "Поле image обязательно"})
+        return {"statusCode": 400, "headers": CORS,
+                "body": json.dumps({"error": "Поле image обязательно"})}
 
     try:
-        raw = base64.b64decode(image_b64)
-    except Exception:
-        return _resp(400, {"error": "Некорректный base64"})
+        questions_count = int(body.get("questionsCount") or body.get("questions_count") or 20)
+        options_count   = int(body.get("optionsCount")   or body.get("options_count")   or 4)
+        options_count   = max(2, min(options_count, 6))
+        questions_count = max(1, min(questions_count, 60))
+    except (TypeError, ValueError):
+        questions_count, options_count = 20, 4
 
-    arr   = np.frombuffer(raw, dtype=np.uint8)
-    check = cv2.imdecode(arr, cv2.IMREAD_GRAYSCALE)
-    if check is None:
-        return _resp(400, {"error": "Не удалось прочитать изображение"})
-    if check.shape[0] < 100 or check.shape[1] < 100:
-        return _resp(422, {"error": "Изображение слишком маленькое.", "hint": "image_too_small"})
-
-    questions  = max(1, min(int(body.get("questionsCount", 20)), 80))
-    options    = max(2, min(int(body.get("optionsCount",   4)),  6))
-    answer_key = str(body.get("answerKey", ""))
+    answer_key = str(body.get("answerKey") or body.get("answer_key") or "").strip()
 
     try:
-        result = _recognize(image_b64, questions, options)
-    except ValueError as e:
-        return _resp(422, {"error": str(e)})
-    except Exception as e:
-        return _resp(422, {"error": f"Ошибка распознавания: {e}"})
+        result = _recognize(image_b64, questions_count, options_count)
+    except (ValueError, base64.binascii.Error, Exception) as e:
+        err_str = str(e)
+        code = 400 if "padding" in err_str.lower() or "decode" in err_str.lower() else 422
+        return {"statusCode": code, "headers": CORS,
+                "body": json.dumps({"error": f"Ошибка распознавания: {e}"},
+                                   ensure_ascii=False)}
 
-    answers     = result["answers"]
-    confidences = result["confidences"]
-    code        = result["code"]
-    code_confs  = result["code_confs"]
-    analysis    = _analyze(answers, answer_key)
-    avg_conf    = round(float(np.mean([c for c in confidences if c > 0] or [0])), 2)
+    analysis = _analyze(result["answers"], answer_key)
 
-    return _resp(200, {
-        "studentCode":       code,
-        "codeConfidence":    code_confs,
-        "answers":           answers,
-        "answersConfidence": confidences,
-        "averageConfidence": avg_conf,
-        "questionsCount":    questions,
-        "analysis":          analysis,
-        "debug": {
-            "anchorsFound": result["squares_found"],
-            "answerRows":   result["answer_rows"],
-            "answers5":     answers[:5],
-            "fills3":       result.get("dbg_fills", []),
-            "rowsDist":     result.get("dbg_rows_dist", []),
-        }
-    })
+    resp = {
+        "studentCode":   result["code"],
+        "codeConfs":     result["code_confs"],
+        "answers":       result["answers"],
+        "confidences":   result["confidences"],
+        "squaresFound":  result["squares_found"],
+        "answerRows":    result["answer_rows"],
+        "_debug": {
+            "ocr": {
+                "anchorsFound": result["squares_found"],
+                "answerRows":   result["answer_rows"],
+                "answers5":     result["answers"][:5],
+                "fills3":       result["dbg_fills"],
+                "rowsDist":     result["dbg_rows_dist"],
+                "code":         result["dbg_code"],
+            },
+            "analyze": analysis.get("_dbg", {}),
+        },
+    }
+    if analysis:
+        resp["analysis"] = {k: v for k, v in analysis.items() if k != "_dbg"}
+
+    return {
+        "statusCode": 200,
+        "headers": {**CORS, "Content-Type": "application/json"},
+        "body": json.dumps(resp, ensure_ascii=False),
+    }

@@ -12,6 +12,7 @@ import { ExamsSection } from "@/components/scanner/ExamsSection";
 import { FipiExamsSection } from "@/components/scanner/FipiExamsSection";
 import { ChatSection } from "@/components/scanner/ChatSection";
 import CollectiveSection from "@/components/scanner/CollectiveSection";
+import { SupportSection } from "@/components/scanner/SupportSection";
 import TokensModal from "@/components/TokensModal";
 import { authApi } from "@/lib/api";
 import LoginPage from "@/pages/LoginPage";
@@ -68,6 +69,7 @@ const SECTION_COMPONENTS: Record<Section, React.FC> = {
   exams: ExamsSection,
   fipiExams: FipiExamsSection,
   chat: ChatSection,
+  support: SupportSection,
   settings: SettingsSection,
   collective: CollectiveSection,
 };
@@ -88,6 +90,9 @@ export default function Index() {
   const [ouUser, setOuUser]         = useState<OUUser | null>(() => loadOUSession());
   const [hasInstitution, setHasInstitution] = useState(false);
   const [showTokensModal, setShowTokensModal] = useState(false);
+  const [showPanel, setShowPanel]   = useState(false);
+  const [hasPanelRole, setHasPanelRole] = useState(false);
+  const [panelAutoShown, setPanelAutoShown] = useState(false); // чтобы не сбрасывать при ре-рендере
   const { teacher, yadiskConnected, maintenanceSections } = useAppStore();
   const ActiveSection = SECTION_COMPONENTS[active];
 
@@ -113,11 +118,36 @@ export default function Index() {
   useEffect(() => {
     const handler = (e: Event) => {
       const section = (e as CustomEvent).detail as Section;
-      if (section) { setActive(section); setSidebar(false); }
+      if (section) { setActive(section); setSidebar(false); setShowPanel(false); }
     };
     window.addEventListener("navigate-to-section", handler);
     return () => window.removeEventListener("navigate-to-section", handler);
   }, []);
+
+  // Открытие ЛК из ПУ
+  useEffect(() => {
+    const handler = () => setShowPanel(false);
+    window.addEventListener("open-lk-from-panel", handler);
+    return () => window.removeEventListener("open-lk-from-panel", handler);
+  }, []);
+
+  // Проверяем панельную роль для не-admin пользователей
+  useEffect(() => {
+    if (!teacher || teacher.role === "admin") return;
+    import("@/lib/api").then(({ supportApi }) => {
+      supportApi.operators(teacher.login, teacher.authToken).then(res => {
+        const me = res.operators.find((o: { login: string; panel_role: string }) => o.login === teacher.login);
+        if (me && me.panel_role && me.panel_role !== "removed") {
+          setHasPanelRole(true);
+          // Автоматически показываем ПУ при первом входе
+          if (!panelAutoShown) {
+            setShowPanel(true);
+            setPanelAutoShown(true);
+          }
+        }
+      }).catch(() => {});
+    });
+  }, [teacher?.login]);
 
   // Закрываем сайдбар при смене раздела
   const navigate = (s: Section) => { setActive(s); setSidebar(false); };
@@ -172,7 +202,9 @@ export default function Index() {
     );
   }
 
-  if (teacher.role === "admin") return <AdminPanel />;
+  if (teacher.role === "admin" || showPanel) {
+    return <AdminPanel onOpenLK={teacher.role !== "admin" ? () => setShowPanel(false) : undefined} />;
+  }
 
   const isTester = teacher.role === "tester";
 
@@ -282,6 +314,19 @@ export default function Index() {
             </span>
           </div>
         </div>
+
+        {/* Кнопка Панели Управления для операторов */}
+        {hasPanelRole && (
+          <div className="px-3 mb-2">
+            <button onClick={() => setShowPanel(true)}
+              className="w-full px-3 py-2 rounded-sm border flex items-center gap-2 hover:border-blue-400/40 transition-colors"
+              style={{ borderColor: "hsl(215 60% 40% / 0.3)", background: "hsl(215 60% 40% / 0.06)" }}>
+              <Icon name="Shield" size={13} style={{ color: "hsl(215 60% 40%)" }} />
+              <span className="text-xs flex-1 text-left" style={{ color: "hsl(215 60% 40%)" }}>Панель управления</span>
+              <Icon name="ChevronRight" size={11} style={{ color: "hsl(215 60% 40%)", opacity: 0.6 }} />
+            </button>
+          </div>
+        )}
 
         {/* User */}
         <div className="px-3 py-4 border-t" style={{ borderColor: "hsl(var(--sidebar-border))" }}>

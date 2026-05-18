@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import Icon from "@/components/ui/icon";
 import { appStore, useAppStore } from "@/store/appStore";
-import { authApi, UserRow } from "@/lib/api";
+import { authApi, supportApi, UserRow, PanelOperator } from "@/lib/api";
 import CompanyFooter from "@/components/CompanyFooter";
 import AdminCreateForm from "@/pages/admin/AdminCreateForm";
 import AdminUsersTable from "@/pages/admin/AdminUsersTable";
@@ -9,13 +9,45 @@ import AdminSubscriptionModal from "@/pages/admin/AdminSubscriptionModal";
 import AdminResetPasswordModal from "@/pages/admin/AdminResetPasswordModal";
 import AdminMaintenancePanel from "@/pages/admin/AdminMaintenancePanel";
 import AdminTokensModal from "@/pages/admin/AdminTokensModal";
+import AdminSupportPanel from "@/pages/admin/AdminSupportPanel";
 
-type Tab = "users" | "maintenance";
+type Tab = "users" | "maintenance" | "support";
 
-export default function AdminPanel() {
+const PANEL_ROLE_LABELS: Record<string, string> = {
+  head:        "Глава Правления",
+  deputy:      "Зам. Главы Правления",
+  developer:   "Разработчик",
+  tester_role: "Тестер",
+  advisor:     "Советник",
+  operator:    "Оператор ТП",
+};
+
+interface AdminPanelProps {
+  onOpenLK?: () => void;
+}
+
+export default function AdminPanel({ onOpenLK }: AdminPanelProps = {}) {
   const { teacher } = useAppStore();
   const token = teacher?.authToken || "";
-  const [tab, setTab]         = useState<Tab>("users");
+  const login = teacher?.login || "";
+  const isAdmin = teacher?.role === "admin";
+
+  // Данные оператора ПУ (панельная роль)
+  const [panelOperator, setPanelOperator] = useState<PanelOperator | null>(null);
+
+  useEffect(() => {
+    if (!login || !token) return;
+    supportApi.operators(login, token).then(res => {
+      const me = res.operators.find(o => o.login === login);
+      if (me) setPanelOperator(me);
+    }).catch(() => {});
+  }, [login, token]);
+
+  const panelRole = panelOperator?.panel_role ?? (isAdmin ? "head" : "operator");
+  const panelRoleLabel = PANEL_ROLE_LABELS[panelRole] ?? panelRole;
+  const operatorNumber = panelOperator?.operator_number;
+
+  const [tab, setTab]         = useState<Tab>("support");
   const [users, setUsers]     = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState("");
@@ -51,8 +83,8 @@ export default function AdminPanel() {
   };
 
   useEffect(() => {
-    if (token) loadUsers();
-  }, [token]);
+    if (token && isAdmin) loadUsers();
+  }, [token, isAdmin]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -152,31 +184,51 @@ export default function AdminPanel() {
     return pwd;
   };
 
-  const TABS: { id: Tab; label: string; icon: string }[] = [
-    { id: "users",       label: "Учителя",         icon: "Users" },
-    { id: "maintenance", label: "Тех. работы",      icon: "Construction" },
-  ];
+  const TABS: { id: Tab; label: string; icon: string; adminOnly?: boolean }[] = [
+    { id: "support",     label: "Тех. поддержка",  icon: "Headphones" },
+    { id: "users",       label: "Учителя",         icon: "Users",         adminOnly: true },
+    { id: "maintenance", label: "Тех. работы",      icon: "Construction",  adminOnly: true },
+  ].filter(t => !t.adminOnly || isAdmin || ["head","deputy","developer"].includes(panelRole));
 
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
-      <header className="bg-white border-b border-border px-4 md:px-6 py-4 flex items-center justify-between">
+      <header className="bg-white border-b border-border px-4 md:px-6 py-3 flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-sm flex items-center justify-center" style={{ background: "hsl(var(--sidebar-primary))" }}>
             <Icon name="Shield" size={18} className="text-white" />
           </div>
           <div>
-            <h1 className="text-base font-bold leading-none">Панель администратора</h1>
-            <p className="text-xs text-muted-foreground mt-0.5">САОУ · управление системой</p>
+            <h1 className="text-base font-bold leading-none">Панель управления</h1>
+            <div className="flex items-center gap-2 mt-0.5">
+              <span className="text-xs text-muted-foreground">{login}</span>
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 border border-blue-100">
+                {panelRoleLabel}
+              </span>
+              {operatorNumber && (
+                <span className="text-[10px] text-muted-foreground font-mono">№{operatorNumber}</span>
+              )}
+            </div>
           </div>
         </div>
-        <button
-          onClick={() => appStore.logout()}
-          className="inline-flex items-center gap-2 px-3 py-2 border border-border text-xs rounded-sm hover:bg-muted transition-colors"
-        >
-          <Icon name="LogOut" size={13} />
-          Выйти
-        </button>
+        <div className="flex items-center gap-2">
+          {onOpenLK && (
+            <button
+              onClick={onOpenLK}
+              className="inline-flex items-center gap-2 px-3 py-2 border border-border text-xs rounded-sm hover:bg-muted transition-colors"
+            >
+              <Icon name="LayoutDashboard" size={13} />
+              Открыть ЛК
+            </button>
+          )}
+          <button
+            onClick={() => appStore.logout()}
+            className="inline-flex items-center gap-2 px-3 py-2 border border-border text-xs rounded-sm hover:bg-muted transition-colors"
+          >
+            <Icon name="LogOut" size={13} />
+            Выйти
+          </button>
+        </div>
       </header>
 
       {/* Вкладки */}
@@ -280,6 +332,11 @@ export default function AdminPanel() {
               onTokens={u => setTokensFor(u)}
             />
           </>
+        )}
+
+        {/* ── Вкладка: Тех. поддержка ── */}
+        {tab === "support" && (
+          <AdminSupportPanel login={login} token={token} panelRole={panelRole} />
         )}
 
         {/* ── Вкладка: Тех. работы ── */}

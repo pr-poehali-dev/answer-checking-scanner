@@ -941,3 +941,111 @@ export const subscriptionApi = {
       }
     ),
 };
+
+// ── Тех.поддержка ────────────────────────────────────────────────────────────
+
+const SUPPORT_URL = "https://functions.poehali.dev/dba2d455-f3eb-4ea1-8f0f-3e3404670875";
+
+export interface SupportTicket {
+  id: number;
+  login: string;
+  section: string;
+  subject: string;
+  status: "open" | "taken" | "closed";
+  operator_login: string | null;
+  operator_number: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SupportMessage {
+  id: number;
+  ticket_id: number;
+  sender_login: string;
+  sender_role: "user" | "operator" | "system";
+  body: string;
+  created_at: string;
+}
+
+export interface PanelOperator {
+  login: string;
+  panel_role: string;
+  panel_role_label: string;
+  operator_number: number;
+  assigned_by: string | null;
+  assigned_at: string;
+  full_name: string;
+}
+
+async function supReq<T>(
+  action: string,
+  options: { method?: string; body?: object; login: string; token: string; qs?: Record<string, string> } = { login: "", token: "" }
+): Promise<T> {
+  const { method = "GET", body, login, token, qs = {} } = options;
+  const params = new URLSearchParams({ action, ...qs });
+  const res = await fetch(`${SUPPORT_URL}?${params.toString()}`, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      "X-Authorization": token,
+    },
+    ...(body ? { body: JSON.stringify({ ...body, login }) } : {}),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data as { error?: string }).error || `Ошибка ${res.status}`);
+  return data as T;
+}
+
+export const supportApi = {
+  createTicket: (login: string, token: string, section: string, subject: string, body: string) =>
+    supReq<{ ok: boolean; ticket_id: number }>("create-ticket", {
+      method: "POST", login, token,
+      body: { section, subject, body },
+    }),
+
+  myTickets: (login: string, token: string) =>
+    supReq<{ tickets: SupportTicket[] }>("my-tickets", { login, token }),
+
+  ticketMessages: (login: string, token: string, ticket_id: number) =>
+    supReq<{ ticket: SupportTicket; messages: SupportMessage[] }>("ticket-messages", {
+      login, token, qs: { ticket_id: String(ticket_id) },
+    }),
+
+  sendMessage: (login: string, token: string, ticket_id: number, body: string) =>
+    supReq<{ ok: boolean }>("send-message", {
+      method: "POST", login, token,
+      body: { ticket_id, body },
+    }),
+
+  // Операторские
+  allTickets: (login: string, token: string, status = "open") =>
+    supReq<{ tickets: SupportTicket[] }>("all-tickets", { login, token, qs: { status } }),
+
+  takeTicket: (login: string, token: string, ticket_id: number) =>
+    supReq<{ ok: boolean; operator_number: number }>("take-ticket", {
+      method: "POST", login, token, body: { ticket_id },
+    }),
+
+  closeTicket: (login: string, token: string, ticket_id: number) =>
+    supReq<{ ok: boolean }>("close-ticket", {
+      method: "POST", login, token, body: { ticket_id },
+    }),
+
+  opSendMessage: (login: string, token: string, ticket_id: number, body: string) =>
+    supReq<{ ok: boolean }>("op-send-message", {
+      method: "POST", login, token, body: { ticket_id, body },
+    }),
+
+  operators: (login: string, token: string) =>
+    supReq<{ operators: PanelOperator[] }>("operators", { login, token }),
+
+  assignOperator: (login: string, token: string, target_login: string, panel_role: string) =>
+    supReq<{ ok: boolean }>("assign-operator", {
+      method: "POST", login, token, body: { target_login, panel_role },
+    }),
+
+  removeOperator: (login: string, token: string, target_login: string) =>
+    supReq<{ ok: boolean }>("remove-operator", {
+      method: "POST", login, token, body: { target_login },
+    }),
+};

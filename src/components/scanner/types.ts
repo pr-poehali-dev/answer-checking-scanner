@@ -10,7 +10,8 @@ export type Section =
   | "fipiExams"
   | "chat"
   | "settings"
-  | "collective";
+  | "collective"
+  | "support";
 
 export const NAV_ITEMS: { id: Section; label: string; icon: string }[] = [
   { id: "works", label: "Работы", icon: "ClipboardList" },
@@ -23,6 +24,7 @@ export const NAV_ITEMS: { id: Section; label: string; icon: string }[] = [
   { id: "exams", label: "ОГЭ / ЕГЭ", icon: "GraduationCap" },
   { id: "fipiExams", label: "Экзамены ФИПИ", icon: "ScrollText" },
   { id: "chat", label: "Чат с ИИ", icon: "MessageSquare" },
+  { id: "support", label: "Тех. поддержка", icon: "Headphones" },
   { id: "settings", label: "Настройки", icon: "Settings" },
 ];
 
@@ -48,6 +50,7 @@ export const SECTION_TITLES: Record<Section, string> = {
   exams: "ОГЭ / ЕГЭ — варианты по ФИПИ",
   fipiExams: "Экзамены ФИПИ — готовые варианты без ИИ",
   chat: "Чат с ИИ",
+  support: "Техническая поддержка",
   settings: "Настройки",
   collective: "Коллектив",
 };

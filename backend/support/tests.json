@@ -1,0 +1,37 @@
+{
+  "tests": [
+    {
+      "name": "GET sections",
+      "method": "GET",
+      "path": "/?action=sections",
+      "expectedStatus": 200,
+      "expectedBody": {"sections": ["upload", "works", "results", "students", "tests", "synopsis", "presentations", "exams", "chat", "subscription", "other"]},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "create-ticket без авторизации",
+      "method": "POST",
+      "path": "/?action=create-ticket",
+      "body": {"login": "", "section": "other", "subject": "test", "body": "test body"},
+      "expectedStatus": 401
+    },
+    {
+      "name": "my-tickets без авторизации",
+      "method": "GET",
+      "path": "/?action=my-tickets&login=",
+      "expectedStatus": 401
+    },
+    {
+      "name": "all-tickets без прав оператора",
+      "method": "GET",
+      "path": "/?action=all-tickets&login=",
+      "expectedStatus": 403
+    },
+    {
+      "name": "unknown action",
+      "method": "GET",
+      "path": "/?action=unknown&login=",
+      "expectedStatus": 403
+    }
+  ]
+}

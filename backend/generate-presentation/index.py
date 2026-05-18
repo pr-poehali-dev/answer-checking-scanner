@@ -334,21 +334,32 @@ def gigachat_chat(messages: list, max_tokens: int = 3000, temperature: float = 0
 
 
 def gigachat_with_fallback(messages: list, max_tokens: int = 3000) -> str:
-    """3 попытки: Lite(50с) → Lite(50с) → GigaChat-2(120с).
-    Lite быстрее, но иногда обрывает — поэтому 2 попытки на неё, потом тяжёлая модель."""
+    """4 попытки с экспоненциальной задержкой при обрывах соединения:
+    Lite(40с) → wait 1с → Lite(40с) → wait 2с → GigaChat-2(80с) → wait 3с → Lite(40с)."""
     last_err = None
-    for model, timeout in (("GigaChat-Lite", 50), ("GigaChat-Lite", 50), ("GigaChat-2", 120)):
+    attempts = [
+        ("GigaChat-Lite", 40, 0),
+        ("GigaChat-Lite", 40, 1),
+        ("GigaChat-2",    80, 2),
+        ("GigaChat-Lite", 40, 3),
+    ]
+    for model, timeout, delay in attempts:
+        if delay:
+            time.sleep(delay)
         try:
             return gigachat_chat(messages, max_tokens=max_tokens, model=model, req_timeout=timeout)
         except RuntimeError as e:
             last_err = e
             msg = str(e)
             if "MODEL_NOT_FOUND" in msg or "404" in msg or "401" in msg or "403" in msg:
+                _TOKEN_CACHE["token"] = None
+                _TOKEN_CACHE["expires_at"] = None
                 continue
             if "timed out" in msg.lower() or "timeout" in msg.lower():
                 continue
             if "remote end closed" in msg.lower() or "remotedisconnected" in msg.lower() \
-                    or "connection reset" in msg.lower() or "недоступен" in msg.lower():
+                    or "connection reset" in msg.lower() or "недоступен" in msg.lower() \
+                    or "bad gateway" in msg.lower() or "502" in msg or "503" in msg or "504" in msg:
                 _TOKEN_CACHE["token"] = None
                 _TOKEN_CACHE["expires_at"] = None
                 continue

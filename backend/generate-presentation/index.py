@@ -281,7 +281,7 @@ def openrouter_chat(messages: list, max_tokens: int = 4000, temperature: float =
         except urllib.error.HTTPError as e:
             err_text = e.read().decode(errors="ignore")[:300]
             # 404 = модель недоступна, 429/502/503 = перегрузка — переходим к следующей
-            if e.code in (404, 429, 502, 503):
+            if e.code in (403, 404, 429, 502, 503):
                 last_err = RuntimeError(f"OpenRouter {e.code} ({model}): {err_text}")
                 if e.code == 429:
                     time.sleep(2)

@@ -16,15 +16,11 @@ import json
 import os
 import io
 import re
-import ssl
 import time
-import uuid
 import base64
 import random
-import urllib.parse
 import urllib.request
 import urllib.error
-from datetime import datetime, timedelta
 
 AUTH_URL = os.environ.get("AUTH_FUNCTION_URL", "https://functions.poehali.dev/b08ae7cf-6c0b-4178-acc9-4b62b2c2a61b")
 
@@ -222,11 +218,6 @@ def pick_theme(topic: str) -> dict:
     return random.choice(THEMES)
 
 
-# ─── КЭШИ ───────────────────────────────────────────────────────────────────
-
-_TOKEN_CACHE = {"token": None, "expires_at": None}
-
-
 def _resp(status: int, body: dict) -> dict:
     return {
         "statusCode": status,
@@ -236,135 +227,74 @@ def _resp(status: int, body: dict) -> dict:
     }
 
 
-def _ssl_ctx() -> ssl.SSLContext:
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    return ctx
+# ─── OPENROUTER AI ───────────────────────────────────────────────────────────
+# Используем OpenRouter (бесплатно) — модели с большим контекстом и надёжным JSON
+
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+# Порядок попыток: основная → запасная
+_OR_MODELS = [
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "google/gemma-3-27b-it:free",
+    "mistralai/mistral-7b-instruct:free",
+]
 
 
-# ─── GIGACHAT AUTH ───────────────────────────────────────────────────────────
+def openrouter_chat(messages: list, max_tokens: int = 4000, temperature: float = 0.2,
+                    req_timeout: int = 90) -> str:
+    """Вызов OpenRouter API. Пробует модели по очереди при ошибках."""
+    api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("OPENROUTER_API_KEY не задан")
 
-def get_gigachat_token() -> str:
-    now = datetime.utcnow()
-    if _TOKEN_CACHE["token"] and _TOKEN_CACHE["expires_at"] and _TOKEN_CACHE["expires_at"] > now:
-        return _TOKEN_CACHE["token"]
-
-    auth_key = os.environ.get("GIGACHAT_AUTH_KEY", "").strip()
-    if not auth_key:
-        raise RuntimeError("GIGACHAT_AUTH_KEY не задан")
-
-    rq_uid = str(uuid.uuid4())
-    data = urllib.parse.urlencode({"scope": "GIGACHAT_API_PERS"}).encode()
-    req = urllib.request.Request(
-        "https://ngw.devices.sberbank.ru:9443/api/v2/oauth",
-        data=data,
-        method="POST",
-        headers={
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Accept": "application/json",
-            "RqUID": rq_uid,
-            "Authorization": f"Basic {auth_key}",
-        },
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=20, context=_ssl_ctx()) as r:
-            body = json.loads(r.read().decode())
-    except urllib.error.HTTPError as e:
-        raise RuntimeError(f"GigaChat auth HTTP {e.code}: {e.read().decode(errors='ignore')[:300]}")
-
-    token = body.get("access_token")
-    if not token:
-        raise RuntimeError(f"GigaChat не вернул access_token: {body}")
-
-    expires_in_ms = body.get("expires_at")
-    expires_at = (datetime.utcfromtimestamp(expires_in_ms / 1000) - timedelta(minutes=2)
-                  if expires_in_ms else now + timedelta(minutes=25))
-    _TOKEN_CACHE["token"] = token
-    _TOKEN_CACHE["expires_at"] = expires_at
-    return token
-
-
-def _gigachat_call_once(messages: list, max_tokens: int, temperature: float,
-                        model: str, req_timeout: int) -> str:
-    token = get_gigachat_token()
-    payload = {
-        "model": model,
-        "messages": messages,
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-        "stream": False,
-    }
-    req = urllib.request.Request(
-        "https://gigachat.devices.sberbank.ru/api/v1/chat/completions",
-        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        method="POST",
-        headers={
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "Authorization": f"Bearer {token}",
-            "Connection": "close",
-        },
-    )
-    with urllib.request.urlopen(req, timeout=req_timeout, context=_ssl_ctx()) as r:
-        body = json.loads(r.read().decode())
-    choices = body.get("choices") or []
-    if not choices:
-        raise RuntimeError(f"GigaChat вернул пустой ответ: {body}")
-    return choices[0].get("message", {}).get("content", "").strip()
-
-
-def gigachat_chat(messages: list, max_tokens: int = 3000, temperature: float = 0.2,
-                  model: str = "GigaChat-2", req_timeout: int = 95) -> str:
-    """Один вызов GigaChat без ретраев — функция ограничена 120 сек платформой."""
-    try:
-        return _gigachat_call_once(messages, max_tokens, temperature, model, req_timeout)
-    except urllib.error.HTTPError as e:
-        try:
-            err_text = e.read().decode(errors="ignore")[:300]
-        except Exception:
-            err_text = str(e)
-        if e.code in (401, 403):
-            raise RuntimeError(f"GigaChat auth HTTP {e.code}: {err_text}")
-        if e.code == 404:
-            raise RuntimeError(f"MODEL_NOT_FOUND: {err_text}")
-        raise RuntimeError(f"GigaChat HTTP {e.code}: {err_text}")
-    except Exception as e:
-        raise RuntimeError(f"GigaChat недоступен: {e}")
-
-
-def gigachat_with_fallback(messages: list, max_tokens: int = 3000) -> str:
-    """4 попытки с экспоненциальной задержкой при обрывах соединения:
-    Lite(40с) → wait 1с → Lite(40с) → wait 2с → GigaChat-2(80с) → wait 3с → Lite(40с)."""
     last_err = None
-    attempts = [
-        ("GigaChat-Lite", 40, 0),
-        ("GigaChat-Lite", 40, 1),
-        ("GigaChat-2",    80, 2),
-        ("GigaChat-Lite", 40, 3),
-    ]
-    for model, timeout, delay in attempts:
-        if delay:
-            time.sleep(delay)
+    for model in _OR_MODELS:
+        payload = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        req = urllib.request.Request(
+            OPENROUTER_URL,
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            method="POST",
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}",
+                "HTTP-Referer": "https://poehali.dev",
+                "X-Title": "AOUSPТ Presentations",
+            },
+        )
         try:
-            return gigachat_chat(messages, max_tokens=max_tokens, model=model, req_timeout=timeout)
-        except RuntimeError as e:
-            last_err = e
-            msg = str(e)
-            if "MODEL_NOT_FOUND" in msg or "404" in msg or "401" in msg or "403" in msg:
-                _TOKEN_CACHE["token"] = None
-                _TOKEN_CACHE["expires_at"] = None
+            with urllib.request.urlopen(req, timeout=req_timeout) as r:
+                body = json.loads(r.read().decode())
+            choices = body.get("choices") or []
+            if not choices:
+                last_err = RuntimeError(f"OpenRouter вернул пустой ответ ({model}): {body}")
                 continue
-            if "timed out" in msg.lower() or "timeout" in msg.lower():
+            content = choices[0].get("message", {}).get("content", "").strip()
+            if not content:
+                last_err = RuntimeError(f"OpenRouter вернул пустой content ({model})")
                 continue
-            if "remote end closed" in msg.lower() or "remotedisconnected" in msg.lower() \
-                    or "connection reset" in msg.lower() or "недоступен" in msg.lower() \
-                    or "bad gateway" in msg.lower() or "502" in msg or "503" in msg or "504" in msg:
-                _TOKEN_CACHE["token"] = None
-                _TOKEN_CACHE["expires_at"] = None
+            return content
+        except urllib.error.HTTPError as e:
+            err_text = e.read().decode(errors="ignore")[:300]
+            if e.code in (429, 503, 502):
+                last_err = RuntimeError(f"OpenRouter {e.code} ({model}): {err_text}")
+                time.sleep(2)
                 continue
-            raise
-    raise last_err if last_err else RuntimeError("Все модели GigaChat недоступны")
+            raise RuntimeError(f"OpenRouter HTTP {e.code} ({model}): {err_text}")
+        except Exception as e:
+            last_err = RuntimeError(f"OpenRouter недоступен ({model}): {e}")
+            continue
+
+    raise last_err or RuntimeError("Все модели OpenRouter недоступны")
+
+
+# Псевдоним для совместимости с кодом generate_outline / generate_slide_content
+def gigachat_with_fallback(messages: list, max_tokens: int = 3000) -> str:
+    return openrouter_chat(messages, max_tokens=max_tokens)
 
 
 def _repair_truncated_json(text: str) -> str:

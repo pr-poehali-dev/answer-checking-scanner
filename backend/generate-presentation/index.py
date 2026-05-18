@@ -232,11 +232,11 @@ def _resp(status: int, body: dict) -> dict:
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
-# Порядок попыток: основная → запасная
+# Порядок попыток: основная → запасные (актуальные бесплатные модели OpenRouter)
 _OR_MODELS = [
     "meta-llama/llama-3.3-70b-instruct:free",
-    "google/gemma-3-27b-it:free",
-    "mistralai/mistral-7b-instruct:free",
+    "nousresearch/hermes-3-llama-3.1-405b:free",
+    "minimax/minimax-m2.5:free",
 ]
 
 
@@ -280,9 +280,11 @@ def openrouter_chat(messages: list, max_tokens: int = 4000, temperature: float =
             return content
         except urllib.error.HTTPError as e:
             err_text = e.read().decode(errors="ignore")[:300]
-            if e.code in (429, 503, 502):
+            # 404 = модель недоступна, 429/502/503 = перегрузка — переходим к следующей
+            if e.code in (404, 429, 502, 503):
                 last_err = RuntimeError(f"OpenRouter {e.code} ({model}): {err_text}")
-                time.sleep(2)
+                if e.code == 429:
+                    time.sleep(2)
                 continue
             raise RuntimeError(f"OpenRouter HTTP {e.code} ({model}): {err_text}")
         except Exception as e:

@@ -263,7 +263,7 @@ def openrouter_chat(messages: list, max_tokens: int = 4000, temperature: float =
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {api_key}",
                 "HTTP-Referer": "https://poehali.dev",
-                "X-Title": "AOUSPТ Presentations",
+                "X-Title": "AOUSPT Presentations",
             },
         )
         try:

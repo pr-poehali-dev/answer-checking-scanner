@@ -367,17 +367,64 @@ def gigachat_with_fallback(messages: list, max_tokens: int = 3000) -> str:
     raise last_err if last_err else RuntimeError("Все модели GigaChat недоступны")
 
 
+def _repair_truncated_json(text: str) -> str:
+    """Пытается закрыть обрезанный JSON: закрывает незакрытые строки/массивы/объекты."""
+    # Убираем trailing мусор до последней «чистой» запятой или значения
+    text = text.rstrip().rstrip(",").rstrip()
+    # Считаем незакрытые скобки/кавычки
+    in_string = False
+    escape_next = False
+    stack = []
+    for ch in text:
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == "\\" and in_string:
+            escape_next = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch in ("{", "["):
+            stack.append(ch)
+        elif ch == "}":
+            if stack and stack[-1] == "{":
+                stack.pop()
+        elif ch == "]":
+            if stack and stack[-1] == "[":
+                stack.pop()
+    # Если внутри строки — закрываем её
+    if in_string:
+        text += '"'
+    # Закрываем массивы и объекты в обратном порядке
+    for ch in reversed(stack):
+        text += "]" if ch == "[" else "}"
+    return text
+
+
 def extract_json(text: str) -> dict:
     text = text.strip()
-    fence = re.search(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", text)
+    # Убираем markdown-блок если есть
+    fence = re.search(r"```(?:json)?\s*(\{[\s\S]*)", text)
     if fence:
         text = fence.group(1)
-    else:
-        s = text.find("{")
-        e = text.rfind("}")
-        if s >= 0 and e > s:
-            text = text[s:e + 1]
-    return json.loads(text)
+        end_fence = text.find("```")
+        if end_fence >= 0:
+            text = text[:end_fence]
+    # Берём от первой { до конца
+    s = text.find("{")
+    if s >= 0:
+        text = text[s:]
+    # Пробуем распарсить как есть
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    # Пробуем закрыть обрезанный JSON
+    fixed = _repair_truncated_json(text)
+    return json.loads(fixed)
 
 
 # ─── ПОИСК ИЗОБРАЖЕНИЙ ───────────────────────────────────────────────────────
@@ -521,8 +568,8 @@ def generate_outline(topic: str, description: str, slides_count: int, audience: 
         f"Ровно {slides_count} слайдов. bullets — ровно 5 штук на каждый слайд. image_queries — 3 разных запроса."
     )
 
-    # ~180 токенов на слайд (5 тезисов × ~25 + заголовок + fact + 3 queries) + запас
-    max_tok = min(180 * slides_count + 500, 3500)
+    # ~300 токенов на слайд (5 тезисов × ~25 слов + заголовок + fact + 3 queries + запас)
+    max_tok = min(300 * slides_count + 800, 7000)
 
     raw = gigachat_with_fallback(
         [{"role": "system", "content": system}, {"role": "user", "content": user}],

@@ -21,6 +21,7 @@ import base64
 import random
 import urllib.request
 import urllib.error
+from datetime import datetime
 
 AUTH_URL = os.environ.get("AUTH_FUNCTION_URL", "https://functions.poehali.dev/b08ae7cf-6c0b-4178-acc9-4b62b2c2a61b")
 

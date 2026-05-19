@@ -22,7 +22,6 @@ FREE_MODELS = [
     "nousresearch/hermes-3-llama-3.1-405b:free",
     "minimax/minimax-m2.5:free",
     "mistralai/mistral-7b-instruct:free",
-    "qwen/qwen3-8b:free",
 ]
 
 

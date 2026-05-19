@@ -127,11 +127,11 @@ def get_caller(headers: dict, conn) -> dict | None:
 
 
 def get_caller_by_login(login: str, token: str, conn) -> dict | None:
-    """Упрощённая проверка: берём login из тела запроса и проверяем токен."""
+    """Проверяем токен через auth_token_hash в таблице users."""
     if not login or not token:
         return None
 
-    # Admin — несъёмные права: всегда head, is_panel=True, is_admin=True
+    # Admin — несъёмные права
     expected_admin = f"admin:{hash_password(ADMIN_PASSWORD + 'salt_admin')}"
     if token == expected_admin or (login == "admin" and token.startswith("admin:")):
         cur = conn.cursor()
@@ -144,20 +144,18 @@ def get_caller_by_login(login: str, token: str, conn) -> dict | None:
 
     cur = conn.cursor()
     cur.execute(
-        f"SELECT password_hash, role, is_active FROM {SCHEMA}.users WHERE login = %s",
+        f"SELECT role, is_active, auth_token_hash FROM {SCHEMA}.users WHERE login = %s",
         (login,)
     )
     row = cur.fetchone()
     if not row:
         return None
-    pw_hash, sys_role, is_active = row
+    sys_role, is_active, stored_token_hash = row
     if not is_active:
         return None
 
-    # Токен может быть teacher:hash или tester:hash — проверяем оба варианта
-    expected_teacher = f"teacher:{hash_password(login + pw_hash + 'salt')}"
-    expected_role    = f"{sys_role}:{hash_password(login + pw_hash + 'salt')}"
-    if token not in (expected_teacher, expected_role):
+    # Проверяем токен: hash(token) должен совпасть с сохранённым
+    if not stored_token_hash or hash_password(token) != stored_token_hash:
         return None
 
     cur.execute(
@@ -165,7 +163,6 @@ def get_caller_by_login(login: str, token: str, conn) -> dict | None:
         (login,)
     )
     op_row = cur.fetchone()
-    # panel_role считается активной только если не 'removed'
     active_panel_role = None
     active_op_num = None
     if op_row and op_row[0] and op_row[0] != "removed":
@@ -230,7 +227,7 @@ def handler(event: dict, context) -> dict:
             pass
 
     login = (body.get("login") or qs.get("login") or "").strip()
-    token = headers.get("x-authorization", "")
+    token = (headers.get("x-authorization") or headers.get("authorization") or "").strip()
 
     conn = get_conn()
     try:

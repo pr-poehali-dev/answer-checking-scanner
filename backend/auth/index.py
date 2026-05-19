@@ -199,16 +199,16 @@ def handler(event: dict, context) -> dict:
                 return _resp(409, {"error": "Этот email уже зарегистрирован"})
 
             login = generate_login(first_name, last_name, cur)
+            token = f"teacher:{hash_password(login + password + 'salt')}"
+            token_hash = hash_password(token)
             cur.execute(
                 f"""INSERT INTO {SCHEMA}.users
-                    (login, password_hash, full_name, first_name, last_name, email, school, role, created_by, subscription_status)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, 'teacher', 'self', 'none') RETURNING id""",
-                (login, hash_password(password), full_name, first_name, last_name, email, school)
+                    (login, password_hash, full_name, first_name, last_name, email, school, role, created_by, subscription_status, auth_token_hash)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, 'teacher', 'self', 'none', %s) RETURNING id""",
+                (login, hash_password(password), full_name, first_name, last_name, email, school, token_hash)
             )
             conn.commit()
             user_id = cur.fetchone()[0]
-
-            token = f"teacher:{hash_password(login + password + 'salt')}"
             return _resp(200, {
                 "success": True,
                 "id": user_id,
@@ -280,21 +280,21 @@ def handler(event: dict, context) -> dict:
                 sub["subscription_active"] = True
                 sub["subscription_status"] = "active"
 
-            # Обновляем last_seen_at и, если нужно, статус подписки
+            # Обновляем last_seen_at, статус подписки и сохраняем token_hash
             now_ts = datetime.utcnow()
+            token = f"teacher:{hash_password(login + password + 'salt')}"
+            token_hash = hash_password(token)
             if sub_status == 'active' and sub['subscription_status'] == 'expired':
                 cur.execute(
-                    f"UPDATE {SCHEMA}.users SET subscription_status = 'expired', last_seen_at = %s WHERE login = %s",
-                    (now_ts, login)
+                    f"UPDATE {SCHEMA}.users SET subscription_status = 'expired', last_seen_at = %s, auth_token_hash = %s WHERE login = %s",
+                    (now_ts, token_hash, login)
                 )
             else:
                 cur.execute(
-                    f"UPDATE {SCHEMA}.users SET last_seen_at = %s WHERE login = %s",
-                    (now_ts, login)
+                    f"UPDATE {SCHEMA}.users SET last_seen_at = %s, auth_token_hash = %s WHERE login = %s",
+                    (now_ts, token_hash, login)
                 )
             conn.commit()
-
-            token = f"teacher:{hash_password(login + password + 'salt')}"
             return _resp(200, {
                 "role": role,
                 "login": login,

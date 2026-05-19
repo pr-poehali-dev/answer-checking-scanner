@@ -21,7 +21,6 @@ FREE_MODELS = [
     "microsoft/phi-4-reasoning-plus:free",
     "nousresearch/hermes-3-llama-3.1-405b:free",
     "minimax/minimax-m2.5:free",
-    "mistralai/mistral-7b-instruct:free",
 ]
 
 

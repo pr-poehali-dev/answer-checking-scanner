@@ -33,10 +33,20 @@ export default function SubscriptionGate() {
   const [activatingTrial, setActivatingTrial] = useState(false);
 
   useEffect(() => {
-    subscriptionApi.plans()
-      .then(d => { setPlans(d.plans); setAvailable(d.available); })
-      .catch(e => setError((e as Error).message))
-      .finally(() => setLoadingPlans(false));
+    const load = (attempt = 1) => {
+      subscriptionApi.plans()
+        .then(d => { setPlans(d.plans); setAvailable(d.available); setLoadingPlans(false); })
+        .catch(e => {
+          const msg = (e as Error).message || "";
+          if ((msg.includes("Failed to fetch") || msg.includes("fetch")) && attempt < 4) {
+            setTimeout(() => load(attempt + 1), 1500 * attempt);
+          } else {
+            setError(msg);
+            setLoadingPlans(false);
+          }
+        });
+    };
+    load();
   }, []);
 
   // Возврат после оплаты — обрабатываем ?payment_id=...

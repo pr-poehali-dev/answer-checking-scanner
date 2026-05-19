@@ -880,17 +880,24 @@ export interface PaymentRow {
 async function subRequest<T>(action: string, options: RequestInit & { login?: string } = {}): Promise<T> {
   const { login, headers, ...rest } = options;
   const url = `${SUBSCRIPTION_URL}?action=${action}`;
-  const res = await fetch(url, {
-    ...rest,
-    headers: {
-      "Content-Type": "application/json",
-      ...(login ? { "X-User-Login": login } : {}),
-      ...(headers || {}),
-    },
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `Ошибка ${res.status}`);
-  return data as T;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12000);
+  try {
+    const res = await fetch(url, {
+      ...rest,
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        ...(login ? { "X-User-Login": login } : {}),
+        ...(headers || {}),
+      },
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Ошибка ${res.status}`);
+    return data as T;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export const subscriptionApi = {

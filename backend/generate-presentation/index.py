@@ -236,8 +236,14 @@ OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 # Порядок попыток: основная → запасные (актуальные бесплатные модели OpenRouter)
 _OR_MODELS = [
     "meta-llama/llama-3.3-70b-instruct:free",
+    "deepseek/deepseek-r1-0528:free",
+    "google/gemma-3-27b-it:free",
+    "qwen/qwen3-235b-a22b:free",
+    "microsoft/phi-4-reasoning-plus:free",
     "nousresearch/hermes-3-llama-3.1-405b:free",
     "minimax/minimax-m2.5:free",
+    "mistralai/mistral-7b-instruct:free",
+    "qwen/qwen3-8b:free",
 ]
 
 

@@ -90,10 +90,10 @@ export default function Index() {
   const [ouUser, setOuUser]         = useState<OUUser | null>(() => loadOUSession());
   const [hasInstitution, setHasInstitution] = useState(false);
   const [showTokensModal, setShowTokensModal] = useState(false);
-  const [showPanel, setShowPanel]   = useState(false);
-  const [adminShowLK, setAdminShowLK] = useState(false); // admin нажал "Открыть ЛК"
+  const [showPanel, setShowPanel]       = useState(false);
+  const [adminShowLK, setAdminShowLK]   = useState(false);
   const [hasPanelRole, setHasPanelRole] = useState(false);
-  const [panelAutoShown, setPanelAutoShown] = useState(false);
+  const [panelRoleChecked, setPanelRoleChecked] = useState(false); // проверка завершена
   const { teacher, yadiskConnected, maintenanceSections } = useAppStore();
   const ActiveSection = SECTION_COMPONENTS[active];
 
@@ -134,19 +134,30 @@ export default function Index() {
 
   // Проверяем панельную роль для не-admin пользователей
   useEffect(() => {
-    if (!teacher || teacher.role === "admin") return;
+    if (!teacher) return;
+    // admin — сразу помечаем проверку завершённой (они всегда в ПУ)
+    if (teacher.role === "admin") {
+      setPanelRoleChecked(true);
+      return;
+    }
+    setPanelRoleChecked(false);
     import("@/lib/api").then(({ supportApi }) => {
-      supportApi.operators(teacher.login, teacher.authToken).then(res => {
-        const me = res.operators.find((o: { login: string; panel_role: string }) => o.login === teacher.login);
-        if (me && me.panel_role && me.panel_role !== "removed") {
-          setHasPanelRole(true);
-          // Автоматически показываем ПУ при первом входе
-          if (!panelAutoShown) {
-            setShowPanel(true);
-            setPanelAutoShown(true);
+      supportApi.operators(teacher.login, teacher.authToken)
+        .then(res => {
+          const me = res.operators.find((o: { login: string; panel_role: string }) => o.login === teacher.login);
+          if (me && me.panel_role && me.panel_role !== "removed") {
+            setHasPanelRole(true);
+            setShowPanel(true); // автоматически открываем ПУ
+          } else {
+            setHasPanelRole(false);
           }
-        }
-      }).catch(() => {});
+        })
+        .catch(() => {
+          setHasPanelRole(false);
+        })
+        .finally(() => {
+          setPanelRoleChecked(true);
+        });
     });
   }, [teacher?.login]);
 
@@ -200,6 +211,18 @@ export default function Index() {
         initialMode={authMode === "signup" ? "signup" : "login"}
         onBack={() => setAuthMode("landing")}
       />
+    );
+  }
+
+  // Ждём завершения проверки панельной роли (чтобы не мигал ЛК перед ПУ)
+  if (!panelRoleChecked) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="flex flex-col items-center gap-3">
+          <Icon name="Loader2" size={24} className="animate-spin text-muted-foreground" />
+          <p className="text-xs text-muted-foreground">Загрузка…</p>
+        </div>
+      </div>
     );
   }
 

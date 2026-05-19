@@ -988,7 +988,7 @@ async function supReq<T>(
     method,
     headers: {
       "Content-Type": "application/json",
-      "X-Authorization": token,
+      "Authorization": token,
     },
     ...(body ? { body: JSON.stringify({ ...body, login }) } : {}),
   });

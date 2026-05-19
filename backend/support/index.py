@@ -30,7 +30,7 @@ ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin2026")
 CORS = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, X-Authorization",
+    "Access-Control-Allow-Headers": "Content-Type, X-Authorization, Authorization",
 }
 
 # Иерархия ролей ПУ (чем выше индекс — тем выше роль)

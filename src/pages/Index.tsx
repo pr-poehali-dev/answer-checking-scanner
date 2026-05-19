@@ -91,8 +91,9 @@ export default function Index() {
   const [hasInstitution, setHasInstitution] = useState(false);
   const [showTokensModal, setShowTokensModal] = useState(false);
   const [showPanel, setShowPanel]   = useState(false);
+  const [adminShowLK, setAdminShowLK] = useState(false); // admin нажал "Открыть ЛК"
   const [hasPanelRole, setHasPanelRole] = useState(false);
-  const [panelAutoShown, setPanelAutoShown] = useState(false); // чтобы не сбрасывать при ре-рендере
+  const [panelAutoShown, setPanelAutoShown] = useState(false);
   const { teacher, yadiskConnected, maintenanceSections } = useAppStore();
   const ActiveSection = SECTION_COMPONENTS[active];
 
@@ -124,9 +125,9 @@ export default function Index() {
     return () => window.removeEventListener("navigate-to-section", handler);
   }, []);
 
-  // Открытие ЛК из ПУ
+  // Открытие ЛК из ПУ (для admin и операторов)
   useEffect(() => {
-    const handler = () => setShowPanel(false);
+    const handler = () => { setShowPanel(false); setAdminShowLK(true); };
     window.addEventListener("open-lk-from-panel", handler);
     return () => window.removeEventListener("open-lk-from-panel", handler);
   }, []);
@@ -202,14 +203,21 @@ export default function Index() {
     );
   }
 
-  if (teacher.role === "admin" || showPanel) {
-    return <AdminPanel onOpenLK={teacher.role !== "admin" ? () => setShowPanel(false) : undefined} />;
+  // ПУ: admin (если не нажал "Открыть ЛК") или оператор с панельной ролью
+  if ((teacher.role === "admin" && !adminShowLK) || showPanel) {
+    return (
+      <AdminPanel
+        onOpenLK={() => { setAdminShowLK(true); setShowPanel(false); }}
+      />
+    );
   }
 
   const isTester = teacher.role === "tester";
+  const isAdminInLK = teacher.role === "admin" && adminShowLK;
+  const canGoToPanel = isAdminInLK || hasPanelRole;
 
-  // Тестер — обходит проверки подписки и Я.Диска
-  if (!isTester) {
+  // Тестер и admin — обходят проверки подписки и Я.Диска
+  if (!isTester && !isAdminInLK) {
     if (!teacher.subscriptionActive) return <SubscriptionGate />;
     if (!yadiskConnected) return <YadiskRequiredGate />;
   }
@@ -315,10 +323,10 @@ export default function Index() {
           </div>
         </div>
 
-        {/* Кнопка Панели Управления для операторов */}
-        {hasPanelRole && (
+        {/* Кнопка возврата в Панель Управления */}
+        {canGoToPanel && (
           <div className="px-3 mb-2">
-            <button onClick={() => setShowPanel(true)}
+            <button onClick={() => { setAdminShowLK(false); if (!isAdminInLK) setShowPanel(true); }}
               className="w-full px-3 py-2 rounded-sm border flex items-center gap-2 hover:border-blue-400/40 transition-colors"
               style={{ borderColor: "hsl(215 60% 40% / 0.3)", background: "hsl(215 60% 40% / 0.06)" }}>
               <Icon name="Shield" size={13} style={{ color: "hsl(215 60% 40%)" }} />

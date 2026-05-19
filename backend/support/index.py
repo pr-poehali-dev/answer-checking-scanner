@@ -447,6 +447,9 @@ def handler(event: dict, context) -> dict:
                 })
             return _resp(200, {"operators": ops})
 
+        # Глава Правления (head) не зависит от иерархии — полные права
+        is_head_caller = caller_rank >= PANEL_ROLE_RANK.get("head", 6)
+
         # ── POST assign-operator ─────────────────────────────────────────────
         if action == "assign-operator" and method == "POST":
             target_login = (body.get("target_login") or "").strip()
@@ -454,27 +457,42 @@ def handler(event: dict, context) -> dict:
 
             if not target_login:
                 return _resp(400, {"error": "Укажите target_login"})
+
+            # Пустая роль = снять
+            if panel_role == "":
+                cur = conn.cursor()
+                cur.execute(f"SELECT login FROM {SCHEMA}.panel_operators WHERE login = %s", (target_login,))
+                if cur.fetchone():
+                    cur.execute(
+                        f"UPDATE {SCHEMA}.panel_operators SET panel_role = 'removed', assigned_by = %s WHERE login = %s",
+                        (caller["login"], target_login)
+                    )
+                    conn.commit()
+                return _resp(200, {"ok": True})
+
             if panel_role not in PANEL_ROLE_RANK:
                 return _resp(400, {"error": f"Неверная роль. Доступны: {list(PANEL_ROLE_RANK.keys())}"})
 
-            target_rank = PANEL_ROLE_RANK[panel_role]
-            if target_rank >= caller_rank:
-                return _resp(403, {"error": "Нельзя выдать роль выше или равную своей"})
+            # Глава Правления может выдать любую роль
+            if not is_head_caller:
+                target_rank = PANEL_ROLE_RANK[panel_role]
+                if target_rank >= caller_rank:
+                    return _resp(403, {"error": "Нельзя выдать роль выше или равную своей"})
 
             cur = conn.cursor()
-            # Проверяем что target существует
             cur.execute(f"SELECT login FROM {SCHEMA}.users WHERE login = %s", (target_login,))
             if not cur.fetchone():
                 return _resp(404, {"error": "Пользователь не найден"})
 
-            # Проверяем есть ли уже в операторах
             cur.execute(f"SELECT panel_role FROM {SCHEMA}.panel_operators WHERE login = %s", (target_login,))
             existing = cur.fetchone()
 
             if existing:
-                existing_rank = PANEL_ROLE_RANK.get(existing[0], 1)
-                if existing_rank >= caller_rank:
-                    return _resp(403, {"error": "Нельзя изменить роль равного или вышестоящего"})
+                # Глава может изменить любого
+                if not is_head_caller:
+                    existing_rank = PANEL_ROLE_RANK.get(existing[0], 1)
+                    if existing_rank >= caller_rank:
+                        return _resp(403, {"error": "Нельзя изменить роль равного или вышестоящего"})
                 cur.execute(
                     f"""UPDATE {SCHEMA}.panel_operators
                         SET panel_role = %s, assigned_by = %s, assigned_at = NOW()
@@ -501,11 +519,11 @@ def handler(event: dict, context) -> dict:
             row = cur.fetchone()
             if not row:
                 return _resp(404, {"error": "Оператор не найден"})
-            target_rank = PANEL_ROLE_RANK.get(row[0], 1)
-            if target_rank >= caller_rank:
-                return _resp(403, {"error": "Нельзя снять равного или вышестоящего"})
-            cur.execute(f"UPDATE {SCHEMA}.panel_operators SET panel_role = NULL WHERE login = %s AND 1=0", (target_login,))
-            # Используем UPDATE чтобы не DELETE
+            # Глава может снять любого
+            if not is_head_caller:
+                target_rank = PANEL_ROLE_RANK.get(row[0], 1)
+                if target_rank >= caller_rank:
+                    return _resp(403, {"error": "Нельзя снять равного или вышестоящего"})
             cur.execute(
                 f"UPDATE {SCHEMA}.panel_operators SET panel_role = 'removed', assigned_by = %s WHERE login = %s",
                 (caller["login"], target_login)

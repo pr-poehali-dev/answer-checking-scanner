@@ -69,6 +69,29 @@ export default function AdminPanel({ onOpenLK }: AdminPanelProps = {}) {
   const [tokensFor, setTokensFor] = useState<UserRow | null>(null);
   const [tokensBusy, setTokensBusy] = useState(false);
 
+  // Роли ПУ для пользователей: login → panel_role
+  const [panelRoles, setPanelRoles] = useState<Record<string, string>>({});
+
+  const loadPanelRoles = async () => {
+    try {
+      const res = await supportApi.operators(login, token);
+      const map: Record<string, string> = {};
+      res.operators.forEach(op => { if (op.panel_role && op.panel_role !== "removed") map[op.login] = op.panel_role; });
+      setPanelRoles(map);
+    } catch { /* ignore */ }
+  };
+
+  const handleSetPanelRole = async (targetLogin: string, panelRole: string) => {
+    try {
+      if (panelRole === "") {
+        await supportApi.removeOperator(login, token, targetLogin);
+      } else {
+        await supportApi.assignOperator(login, token, targetLogin, panelRole);
+      }
+      await loadPanelRoles();
+    } catch (e) { setError((e as Error).message); }
+  };
+
   const loadUsers = async () => {
     setLoading(true);
     setError("");
@@ -83,7 +106,8 @@ export default function AdminPanel({ onOpenLK }: AdminPanelProps = {}) {
   };
 
   useEffect(() => {
-    if (token && isAdmin) loadUsers();
+    if (token && isAdmin) { loadUsers(); loadPanelRoles(); }
+    else if (token) { loadPanelRoles(); }
   }, [token, isAdmin]);
 
   const handleCreate = async (e: React.FormEvent) => {
@@ -184,11 +208,13 @@ export default function AdminPanel({ onOpenLK }: AdminPanelProps = {}) {
     return pwd;
   };
 
-  const TABS: { id: Tab; label: string; icon: string; adminOnly?: boolean }[] = [
+  const isHead = isAdmin || panelRole === "head";
+
+  const TABS: { id: Tab; label: string; icon: string; headOnly?: boolean }[] = [
     { id: "support",     label: "Тех. поддержка",  icon: "Headphones" },
-    { id: "users",       label: "Учителя",         icon: "Users",         adminOnly: true },
-    { id: "maintenance", label: "Тех. работы",      icon: "Construction",  adminOnly: true },
-  ].filter(t => !t.adminOnly || isAdmin || ["head","deputy","developer"].includes(panelRole));
+    { id: "users",       label: "Пользователи",    icon: "Users",      headOnly: false },
+    { id: "maintenance", label: "Тех. работы",      icon: "Construction", headOnly: true },
+  ].filter(t => !t.headOnly || isHead);
 
   return (
     <div className="min-h-screen bg-background">
@@ -212,15 +238,19 @@ export default function AdminPanel({ onOpenLK }: AdminPanelProps = {}) {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {onOpenLK && (
-            <button
-              onClick={onOpenLK}
-              className="inline-flex items-center gap-2 px-3 py-2 border border-border text-xs rounded-sm hover:bg-muted transition-colors"
-            >
-              <Icon name="LayoutDashboard" size={13} />
-              Открыть ЛК
-            </button>
-          )}
+          <button
+            onClick={() => {
+              if (onOpenLK) {
+                onOpenLK();
+              } else {
+                window.dispatchEvent(new CustomEvent("open-lk-from-panel"));
+              }
+            }}
+            className="inline-flex items-center gap-2 px-3 py-2 bg-primary text-primary-foreground text-xs font-semibold rounded-sm hover:opacity-90 transition-opacity"
+          >
+            <Icon name="LayoutDashboard" size={13} />
+            Открыть ЛК
+          </button>
           <button
             onClick={() => appStore.logout()}
             className="inline-flex items-center gap-2 px-3 py-2 border border-border text-xs rounded-sm hover:bg-muted transition-colors"
@@ -325,11 +355,15 @@ export default function AdminPanel({ onOpenLK }: AdminPanelProps = {}) {
               formatSubUntil={formatSubUntil}
               formatLastSeen={formatLastSeen}
               onSubscription={u => { setSubFor(u); setSubMonths(1); }}
-              onResetPassword={login => { setResetFor(login); setResetPass(""); }}
+              onResetPassword={l => { setResetFor(l); setResetPass(""); }}
               onToggle={handleToggle}
               onDelete={handleDelete}
               onSetRole={handleSetRole}
               onTokens={u => setTokensFor(u)}
+              onSetPanelRole={handleSetPanelRole}
+              panelRoles={panelRoles}
+              currentPanelRole={panelRole}
+              isHead={isHead}
             />
           </>
         )}

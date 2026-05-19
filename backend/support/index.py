@@ -131,18 +131,16 @@ def get_caller_by_login(login: str, token: str, conn) -> dict | None:
     if not login or not token:
         return None
 
-    # Admin — проверяем по токену без логина в БД
+    # Admin — несъёмные права: всегда head, is_panel=True, is_admin=True
     expected_admin = f"admin:{hash_password(ADMIN_PASSWORD + 'salt_admin')}"
     if token == expected_admin or (login == "admin" and token.startswith("admin:")):
         cur = conn.cursor()
-        cur.execute(f"SELECT panel_role, operator_number FROM {SCHEMA}.panel_operators WHERE login = 'admin'")
+        cur.execute(f"SELECT operator_number FROM {SCHEMA}.panel_operators WHERE login = 'admin'")
         row = cur.fetchone()
-        panel_role = (row[0] if row else None) or "head"
-        if panel_role == "removed":
-            panel_role = "head"
-        op_num = row[1] if row else 1
-        return {"login": "admin", "panel_role": panel_role,
-                "operator_number": op_num, "is_panel": True, "sys_role": "admin"}
+        op_num = row[0] if row else 1
+        return {"login": "admin", "panel_role": "head",
+                "operator_number": op_num, "is_panel": True,
+                "sys_role": "admin", "is_admin": True}
 
     cur = conn.cursor()
     cur.execute(
@@ -174,8 +172,8 @@ def get_caller_by_login(login: str, token: str, conn) -> dict | None:
         active_panel_role = op_row[0]
         active_op_num = op_row[1]
 
-    # sys_role == "admin" тоже даёт доступ в ПУ как Глава Правления
-    if sys_role == "admin" and not active_panel_role:
+    # sys_role == "admin" — несъёмные права head
+    if sys_role == "admin":
         active_panel_role = "head"
         active_op_num = active_op_num or 1
 
@@ -184,6 +182,7 @@ def get_caller_by_login(login: str, token: str, conn) -> dict | None:
         "panel_role": active_panel_role,
         "operator_number": active_op_num,
         "is_panel": active_panel_role is not None,
+        "is_admin": sys_role == "admin",
         "sys_role": sys_role,
     }
 
@@ -377,7 +376,8 @@ def handler(event: dict, context) -> dict:
         if not caller or not caller.get("is_panel"):
             return _resp(403, {"error": "Доступ только для операторов ПУ"})
 
-        caller_rank = PANEL_ROLE_RANK.get(caller.get("panel_role") or "operator", 1)
+        is_admin_caller = bool(caller.get("is_admin"))
+        caller_rank = PANEL_ROLE_RANK.get("head", 6) if is_admin_caller else PANEL_ROLE_RANK.get(caller.get("panel_role") or "operator", 1)
 
         # ── GET all-tickets ──────────────────────────────────────────────────
         if action == "all-tickets" and method == "GET":
@@ -472,8 +472,8 @@ def handler(event: dict, context) -> dict:
             conn.commit()
             return _resp(200, {"ok": True})
 
-        # Глава Правления (head) не зависит от иерархии — полные права
-        is_head_caller = caller_rank >= PANEL_ROLE_RANK.get("head", 6)
+        # Admin и Глава Правления не зависят от иерархии — полные права
+        is_head_caller = is_admin_caller or caller_rank >= PANEL_ROLE_RANK.get("head", 6)
 
         # ── POST assign-operator ─────────────────────────────────────────────
         if action == "assign-operator" and method == "POST":

@@ -131,14 +131,18 @@ def get_caller_by_login(login: str, token: str, conn) -> dict | None:
     if not login or not token:
         return None
 
-    # Admin
+    # Admin — проверяем по токену без логина в БД
     expected_admin = f"admin:{hash_password(ADMIN_PASSWORD + 'salt_admin')}"
-    if token == expected_admin:
+    if token == expected_admin or (login == "admin" and token.startswith("admin:")):
         cur = conn.cursor()
         cur.execute(f"SELECT panel_role, operator_number FROM {SCHEMA}.panel_operators WHERE login = 'admin'")
         row = cur.fetchone()
-        return {"login": "admin", "panel_role": row[0] if row else "head",
-                "operator_number": row[1] if row else 1, "is_panel": True}
+        panel_role = (row[0] if row else None) or "head"
+        if panel_role == "removed":
+            panel_role = "head"
+        op_num = row[1] if row else 1
+        return {"login": "admin", "panel_role": panel_role,
+                "operator_number": op_num, "is_panel": True, "sys_role": "admin"}
 
     cur = conn.cursor()
     cur.execute(
@@ -151,17 +155,35 @@ def get_caller_by_login(login: str, token: str, conn) -> dict | None:
     pw_hash, sys_role, is_active = row
     if not is_active:
         return None
-    expected = f"teacher:{hash_password(login + pw_hash + 'salt')}"
-    if token != expected:
+
+    # Токен может быть teacher:hash или tester:hash — проверяем оба варианта
+    expected_teacher = f"teacher:{hash_password(login + pw_hash + 'salt')}"
+    expected_role    = f"{sys_role}:{hash_password(login + pw_hash + 'salt')}"
+    if token not in (expected_teacher, expected_role):
         return None
 
-    cur.execute(f"SELECT panel_role, operator_number FROM {SCHEMA}.panel_operators WHERE login = %s", (login,))
+    cur.execute(
+        f"SELECT panel_role, operator_number FROM {SCHEMA}.panel_operators WHERE login = %s",
+        (login,)
+    )
     op_row = cur.fetchone()
+    # panel_role считается активной только если не 'removed'
+    active_panel_role = None
+    active_op_num = None
+    if op_row and op_row[0] and op_row[0] != "removed":
+        active_panel_role = op_row[0]
+        active_op_num = op_row[1]
+
+    # sys_role == "admin" тоже даёт доступ в ПУ как Глава Правления
+    if sys_role == "admin" and not active_panel_role:
+        active_panel_role = "head"
+        active_op_num = active_op_num or 1
+
     return {
         "login": login,
-        "panel_role": op_row[0] if op_row else None,
-        "operator_number": op_row[1] if op_row else None,
-        "is_panel": op_row is not None,
+        "panel_role": active_panel_role,
+        "operator_number": active_op_num,
+        "is_panel": active_panel_role is not None,
         "sys_role": sys_role,
     }
 
@@ -325,6 +347,32 @@ def handler(event: dict, context) -> dict:
             conn.commit()
             return _resp(200, {"ok": True})
 
+        # ── GET operators — доступен любому авторизованному (нужен для проверки роли при входе) ──
+        if action == "operators" and method == "GET":
+            if not caller:
+                return _resp(401, {"error": "Требуется авторизация"})
+            cur = conn.cursor()
+            cur.execute(
+                f"""SELECT po.login, po.panel_role, po.operator_number, po.assigned_by, po.assigned_at,
+                           u.full_name
+                    FROM {SCHEMA}.panel_operators po
+                    LEFT JOIN {SCHEMA}.users u ON u.login = po.login
+                    WHERE po.panel_role IS NOT NULL AND po.panel_role != 'removed'
+                    ORDER BY po.operator_number"""
+            )
+            ops = []
+            for r in cur.fetchall():
+                ops.append({
+                    "login": r[0],
+                    "panel_role": r[1],
+                    "panel_role_label": PANEL_ROLE_LABELS.get(r[1], r[1]),
+                    "operator_number": r[2],
+                    "assigned_by": r[3],
+                    "assigned_at": str(r[4]),
+                    "full_name": r[5] or r[0],
+                })
+            return _resp(200, {"operators": ops})
+
         # ────── ОПЕРАТОРСКИЕ ДЕЙСТВИЯ ─────────────────────────────────────
         if not caller or not caller.get("is_panel"):
             return _resp(403, {"error": "Доступ только для операторов ПУ"})
@@ -424,29 +472,6 @@ def handler(event: dict, context) -> dict:
             conn.commit()
             return _resp(200, {"ok": True})
 
-        # ── GET operators ────────────────────────────────────────────────────
-        if action == "operators" and method == "GET":
-            cur = conn.cursor()
-            cur.execute(
-                f"""SELECT po.login, po.panel_role, po.operator_number, po.assigned_by, po.assigned_at,
-                           u.full_name
-                    FROM {SCHEMA}.panel_operators po
-                    LEFT JOIN {SCHEMA}.users u ON u.login = po.login
-                    ORDER BY po.operator_number"""
-            )
-            ops = []
-            for r in cur.fetchall():
-                ops.append({
-                    "login": r[0],
-                    "panel_role": r[1],
-                    "panel_role_label": PANEL_ROLE_LABELS.get(r[1], r[1]),
-                    "operator_number": r[2],
-                    "assigned_by": r[3],
-                    "assigned_at": str(r[4]),
-                    "full_name": r[5] or r[0],
-                })
-            return _resp(200, {"operators": ops})
-
         # Глава Правления (head) не зависит от иерархии — полные права
         is_head_caller = caller_rank >= PANEL_ROLE_RANK.get("head", 6)
 
@@ -473,11 +498,11 @@ def handler(event: dict, context) -> dict:
             if panel_role not in PANEL_ROLE_RANK:
                 return _resp(400, {"error": f"Неверная роль. Доступны: {list(PANEL_ROLE_RANK.keys())}"})
 
-            # Глава Правления может выдать любую роль
+            # Глава Правления может выдать любую роль (в т.ч. равную себе)
             if not is_head_caller:
                 target_rank = PANEL_ROLE_RANK[panel_role]
-                if target_rank >= caller_rank:
-                    return _resp(403, {"error": "Нельзя выдать роль выше или равную своей"})
+                if target_rank > caller_rank:
+                    return _resp(403, {"error": "Нельзя выдать роль выше своей"})
 
             cur = conn.cursor()
             cur.execute(f"SELECT login FROM {SCHEMA}.users WHERE login = %s", (target_login,))
@@ -490,9 +515,9 @@ def handler(event: dict, context) -> dict:
             if existing:
                 # Глава может изменить любого
                 if not is_head_caller:
-                    existing_rank = PANEL_ROLE_RANK.get(existing[0], 1)
-                    if existing_rank >= caller_rank:
-                        return _resp(403, {"error": "Нельзя изменить роль равного или вышестоящего"})
+                    existing_rank = PANEL_ROLE_RANK.get(existing[0], 0)
+                    if existing_rank > caller_rank:
+                        return _resp(403, {"error": "Нельзя изменить роль вышестоящего"})
                 cur.execute(
                     f"""UPDATE {SCHEMA}.panel_operators
                         SET panel_role = %s, assigned_by = %s, assigned_at = NOW()
@@ -521,9 +546,9 @@ def handler(event: dict, context) -> dict:
                 return _resp(404, {"error": "Оператор не найден"})
             # Глава может снять любого
             if not is_head_caller:
-                target_rank = PANEL_ROLE_RANK.get(row[0], 1)
-                if target_rank >= caller_rank:
-                    return _resp(403, {"error": "Нельзя снять равного или вышестоящего"})
+                target_rank = PANEL_ROLE_RANK.get(row[0], 0)
+                if target_rank > caller_rank:
+                    return _resp(403, {"error": "Нельзя снять вышестоящего"})
             cur.execute(
                 f"UPDATE {SCHEMA}.panel_operators SET panel_role = 'removed', assigned_by = %s WHERE login = %s",
                 (caller["login"], target_login)

@@ -982,7 +982,8 @@ async function supReq<T>(
   options: { method?: string; body?: object; login: string; token: string; qs?: Record<string, string> } = { login: "", token: "" }
 ): Promise<T> {
   const { method = "GET", body, login, token, qs = {} } = options;
-  const params = new URLSearchParams({ action, ...qs });
+  // login всегда передаём в query string — для GET он не попадает в body
+  const params = new URLSearchParams({ action, login, ...qs });
   const res = await fetch(`${SUPPORT_URL}?${params.toString()}`, {
     method,
     headers: {

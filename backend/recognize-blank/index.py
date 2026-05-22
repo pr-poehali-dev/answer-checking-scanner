@@ -3,7 +3,7 @@
 POST / — { image: base64, questionsCount?: 20, optionsCount?: 4, answerKey?: "АБВГ..." }
 -> { studentCode, answers[], confidence[], analysis }
 """
-# v33: section-split clustering, header skip, code threshold fix
+# v34: geometry_grid as primary method, fixed code circle coords
 import json, base64, math
 import numpy as np
 import cv2
@@ -272,85 +272,37 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
     raw_cells = [c for c in raw_cells
                  if grid_x0 - 20 <= c[0] <= grid_x1 + 20]
 
-    # Кластеризуем по строкам
-    if raw_cells:
-        med_side = float(np.median([c[4] for c in raw_cells]))
-        row_tol  = med_side * 0.7
-        # Дедупликация по сетке: убираем близкие ячейки (дубли от разных threshold)
-        dedup_cells = []
-        dedup_seen = set()
-        for c in sorted(raw_cells, key=lambda x: -x[4]):  # крупные первыми
-            key = (round(c[0] / max(med_side * 0.5, 4)), round(c[1] / max(med_side * 0.5, 4)))
-            if key not in dedup_seen:
-                dedup_seen.add(key)
-                dedup_cells.append(c)
+    # Основной метод: геометрическая сетка по якорям (точная, не зависит от детектора)
+    # Пропорции из generate-blank: P=4mm, num_w=7.5mm, sq=5.5mm, row_h=sq+2mm
+    n_blank_cols = 1 if questions_count <= 15 else (2 if questions_count <= 40 else 3)
+    rows_per_col = math.ceil(questions_count / n_blank_cols)
+    section_w    = grid_w / n_blank_cols
+    # num_frac = num_w / col_w = 7.5 / (col_w). Для A4: col_w=(198-8)/2=95mm → 7.5/95=0.079
+    # Но якоря стоят в полях (P/2=2mm от края), поэтому grid_x0 уже включает поле.
+    # Внутри колонки: num_w=7.5mm занимает левую часть, затем 4 ячейки равномерно.
+    num_frac  = 0.079
+    sq_area_w = section_w * (1 - num_frac)
+    sq_step   = sq_area_w / options_count
+    row_step  = grid_h / rows_per_col
+    cell_w    = int(sq_step * 0.65)
+    cell_h    = int(row_step * 0.70)
+    answer_rows_cells = []
+    for sec in range(n_blank_cols):
+        sec_x0     = grid_x0 + sec * section_w
+        sq_x_start = sec_x0 + section_w * num_frac + sq_step / 2
+        for ri in range(rows_per_col):
+            q_idx = sec * rows_per_col + ri
+            if q_idx >= questions_count:
+                break
+            cy_cell = grid_y0 + ri * row_step + row_step / 2
+            row = [(int(sq_x_start + oi * sq_step), int(cy_cell),
+                    cell_w, cell_h, sq_step)
+                   for oi in range(options_count)]
+            answer_rows_cells.append(row)
 
-        # Отбрасываем ячейки из верхних 8% сетки — там заголовок "А Б В Г"
-        header_cutoff = grid_y0 + grid_h * 0.08
-        dedup_cells = [c for c in dedup_cells if c[1] > header_cutoff]
-
-        # Определяем число колонок, разбиваем ячейки по секциям
-        n_blank_cols = 1 if questions_count <= 15 else (2 if questions_count <= 40 else 3)
-        section_w = grid_w / n_blank_cols
-
-        answer_rows_cells = []
-        for sec in range(n_blank_cols):
-            sec_x0 = grid_x0 + sec * section_w
-            sec_x1 = grid_x0 + (sec + 1) * section_w
-            # Ячейки только этой секции
-            sec_cells = [c for c in dedup_cells if sec_x0 - med_side <= c[0] <= sec_x1 + med_side]
-            rows_sec = _cluster_rows(sec_cells, tol=row_tol)
-            # Берём только строки с нужным числом ячеек
-            good_rows = [r for r in rows_sec if len(r) == options_count]
-            # Смягчаем: строки с ≥ options_count — обрезаем, с options_count-1 — берём
-            if len(good_rows) < (questions_count // n_blank_cols) // 2:
-                good_rows = []
-                for r in rows_sec:
-                    if len(r) >= options_count:
-                        good_rows.append(r[:options_count])
-                    elif len(r) == options_count - 1:
-                        good_rows.append(r)
-            answer_rows_cells.extend(good_rows)
-
-        # Сортируем итоговые строки: левая колонка (q1-10) потом правая (q11-20)
-        # Уже добавлены в порядке секций, дополнительная сортировка не нужна
-
-        dbg_rows_dist = ["cells_detected", len(answer_rows_cells),
-                         f"raw={len(raw_cells)}", f"dedup={len(dedup_cells)}", f"grid={int(grid_w)}x{int(grid_h)}"]
-    else:
-        answer_rows_cells = []
-        dbg_rows_dist = ["no_cells_found", f"grid={int(grid_w)}x{int(grid_h)}"]
-
-    # Если детектор не нашёл достаточно строк — строим геометрическую сетку
-    if len(answer_rows_cells) < questions_count * 0.5:
-        n_blank_cols = 1 if questions_count <= 15 else (2 if questions_count <= 40 else 3)
-        rows_per_col = math.ceil(questions_count / n_blank_cols)
-        section_w    = grid_w / n_blank_cols
-        # Точные пропорции из generate-blank:
-        # col_w=(bw-2P)/n_cols, P=4mm, num_w=7.5mm, cell_w=(col_w-num_w)/n_opts
-        # Для 20 вопр, 2 кол на A4 (~180mm): col_w=86mm, num_w=7.5mm → num_frac=0.087
-        num_frac  = 0.087
-        sq_area_w = section_w * (1 - num_frac)
-        sq_step   = sq_area_w / options_count
-        row_step  = grid_h / rows_per_col
-        # Квадрат ответа = 5.5mm, шаг ячейки ≈ 9.8mm → доля 0.56
-        # Но для центрирования ROI берём 70% шага
-        cell_w    = int(sq_step * 0.70)
-        cell_h    = int(row_step * 0.75)
-        answer_rows_cells = []
-        for sec in range(n_blank_cols):
-            sec_x0     = grid_x0 + sec * section_w
-            sq_x_start = sec_x0 + section_w * num_frac + sq_step / 2
-            for ri in range(rows_per_col):
-                q_idx = sec * rows_per_col + ri
-                if q_idx >= questions_count:
-                    break
-                cy_cell = grid_y0 + ri * row_step + row_step / 2
-                row = [(int(sq_x_start + oi * sq_step), int(cy_cell),
-                        cell_w, cell_h, sq_step)
-                       for oi in range(options_count)]
-                answer_rows_cells.append(row)
-        dbg_rows_dist.append("fallback_geometry")
+    dbg_rows_dist = ["geometry_grid", len(answer_rows_cells),
+                     f"raw={len(raw_cells)}", f"grid={int(grid_w)}x{int(grid_h)}",
+                     f"sq_step={round(sq_step,1)}", f"row_step={round(row_step,1)}"]
 
     answer_rows_cells = answer_rows_cells[:questions_count]
 
@@ -413,28 +365,29 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
 
     if code_anchors:
         c_tl, c_tr, c_bl, c_br = code_anchors
-        # Зона кружков между якорями кода
-        c_x0 = c_tl[0] + c_tl[2] // 2
-        c_x1 = c_tr[0] - c_tr[2] // 2
-        c_y0 = c_tl[1]
-        c_y1 = c_bl[1]
-        c_w  = c_x1 - c_x0
+        # Якоря кода стоят в полях: c_tl[0] — левый X якоря (левое поле)
+        # Контент кода начинается правее: x0+P+nw2 от левого края бланка
+        # Якорь левого поля ≈ x0 + P/2 → контент ≈ c_tl[0] + P*1.5 + nw2
+        # Из generate-blank: P=4mm, nw2=5mm, gap_x=cr2*2+0.5=3.5mm, cr2=1.5mm
+        # Якоря расположены снаружи зоны кружков, поэтому используем их Y для высоты
+        c_inner_x0 = c_tl[0] + c_tl[2]  # правый край левого якоря
+        c_inner_x1 = c_tr[0] - c_tr[2]  # левый край правого якоря
+        c_y0 = c_tl[1] + c_tl[3] // 2
+        c_y1 = c_bl[1] - c_bl[3] // 2
+        c_w  = c_inner_x1 - c_inner_x0
         c_h  = c_y1 - c_y0
 
-        # Структура: 5 строк × 10 кружков (0-9), номер строки слева
-        # В generate-blank: nw2=5mm (номер), затем 10 кружков с шагом 3.5mm
-        # nw2/всё = 5/(5+10*3.5) = 5/40 = 0.125 → но нужна реальная пропорция
-        # Лучше — попробуем разные num_frac и выберем где fills дают чёткий разрыв
+        # Структура: 5 строк × 10 кружков (0-9), номер строки слева (nw2=5mm)
+        # Из generate-blank: gap_x = cr2*2 + 0.5mm = 3.5mm, nw2=5mm
+        # nw2 / (nw2 + 10*gap_x) = 5 / (5 + 35) = 0.125
         n_rows_code = 5
         n_cols_code = 10
-
-        # Берём фиксированный num_frac=0.13 (5mm из ~38mm зоны)
-        num_frac_c = 0.13
-        circ_x0 = c_x0 + c_w * num_frac_c
+        num_frac_c = 0.125
+        circ_x0 = c_inner_x0 + c_w * num_frac_c
         circ_w  = c_w * (1.0 - num_frac_c)
         step_x  = circ_w / n_cols_code
-        step_y  = c_h / n_rows_code
-        r_est   = int(min(step_x, step_y) * 0.40)
+        step_y  = c_h / n_rows_code if c_h > 0 else 40
+        r_est   = max(3, int(min(step_x, step_y) * 0.38))
 
         dbg_code["circ_x0"] = int(circ_x0)
         dbg_code["circ_y0"] = c_y0

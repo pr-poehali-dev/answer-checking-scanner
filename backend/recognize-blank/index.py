@@ -3,7 +3,7 @@
 POST / — { image: base64, questionsCount?: 20, optionsCount?: 4, answerKey?: "АБВГ..." }
 -> { studentCode, answers[], confidence[], analysis }
 """
-# v38b: relative darkness for code circles, num_frac=0.150
+# v39: detector-based calibration for both answers grid and code circles
 import json, base64, math
 import numpy as np
 import cv2
@@ -272,33 +272,102 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
     raw_cells = [c for c in raw_cells
                  if grid_x0 - 20 <= c[0] <= grid_x1 + 20]
 
-    # Основной метод: геометрическая сетка по якорям (точная, не зависит от детектора)
-    # Пропорции из generate-blank: P=4mm, num_w=7.5mm, sq=5.5mm, row_h=sq+2mm
+    # Основной метод: геометрическая сетка + уточнение по детектированным квадратам
     n_blank_cols = 1 if questions_count <= 15 else (2 if questions_count <= 40 else 3)
     rows_per_col = math.ceil(questions_count / n_blank_cols)
     section_w    = grid_w / n_blank_cols
-    # Из generate-blank: num_w=7.5mm, grid_w≈(bw-2P)=198-8=190mm для A4 при 2 кол → col_w=95mm
-    # Якоря в полях P/2=2mm, grid_x0 ≈ x0+P/2. Контент с x0+P, итого отступ P/2=2mm внутри секции.
-    # num_w=7.5mm от начала контента. Суммарно: (P/2 + num_w)/col_w = (2+7.5)/95 = 0.10
-    # Откалибровано по debug: grid_w=662, section_w=331, row0_xy[0]=242, grid_x0=178
-    # А должен быть на 178+45+38=261, реально 242 → num_frac надо увеличить на (261-242)/331=0.057
-    # Итого num_frac = 0.079 + 0.057 = 0.136
-    num_frac  = 0.150
-    sq_area_w = section_w * (1 - num_frac)
-    sq_step   = sq_area_w / options_count
-    row_step  = grid_h / rows_per_col
-    cell_w    = int(sq_step * 0.60)
-    cell_h    = int(row_step * 0.65)
+    row_step     = grid_h / rows_per_col
+
+    # Калибровка по реальным детектированным квадратам, если они есть
+    # Иначе используем пропорции из generate-blank
+    sq_x_start_per_sec = []
+    sq_step_calibrated = None
+    cell_size_med      = None
+
+    if len(raw_cells) >= 4:
+        # Медианный размер квадрата
+        cell_size_med = float(np.median([c[4] for c in raw_cells]))
+        # Для каждой секции находим X-координаты квадратов в первой строке (q1, q11)
+        # и берём шаг между ними
+        for sec in range(n_blank_cols):
+            sec_x0 = grid_x0 + sec * section_w
+            sec_x1 = grid_x0 + (sec + 1) * section_w
+            sec_cells = [c for c in raw_cells
+                         if sec_x0 - cell_size_med <= c[0] <= sec_x1 + cell_size_med]
+            if len(sec_cells) < options_count:
+                sq_x_start_per_sec.append(None)
+                continue
+            # Кластеризуем по X, находим options_count наиболее частых X-позиций
+            xs = sorted([c[0] for c in sec_cells])
+            # Группируем близкие X
+            x_clusters = []
+            cluster_tol = cell_size_med * 0.6
+            for x in xs:
+                placed = False
+                for cl in x_clusters:
+                    if abs(np.mean(cl) - x) <= cluster_tol:
+                        cl.append(x)
+                        placed = True
+                        break
+                if not placed:
+                    x_clusters.append([x])
+            # Сортируем кластеры по числу элементов (самые частые = настоящие столбцы)
+            x_clusters.sort(key=lambda cl: -len(cl))
+            top_clusters = x_clusters[:options_count]
+            if len(top_clusters) == options_count:
+                col_xs = sorted([np.mean(cl) for cl in top_clusters])
+                sq_x_start_per_sec.append(col_xs[0])
+                if sq_step_calibrated is None and len(col_xs) >= 2:
+                    sq_step_calibrated = float(np.median(np.diff(col_xs)))
+            else:
+                sq_x_start_per_sec.append(None)
+
+    # Фоллбэк-пропорции если калибровка не удалась
+    if sq_step_calibrated is None:
+        num_frac  = 0.150
+        sq_area_w = section_w * (1 - num_frac)
+        sq_step_calibrated = sq_area_w / options_count
+    if cell_size_med is None:
+        cell_size_med = sq_step_calibrated * 0.55
+
+    sq_step = sq_step_calibrated
+    cell_w  = int(cell_size_med * 0.85)
+    cell_h  = int(cell_size_med * 0.85)
+
+    # Калибровка Y-координат строк по детектированным ячейкам
+    row_ys_calibrated = None
+    if len(raw_cells) >= rows_per_col:
+        ys = sorted([c[1] for c in raw_cells])
+        y_clusters = []
+        y_tol = cell_size_med * 0.6
+        for y in ys:
+            placed = False
+            for cl in y_clusters:
+                if abs(np.mean(cl) - y) <= y_tol:
+                    cl.append(y)
+                    placed = True
+                    break
+            if not placed:
+                y_clusters.append([y])
+        # Сортируем по числу элементов и берём rows_per_col самых больших
+        y_clusters.sort(key=lambda cl: -len(cl))
+        top_y_clusters = y_clusters[:rows_per_col]
+        if len(top_y_clusters) == rows_per_col:
+            row_ys_calibrated = sorted([float(np.mean(cl)) for cl in top_y_clusters])
+
     answer_rows_cells = []
     for sec in range(n_blank_cols):
         sec_x0     = grid_x0 + sec * section_w
-        sq_x_start = sec_x0 + section_w * num_frac + sq_step / 2
+        sq_x_first = sq_x_start_per_sec[sec] if sec < len(sq_x_start_per_sec) and sq_x_start_per_sec[sec] is not None else (sec_x0 + section_w * 0.15 + sq_step / 2)
         for ri in range(rows_per_col):
             q_idx = sec * rows_per_col + ri
             if q_idx >= questions_count:
                 break
-            cy_cell = grid_y0 + ri * row_step + row_step / 2
-            row = [(int(sq_x_start + oi * sq_step), int(cy_cell),
+            if row_ys_calibrated and ri < len(row_ys_calibrated):
+                cy_cell = row_ys_calibrated[ri]
+            else:
+                cy_cell = grid_y0 + ri * row_step + row_step / 2
+            row = [(int(sq_x_first + oi * sq_step), int(cy_cell),
                     cell_w, cell_h, sq_step)
                    for oi in range(options_count)]
             answer_rows_cells.append(row)
@@ -374,29 +443,79 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
 
     if code_anchors:
         c_tl, c_tr, c_bl, c_br = code_anchors
-        # Якоря кода стоят в полях: c_tl[0] — левый X якоря (левое поле)
-        # Контент кода начинается правее: x0+P+nw2 от левого края бланка
-        # Якорь левого поля ≈ x0 + P/2 → контент ≈ c_tl[0] + P*1.5 + nw2
-        # Из generate-blank: P=4mm, nw2=5mm, gap_x=cr2*2+0.5=3.5mm, cr2=1.5mm
-        # Якоря расположены снаружи зоны кружков, поэтому используем их Y для высоты
-        c_inner_x0 = c_tl[0] + c_tl[2]  # правый край левого якоря
-        c_inner_x1 = c_tr[0] - c_tr[2]  # левый край правого якоря
-        c_y0 = c_tl[1] + c_tl[3] // 2
-        c_y1 = c_bl[1] - c_bl[3] // 2
+        # tuple структура: (cx, cy, cw, ch, side) — cx, cy это ЦЕНТР якоря
+        # Правый край левого якоря = cx + cw/2; левый край правого = cx - cw/2
+        c_inner_x0 = c_tl[0] + c_tl[2] // 2  # правый край левого якоря
+        c_inner_x1 = c_tr[0] - c_tr[2] // 2  # левый край правого якоря
+        c_y0 = c_tl[1]
+        c_y1 = c_bl[1]
         c_w  = c_inner_x1 - c_inner_x0
         c_h  = c_y1 - c_y0
 
-        # Структура: 5 строк × 10 кружков (0-9), номер строки слева (nw2=5mm)
-        # Из generate-blank: gap_x = cr2*2 + 0.5mm = 3.5mm, nw2=5mm
-        # nw2 / (nw2 + 10*gap_x) = 5 / (5 + 35) = 0.125
+        # Ищем кружки детектором HoughCircles внутри зоны
         n_rows_code = 5
         n_cols_code = 10
-        num_frac_c = 0.125
-        circ_x0 = c_inner_x0 + c_w * num_frac_c
-        circ_w  = c_w * (1.0 - num_frac_c)
-        step_x  = circ_w / n_cols_code
-        step_y  = c_h / n_rows_code if c_h > 0 else 40
-        r_est   = max(3, int(min(step_x, step_y) * 0.38))
+
+        code_zone_img = gray[c_y0:c_y1, int(c_inner_x0):int(c_inner_x1)]
+        detected_circles = _find_circles(code_zone_img, 0, code_zone_img.shape[0])
+        # Корректируем координаты обратно в полное изображение
+        detected_circles = [(cx + int(c_inner_x0), cy + c_y0, r) for cx, cy, r in detected_circles]
+
+        # Если детектор нашёл достаточно кружков — калибруем сетку по ним
+        if len(detected_circles) >= n_cols_code:
+            # Берём X-координаты, кластеризуем
+            r_med = float(np.median([c[2] for c in detected_circles]))
+            xs = sorted([c[0] for c in detected_circles])
+            x_cls_c = []
+            for x in xs:
+                placed = False
+                for cl in x_cls_c:
+                    if abs(np.mean(cl) - x) <= r_med * 1.2:
+                        cl.append(x); placed = True; break
+                if not placed:
+                    x_cls_c.append([x])
+            x_cls_c.sort(key=lambda cl: -len(cl))
+            top_x = x_cls_c[:n_cols_code]
+            if len(top_x) == n_cols_code:
+                col_xs = sorted([float(np.mean(cl)) for cl in top_x])
+                step_x = float(np.median(np.diff(col_xs)))
+                # circ_x0 — это начало последовательности так, чтобы col_i=0 был col_xs[0]
+                circ_x0 = col_xs[0] - step_x / 2
+                circ_w  = step_x * n_cols_code
+            else:
+                num_frac_c = 0.125
+                circ_x0 = c_inner_x0 + c_w * num_frac_c
+                circ_w  = c_w * (1.0 - num_frac_c)
+                step_x  = circ_w / n_cols_code
+            # Y-калибровка
+            ys_c = sorted([c[1] for c in detected_circles])
+            y_cls_c = []
+            for y in ys_c:
+                placed = False
+                for cl in y_cls_c:
+                    if abs(np.mean(cl) - y) <= r_med * 1.2:
+                        cl.append(y); placed = True; break
+                if not placed:
+                    y_cls_c.append([y])
+            y_cls_c.sort(key=lambda cl: -len(cl))
+            top_y = y_cls_c[:n_rows_code]
+            if len(top_y) == n_rows_code:
+                row_ys_c = sorted([float(np.mean(cl)) for cl in top_y])
+                step_y = float(np.median(np.diff(row_ys_c)))
+                circ_y_start = row_ys_c[0]
+            else:
+                step_y = c_h / n_rows_code if c_h > 0 else 40
+                circ_y_start = c_y0 + step_y / 2
+            r_est = max(3, int(r_med))
+        else:
+            # Фоллбэк — геометрия
+            num_frac_c = 0.125
+            circ_x0 = c_inner_x0 + c_w * num_frac_c
+            circ_w  = c_w * (1.0 - num_frac_c)
+            step_x  = circ_w / n_cols_code
+            step_y  = c_h / n_rows_code if c_h > 0 else 40
+            circ_y_start = c_y0 + step_y / 2
+            r_est   = max(3, int(min(step_x, step_y) * 0.38))
 
         dbg_code["circ_x0"] = int(circ_x0)
         dbg_code["circ_y0"] = c_y0
@@ -427,7 +546,7 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
         thr_code = max(60, min(160, int(code_bg * 0.70)))
 
         for row_i in range(n_rows_code):
-            cy_c = int(c_y0 + row_i * step_y + step_y / 2)
+            cy_c = int(circ_y_start + row_i * step_y)
             # Сначала собираем средние яркости центров кружков (не бинарные fills)
             raw_vals = []
             for col_i in range(n_cols_code):
@@ -455,7 +574,7 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
             gap_c   = best_f - second
             # Кружок закрашен если он значительно темнее остальных
             darkness_abs = row_bg - raw_vals[best_i]  # абс. разница яркостей
-            if darkness_abs > 15 and gap_c > 0.25:
+            if darkness_abs > 8 and gap_c > 0.20:
                 code += str(best_i)
                 code_confs.append(round(min(0.99, gap_c * 0.8 + 0.2), 2))
             else:

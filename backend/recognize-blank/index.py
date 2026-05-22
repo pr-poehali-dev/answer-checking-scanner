@@ -3,7 +3,7 @@
 POST / — { image: base64, questionsCount?: 20, optionsCount?: 4, answerKey?: "АБВГ..." }
 -> { studentCode, answers[], confidence[], analysis }
 """
-# v35: fixed ocrEngine field mapping, reanalyze mode without image
+# v36: extended debug — cell coords, code zone pixels, pixel samples
 import json, base64, math
 import numpy as np
 import cv2
@@ -300,9 +300,15 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
                    for oi in range(options_count)]
             answer_rows_cells.append(row)
 
+    # Координаты первой строки для отладки
+    _r0 = answer_rows_cells[0] if answer_rows_cells else []
+    _r0_coords = [(c[0], c[1]) for c in _r0]
     dbg_rows_dist = ["geometry_grid", len(answer_rows_cells),
                      f"raw={len(raw_cells)}", f"grid={int(grid_w)}x{int(grid_h)}",
-                     f"sq_step={round(sq_step,1)}", f"row_step={round(row_step,1)}"]
+                     f"sq_step={round(sq_step,1)}", f"row_step={round(row_step,1)}",
+                     f"grid_x0={int(grid_x0)}", f"grid_y0={int(grid_y0)}",
+                     f"sq_x_start={int(sq_x_start)}", f"cell_w={cell_w}",
+                     f"row0_xy={_r0_coords}"]
 
     answer_rows_cells = answer_rows_cells[:questions_count]
 
@@ -391,9 +397,26 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
 
         dbg_code["circ_x0"] = int(circ_x0)
         dbg_code["circ_y0"] = c_y0
+        dbg_code["c_inner_x0"] = int(c_inner_x0)
+        dbg_code["c_inner_x1"] = int(c_inner_x1)
+        dbg_code["c_y0"] = c_y0
+        dbg_code["c_y1"] = c_y1
+        dbg_code["c_w"] = int(c_w)
+        dbg_code["c_h"] = int(c_h)
         dbg_code["step_x"]  = round(step_x, 1)
         dbg_code["step_y"]  = round(step_y, 1)
         dbg_code["r_est"]   = r_est
+        # Медиана всей зоны кода для диагностики
+        full_code_zone = gray[c_y0:max(c_y0+1,c_y1), int(c_inner_x0):max(int(c_inner_x0)+1,int(c_inner_x1))]
+        dbg_code["zone_median"] = round(float(np.median(full_code_zone)), 1) if full_code_zone.size > 0 else -1
+        # Сэмпл пикселей первой строки (центры кружков)
+        _first_row_pixels = []
+        for col_i in range(min(5, n_cols_code)):
+            cx_s = int(circ_x0 + col_i * (circ_w / n_cols_code) + circ_w / n_cols_code / 2)
+            cy_s = int(c_y0 + step_y / 2)
+            if 0 <= cy_s < h and 0 <= cx_s < w:
+                _first_row_pixels.append(int(gray[cy_s, cx_s]))
+        dbg_code["pixel_samples"] = _first_row_pixels
 
         # Для кружков берём отдельный порог — кружки закрашены сильнее крестиков
         code_zone_pixels = gray[c_y0:c_y1, int(circ_x0):int(circ_x0 + circ_w)]

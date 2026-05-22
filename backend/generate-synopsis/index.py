@@ -111,7 +111,9 @@ def yandex_chat(messages: list, max_tokens: int = 8000, temperature: float = 0.4
     if not text:
         raise RuntimeError("YandexGPT вернул пустой текст")
     usage = (body.get("result") or {}).get("usage") or {}
+    print(f"[YandexGPT usage] {usage}")
     tokens_used = int(usage.get("totalTokens") or usage.get("completionTokens") or 0)
+    print(f"[YandexGPT tokens_used] {tokens_used}")
     return text, tokens_used
 
 
@@ -413,6 +415,7 @@ def handler(event: dict, context) -> dict:
     )
 
     word_count = len(md_text.split())
+    print(f"[spend] login={login!r} tokens_used={tokens_used}")
     spend_ai_tokens(login, max(tokens_used, 1))
 
     docx_bytes = build_docx(

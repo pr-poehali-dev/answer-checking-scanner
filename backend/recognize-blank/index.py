@@ -3,7 +3,7 @@
 POST / — { image: base64, questionsCount?: 20, optionsCount?: 4, answerKey?: "АБВГ..." }
 -> { studentCode, answers[], confidence[], analysis }
 """
-# v37: fixed num_frac=0.136, code thr=70% of bg median
+# v38b: relative darkness for code circles, num_frac=0.150
 import json, base64, math
 import numpy as np
 import cv2
@@ -283,7 +283,7 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
     # Откалибровано по debug: grid_w=662, section_w=331, row0_xy[0]=242, grid_x0=178
     # А должен быть на 178+45+38=261, реально 242 → num_frac надо увеличить на (261-242)/331=0.057
     # Итого num_frac = 0.079 + 0.057 = 0.136
-    num_frac  = 0.136
+    num_frac  = 0.150
     sq_area_w = section_w * (1 - num_frac)
     sq_step   = sq_area_w / options_count
     row_step  = grid_h / rows_per_col
@@ -428,36 +428,43 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
 
         for row_i in range(n_rows_code):
             cy_c = int(c_y0 + row_i * step_y + step_y / 2)
-            d_vals = []
+            # Сначала собираем средние яркости центров кружков (не бинарные fills)
+            raw_vals = []
             for col_i in range(n_cols_code):
                 cx_c = int(circ_x0 + col_i * step_x + step_x / 2)
-                # Меряем центр кружка — берём 60% радиуса
-                rsz = max(3, int(r_est * 0.6))
+                rsz = max(3, int(r_est * 0.55))
                 x1 = max(0, cx_c - rsz); y1 = max(0, cy_c - rsz)
                 x2 = min(w, cx_c + rsz); y2 = min(h, cy_c + rsz)
                 if x2 > x1 and y2 > y1:
                     roi = gray[y1:y2, x1:x2]
-                    bw_r = (roi < thr_code).astype(np.uint8)
-                    d_vals.append(float(np.mean(bw_r)))
+                    raw_vals.append(float(np.mean(roi)))
                 else:
-                    d_vals.append(0.0)
-            if not d_vals:
+                    raw_vals.append(255.0)
+            # Относительный метод: самый тёмный кружок в строке
+            if not raw_vals:
                 code += "?"; code_confs.append(0.0); continue
-            best_i = int(np.argmax(d_vals))
-            best_f = d_vals[best_i]
+            min_v   = min(raw_vals)
+            max_v   = max(raw_vals)
+            row_bg  = max_v  # самый светлый = фон
+            # Нормируем: 1.0 = самый тёмный (закрашен), 0.0 = фон
+            d_vals  = [max(0.0, (row_bg - v) / max(row_bg - min_v, 1.0)) for v in raw_vals]
+            best_i  = int(np.argmax(d_vals))
+            best_f  = d_vals[best_i]
             sorted_d = sorted(d_vals, reverse=True)
-            second = sorted_d[1] if len(sorted_d) > 1 else 0.0
-            gap_c = best_f - second
-            norm_gap_c = gap_c / max(best_f, 0.01)
-            # Закрашенный кружок: ≥20% тёмных пикселей и норм. разрыв ≥20%
-            if best_f > 0.20 and (gap_c > 0.08 or norm_gap_c > 0.20):
+            second  = sorted_d[1] if len(sorted_d) > 1 else 0.0
+            gap_c   = best_f - second
+            # Кружок закрашен если он значительно темнее остальных
+            darkness_abs = row_bg - raw_vals[best_i]  # абс. разница яркостей
+            if darkness_abs > 15 and gap_c > 0.25:
                 code += str(best_i)
-                code_confs.append(round(min(0.99, norm_gap_c * 0.5 + gap_c * 2 + 0.2), 2))
+                code_confs.append(round(min(0.99, gap_c * 0.8 + 0.2), 2))
             else:
                 code += "?"; code_confs.append(0.0)
             if row_i == 0:
-                dbg_code["row0_fills"] = [round(v, 3) for v in d_vals]
-                dbg_code["thr_code"] = thr_code
+                dbg_code["row0_fills"]    = [round(v, 3) for v in d_vals]
+                dbg_code["row0_raw"]      = [round(v, 1) for v in raw_vals]
+                dbg_code["row0_darkness"] = round(darkness_abs, 1)
+                dbg_code["thr_code"]      = thr_code
     else:
         dbg_code["error"] = "no_code_anchors"
 

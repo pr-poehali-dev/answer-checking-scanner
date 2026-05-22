@@ -3,7 +3,7 @@
 POST / — { image: base64, questionsCount?: 20, optionsCount?: 4, answerKey?: "АБВГ..." }
 -> { studentCode, answers[], confidence[], analysis }
 """
-# v36: extended debug — cell coords, code zone pixels, pixel samples
+# v37: fixed num_frac=0.136, code thr=70% of bg median
 import json, base64, math
 import numpy as np
 import cv2
@@ -277,15 +277,18 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
     n_blank_cols = 1 if questions_count <= 15 else (2 if questions_count <= 40 else 3)
     rows_per_col = math.ceil(questions_count / n_blank_cols)
     section_w    = grid_w / n_blank_cols
-    # num_frac = num_w / col_w = 7.5 / (col_w). Для A4: col_w=(198-8)/2=95mm → 7.5/95=0.079
-    # Но якоря стоят в полях (P/2=2mm от края), поэтому grid_x0 уже включает поле.
-    # Внутри колонки: num_w=7.5mm занимает левую часть, затем 4 ячейки равномерно.
-    num_frac  = 0.079
+    # Из generate-blank: num_w=7.5mm, grid_w≈(bw-2P)=198-8=190mm для A4 при 2 кол → col_w=95mm
+    # Якоря в полях P/2=2mm, grid_x0 ≈ x0+P/2. Контент с x0+P, итого отступ P/2=2mm внутри секции.
+    # num_w=7.5mm от начала контента. Суммарно: (P/2 + num_w)/col_w = (2+7.5)/95 = 0.10
+    # Откалибровано по debug: grid_w=662, section_w=331, row0_xy[0]=242, grid_x0=178
+    # А должен быть на 178+45+38=261, реально 242 → num_frac надо увеличить на (261-242)/331=0.057
+    # Итого num_frac = 0.079 + 0.057 = 0.136
+    num_frac  = 0.136
     sq_area_w = section_w * (1 - num_frac)
     sq_step   = sq_area_w / options_count
     row_step  = grid_h / rows_per_col
-    cell_w    = int(sq_step * 0.65)
-    cell_h    = int(row_step * 0.70)
+    cell_w    = int(sq_step * 0.60)
+    cell_h    = int(row_step * 0.65)
     answer_rows_cells = []
     for sec in range(n_blank_cols):
         sec_x0     = grid_x0 + sec * section_w
@@ -418,10 +421,10 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
                 _first_row_pixels.append(int(gray[cy_s, cx_s]))
         dbg_code["pixel_samples"] = _first_row_pixels
 
-        # Для кружков берём отдельный порог — кружки закрашены сильнее крестиков
+        # Для кружков: порог = 70% от медианы фона (фон ~138, кружки ~30-50)
         code_zone_pixels = gray[c_y0:c_y1, int(circ_x0):int(circ_x0 + circ_w)]
-        code_bg = float(np.median(code_zone_pixels)) if code_zone_pixels.size > 0 else 180
-        thr_code = max(80, min(160, int(code_bg * 0.55)))
+        code_bg = float(np.median(code_zone_pixels)) if code_zone_pixels.size > 0 else 160
+        thr_code = max(60, min(160, int(code_bg * 0.70)))
 
         for row_i in range(n_rows_code):
             cy_c = int(c_y0 + row_i * step_y + step_y / 2)

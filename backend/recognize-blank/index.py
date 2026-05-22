@@ -276,18 +276,31 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
     if raw_cells:
         med_side = float(np.median([c[4] for c in raw_cells]))
         row_tol  = med_side * 0.7
-        rows_all = _cluster_rows(raw_cells, tol=row_tol)
+        # Дедупликация по сетке: убираем близкие ячейки (дубли от разных threshold)
+        dedup_cells = []
+        dedup_seen = set()
+        for c in sorted(raw_cells, key=lambda x: -x[4]):  # крупные первыми
+            key = (round(c[0] / max(med_side * 0.5, 4)), round(c[1] / max(med_side * 0.5, 4)))
+            if key not in dedup_seen:
+                dedup_seen.add(key)
+                dedup_cells.append(c)
+        rows_all = _cluster_rows(dedup_cells, tol=row_tol)
         # Оставляем только строки с нужным числом ячеек
         answer_rows_cells = [r for r in rows_all if len(r) == options_count]
 
-        # Если не хватает строк — смягчаем
+        # Если не хватает строк — смягчаем: берём строки с близким числом ячеек
         if len(answer_rows_cells) < questions_count // 2:
-            answer_rows_cells = [r for r in rows_all
-                                 if abs(len(r) - options_count) <= 1]
-            answer_rows_cells = [r[:options_count] for r in answer_rows_cells]
+            answer_rows_cells = []
+            for r in rows_all:
+                if len(r) >= options_count:
+                    # Слишком много ячеек — берём options_count с равномерным шагом
+                    step = len(r) / options_count
+                    answer_rows_cells.append([r[int(i * step)] for i in range(options_count)])
+                elif len(r) == options_count - 1:
+                    answer_rows_cells.append(r)
 
         dbg_rows_dist = ["cells_detected", len(answer_rows_cells),
-                         f"raw={len(raw_cells)}", f"grid={int(grid_w)}x{int(grid_h)}"]
+                         f"raw={len(raw_cells)}", f"dedup={len(dedup_cells)}", f"grid={int(grid_w)}x{int(grid_h)}"]
     else:
         answer_rows_cells = []
         dbg_rows_dist = ["no_cells_found", f"grid={int(grid_w)}x{int(grid_h)}"]
@@ -353,10 +366,11 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
                                "norm_gap": round(norm_gap, 4),
                                "thr": thr_value,
                                "chosen": chosen})
-        # Помеченный квадрат: ≥10% тёмных пикселей в центре И разрыв ≥30%
-        if max_f > 0.10 and gap > 0.04:
+        # Помеченный квадрат: ≥7% тёмных пикселей И либо абс. разрыв ≥2%, либо норм. разрыв ≥12%
+        is_marked = max_f > 0.07 and (gap > 0.02 or norm_gap > 0.12)
+        if is_marked:
             answers.append(opts[idx] if idx < len(opts) else "")
-            confidences.append(round(min(0.99, gap * 3 + 0.3), 2))
+            confidences.append(round(min(0.99, norm_gap * 0.7 + gap * 2 + 0.2), 2))
         else:
             answers.append(""); confidences.append(0.0)
 

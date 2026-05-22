@@ -837,11 +837,14 @@ def handler(event: dict, context) -> dict:
                 return _resp(404, {"error": "Пользователь не найден"})
             balance_kop, role, sub_until = row[0] or 0, row[1], row[2]
             now = datetime.utcnow()
-            # admin/tester и активная подписка — списание не производится
+            # admin и tester — бесплатно без списания
             if role in ("tester", "admin"):
                 return _resp(200, {"ok": True, "balance_kopecks": balance_kop, "balance_rub": round(balance_kop / 100, 2)})
-            if sub_until and isinstance(sub_until, datetime) and sub_until > now:
-                return _resp(200, {"ok": True, "balance_kopecks": balance_kop, "balance_rub": round(balance_kop / 100, 2)})
+            # Без активной подписки — ИИ заблокирован
+            has_sub = sub_until and isinstance(sub_until, datetime) and sub_until > now
+            if not has_sub:
+                return _resp(403, {"error": "Для использования ИИ необходима активная подписка."})
+            # С подпиской — списываем рубли всегда
             if balance_kop < kopecks_to_spend:
                 need_rub = round(kopecks_to_spend / 100, 2)
                 have_rub = round(balance_kop / 100, 2)

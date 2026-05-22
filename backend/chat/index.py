@@ -84,7 +84,23 @@ def handler(event: dict, context) -> dict:
             )
             resp.raise_for_status()
             data = resp.json()
-            reply = data["choices"][0]["message"]["content"]
+            # Provider returned error — ошибка в теле 200-ответа
+            if data.get("error"):
+                err_msg = data["error"].get("message", str(data["error"])) if isinstance(data["error"], dict) else str(data["error"])
+                last_err = f"Provider error ({model}): {err_msg}"
+                continue
+            choices = data.get("choices") or []
+            if not choices:
+                last_err = f"Пустой ответ ({model})"
+                continue
+            finish_reason = choices[0].get("finish_reason", "")
+            if finish_reason == "error":
+                last_err = f"finish_reason=error ({model})"
+                continue
+            reply = choices[0].get("message", {}).get("content", "").strip()
+            if not reply:
+                last_err = f"Пустой content ({model})"
+                continue
             return _resp(200, {"reply": reply})
         except requests.HTTPError as e:
             try:
@@ -92,8 +108,8 @@ def handler(event: dict, context) -> dict:
             except Exception:
                 err_msg = str(e)
             last_err = f"API error {e.response.status_code}: {err_msg}"
-            if e.response.status_code in (404, 429):
-                continue  # пробуем следующую модель
+            if e.response.status_code in (400, 403, 404, 429, 500, 502, 503):
+                continue
             return _resp(502, {"error": last_err})
         except Exception as e:
             last_err = str(e)

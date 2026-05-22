@@ -98,9 +98,19 @@ def gigachat_with_fallback(messages: list, max_tokens: int = 6000) -> str:
         try:
             with urllib.request.urlopen(req, timeout=120) as r:
                 body_data = json.loads(r.read().decode())
+            # Provider returned error — модель вернула ошибку в теле 200-ответа
+            if body_data.get("error"):
+                err_msg = body_data["error"].get("message", str(body_data["error"]))
+                last_err = RuntimeError(f"OpenRouter provider error ({model}): {err_msg}")
+                continue
             choices = body_data.get("choices") or []
             if not choices:
                 last_err = RuntimeError(f"OpenRouter пустой ответ ({model})")
+                continue
+            # Проверяем finish_reason — если error, пробуем следующую модель
+            finish_reason = choices[0].get("finish_reason", "")
+            if finish_reason == "error":
+                last_err = RuntimeError(f"OpenRouter finish_reason=error ({model})")
                 continue
             content = choices[0].get("message", {}).get("content", "").strip()
             if not content:
@@ -109,7 +119,7 @@ def gigachat_with_fallback(messages: list, max_tokens: int = 6000) -> str:
             return content
         except urllib.error.HTTPError as e:
             err_text = e.read().decode(errors="ignore")[:300]
-            if e.code in (403, 404, 429, 502, 503):
+            if e.code in (400, 403, 404, 429, 500, 502, 503):
                 last_err = RuntimeError(f"OpenRouter {e.code} ({model}): {err_text}")
                 if e.code == 429:
                     time.sleep(2)

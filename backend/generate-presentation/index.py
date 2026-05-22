@@ -274,9 +274,18 @@ def openrouter_chat(messages: list, max_tokens: int = 4000, temperature: float =
         try:
             with urllib.request.urlopen(req, timeout=req_timeout) as r:
                 body = json.loads(r.read().decode())
+            # Provider returned error — ошибка в теле 200-ответа
+            if body.get("error"):
+                err_msg = body["error"].get("message", str(body["error"]))
+                last_err = RuntimeError(f"OpenRouter provider error ({model}): {err_msg}")
+                continue
             choices = body.get("choices") or []
             if not choices:
                 last_err = RuntimeError(f"OpenRouter вернул пустой ответ ({model}): {body}")
+                continue
+            finish_reason = choices[0].get("finish_reason", "")
+            if finish_reason == "error":
+                last_err = RuntimeError(f"OpenRouter finish_reason=error ({model})")
                 continue
             content = choices[0].get("message", {}).get("content", "").strip()
             if not content:
@@ -285,8 +294,7 @@ def openrouter_chat(messages: list, max_tokens: int = 4000, temperature: float =
             return content
         except urllib.error.HTTPError as e:
             err_text = e.read().decode(errors="ignore")[:300]
-            # 404 = модель недоступна, 429/502/503 = перегрузка — переходим к следующей
-            if e.code in (403, 404, 429, 502, 503):
+            if e.code in (400, 403, 404, 429, 500, 502, 503):
                 last_err = RuntimeError(f"OpenRouter {e.code} ({model}): {err_text}")
                 if e.code == 429:
                     time.sleep(2)

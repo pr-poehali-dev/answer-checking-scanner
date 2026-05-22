@@ -45,7 +45,7 @@ export interface UserRow extends SubscriptionInfo {
   created_at: string;
   subscription_plan?: string | null;
   last_seen_at?: string | null;
-  ai_tokens_balance?: number;
+  ai_balance_kopecks?: number;
 }
 
 async function request<T>(action: string, options: RequestInit & { token?: string } = {}): Promise<T> {
@@ -187,7 +187,7 @@ export const authApi = {
     const url = `${AUTH_URL}?action=token-logs&login=${encodeURIComponent(login)}&limit=${limit}`;
     return fetch(url)
       .then(r => r.json())
-      .then(d => d as { logs: { action: string; tokens: number; balance_after: number; created_at: string }[] });
+      .then(d => d as { logs: { action: string; tokens: number; amount_rub: number; balance_rub_after: number; created_at: string }[] });
   },
 };
 
@@ -938,18 +938,18 @@ export const subscriptionApi = {
       login,
     }),
 
-  buyTokens: (login: string, token_count: number, return_url: string) =>
-    subRequest<{ payment_id: string; confirmation_url: string; status: string; amount: number; token_count: number }>(
+  buyTokens: (login: string, amount_rub: number, return_url: string) =>
+    subRequest<{ payment_id: string; confirmation_url: string; status: string; amount_rub: number }>(
       "buy-tokens",
       {
         method: "POST",
         login,
-        body: JSON.stringify({ login, token_count, return_url }),
+        body: JSON.stringify({ login, amount_rub, return_url }),
       }
     ),
 
   checkTokens: (payment_id: string) =>
-    subRequest<{ status: string; token_count: number; ai_tokens_balance?: number }>(
+    subRequest<{ status: string; amount_rub?: number; ai_balance_kopecks?: number; ai_balance_rub?: number }>(
       "check-tokens",
       {
         method: "POST",

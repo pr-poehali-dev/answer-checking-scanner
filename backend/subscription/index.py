@@ -330,20 +330,20 @@ def handler(event: dict, context) -> dict:
         finally:
             conn.close()
 
-    # ── POST buy-tokens — создать платёж на покупку токенов ─────────────────
+    # ── POST buy-tokens — создать платёж на пополнение баланса ИИ ─────────────
     if method == "POST" and route in ("buy-tokens", "buy_tokens"):
         if not user_login or user_login == "admin":
             return _resp(400, {"error": "Неизвестный пользователь"})
         try:
-            token_count = int(body.get("token_count") or 0)
+            amount_rub = float(body.get("amount_rub") or 0)
         except (TypeError, ValueError):
-            token_count = 0
-        if token_count < 1000:
-            return _resp(400, {"error": "Минимальная покупка: 1000 токенов"})
-        if token_count > 1000000:
-            return _resp(400, {"error": "Максимальная покупка: 1 000 000 токенов"})
+            amount_rub = 0
+        if amount_rub < 50:
+            return _resp(400, {"error": "Минимальная сумма пополнения: 50 руб"})
+        if amount_rub > 10000:
+            return _resp(400, {"error": "Максимальная сумма пополнения: 10 000 руб"})
 
-        amount_rub = round(token_count / 1000 * 30, 2)
+        amount_rub = round(amount_rub, 2)
         return_url = (body.get("return_url") or "").strip() or "https://poehali.dev"
 
         conn = get_conn()
@@ -362,14 +362,14 @@ def handler(event: dict, context) -> dict:
                 "amount": {"value": f"{amount_rub:.2f}", "currency": "RUB"},
                 "capture": True,
                 "confirmation": {"type": "redirect", "return_url": return_url},
-                "description": f"АОУСПТ · Токены ИИ ({token_count:,}) · {full_name}",
-                "metadata": {"login": user_login, "plan": "tokens", "token_count": str(token_count)},
+                "description": f"АОУСПТ · Пополнение баланса ИИ · {full_name}",
+                "metadata": {"login": user_login, "plan": "balance", "amount_rub": str(amount_rub)},
             }
             if email:
                 payment_body["receipt"] = {
                     "customer": {"email": email},
                     "items": [{
-                        "description": f"Токены ИИ {token_count:,} шт.",
+                        "description": "Пополнение баланса ИИ",
                         "quantity": "1.00",
                         "amount": {"value": f"{amount_rub:.2f}", "currency": "RUB"},
                         "vat_code": 1,
@@ -392,7 +392,7 @@ def handler(event: dict, context) -> dict:
             cur.execute(
                 f"""INSERT INTO {SCHEMA}.payments
                     (user_login, plan, amount, months, provider, provider_payment_id, status, source)
-                    VALUES (%s, 'tokens', %s, 0, 'yookassa', %s, %s, 'user')""",
+                    VALUES (%s, 'balance', %s, 0, 'yookassa', %s, %s, 'user')""",
                 (user_login, amount_rub, payment_id, status)
             )
             conn.commit()
@@ -403,11 +403,10 @@ def handler(event: dict, context) -> dict:
             "payment_id": payment_id,
             "confirmation_url": confirmation,
             "status": status,
-            "amount": amount_rub,
-            "token_count": token_count,
+            "amount_rub": amount_rub,
         })
 
-    # ── POST check-tokens — проверить статус платежа за токены ──────────────
+    # ── POST check-tokens — проверить статус платежа за пополнение баланса ────
     if method == "POST" and route in ("check-tokens", "check_tokens"):
         payment_id = (body.get("payment_id") or "").strip()
         if not payment_id:
@@ -420,12 +419,20 @@ def handler(event: dict, context) -> dict:
         status = result.get("status", "pending")
         meta = result.get("metadata") or {}
         login = meta.get("login")
-        try:
-            token_count = int(meta.get("token_count") or 0)
-        except (TypeError, ValueError):
-            token_count = 0
 
-        if status == "succeeded" and login and token_count > 0:
+        # amount_rub: берём из metadata, либо из суммы платежа от ЮKassa
+        try:
+            amount_rub = float(meta.get("amount_rub") or 0)
+        except (TypeError, ValueError):
+            amount_rub = 0
+        if not amount_rub:
+            try:
+                amount_rub = float((result.get("amount") or {}).get("value") or 0)
+            except (TypeError, ValueError):
+                amount_rub = 0
+        kopecks = round(amount_rub * 100)
+
+        if status == "succeeded" and login and kopecks > 0:
             conn = get_conn()
             try:
                 cur = conn.cursor()
@@ -437,20 +444,27 @@ def handler(event: dict, context) -> dict:
                 updated = cur.rowcount
                 if updated > 0:
                     cur.execute(
-                        f"UPDATE {SCHEMA}.users SET ai_tokens_balance = ai_tokens_balance + %s WHERE login = %s RETURNING ai_tokens_balance",
-                        (token_count, login)
+                        f"""UPDATE {SCHEMA}.users
+                            SET ai_balance_kopecks = ai_balance_kopecks + %s
+                            WHERE login = %s RETURNING ai_balance_kopecks""",
+                        (kopecks, login)
                     )
                     row = cur.fetchone()
-                    new_balance = row[0] if row else 0
+                    new_kop = row[0] if row else 0
                 else:
-                    cur.execute(f"SELECT ai_tokens_balance FROM {SCHEMA}.users WHERE login = %s", (login,))
+                    cur.execute(f"SELECT ai_balance_kopecks FROM {SCHEMA}.users WHERE login = %s", (login,))
                     row = cur.fetchone()
-                    new_balance = row[0] if row else 0
+                    new_kop = row[0] if row else 0
                 conn.commit()
-                return _resp(200, {"status": "succeeded", "token_count": token_count, "ai_tokens_balance": new_balance})
+                return _resp(200, {
+                    "status": "succeeded",
+                    "amount_rub": amount_rub,
+                    "ai_balance_kopecks": new_kop,
+                    "ai_balance_rub": round(new_kop / 100, 2),
+                })
             finally:
                 conn.close()
 
-        return _resp(200, {"status": status, "token_count": token_count})
+        return _resp(200, {"status": status, "amount_rub": amount_rub})
 
     return _resp(404, {"error": "Метод не найден"})

@@ -6,7 +6,8 @@ import { authApi } from "@/lib/api";
 interface TokenLog {
   action: string;
   tokens: number;
-  balance_after: number;
+  amount_rub: number;
+  balance_rub_after: number;
   created_at: string;
 }
 
@@ -162,8 +163,8 @@ export function ProfileCard() {
             <div className="flex items-center gap-3 p-3 rounded-sm border border-border bg-muted/30">
               <Icon name="Coins" size={18} className="text-primary" />
               <div className="flex-1">
-                <p className="text-xs text-muted-foreground">Баланс токенов ИИ</p>
-                <p className="text-sm font-bold text-primary">{(teacher.aiTokens ?? 0).toLocaleString("ru-RU")} токенов</p>
+                <p className="text-xs text-muted-foreground">Баланс ИИ</p>
+                <p className="text-sm font-bold text-primary">{((teacher.aiTokensKopecks ?? 0) / 100).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₽</p>
               </div>
             </div>
 
@@ -192,8 +193,8 @@ export function ProfileCard() {
                         </p>
                       </div>
                       <div className="text-right flex-shrink-0">
-                        <p className="text-xs font-semibold text-destructive">−{log.tokens.toLocaleString("ru-RU")}</p>
-                        <p className="text-xs text-muted-foreground">{log.balance_after.toLocaleString("ru-RU")} ост.</p>
+                        <p className="text-xs font-semibold text-destructive">−{log.amount_rub.toFixed(2)} ₽</p>
+                        <p className="text-xs text-muted-foreground">{log.balance_rub_after.toFixed(2)} ₽ ост.</p>
                       </div>
                     </div>
                   ))}

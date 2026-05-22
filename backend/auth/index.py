@@ -258,7 +258,7 @@ def handler(event: dict, context) -> dict:
             cur.execute(
                 f"""SELECT login, password_hash, full_name, first_name, last_name, email, school, role, is_active,
                           subscription_status, subscription_until,
-                          trial_until, trial_ai_calls_today, trial_ai_date, ai_tokens_balance
+                          trial_until, trial_ai_calls_today, trial_ai_date, ai_balance_kopecks
                     FROM {SCHEMA}.users
                     WHERE login = %s OR LOWER(email) = LOWER(%s)
                     LIMIT 1""",
@@ -269,7 +269,7 @@ def handler(event: dict, context) -> dict:
                 return _resp(401, {"error": "Неверный логин или пароль"})
 
             (login, _ph, full_name, first_name, last_name, email, school, role, is_active,
-             sub_status, sub_until, trial_until, trial_ai_calls_today, trial_ai_date, ai_tokens_balance) = row
+             sub_status, sub_until, trial_until, trial_ai_calls_today, trial_ai_date, ai_balance_kopecks) = row
             if not is_active:
                 return _resp(403, {"error": "Аккаунт заблокирован. Обратитесь к администратору."})
 
@@ -304,7 +304,8 @@ def handler(event: dict, context) -> dict:
                 "email": email,
                 "school": school,
                 "token": token,
-                "ai_tokens_balance": ai_tokens_balance or 0,
+                "ai_balance_kopecks": ai_balance_kopecks or 0,
+                "ai_balance_rub": round((ai_balance_kopecks or 0) / 100, 2),
                 **sub,
             })
         finally:
@@ -325,7 +326,7 @@ def handler(event: dict, context) -> dict:
             cur = conn.cursor()
             cur.execute(
                 f"""SELECT subscription_status, subscription_until,
-                           trial_until, trial_ai_calls_today, trial_ai_date, role, ai_tokens_balance
+                           trial_until, trial_ai_calls_today, trial_ai_date, role, ai_balance_kopecks
                     FROM {SCHEMA}.users WHERE login = %s""",
                 (login,)
             )
@@ -334,11 +335,11 @@ def handler(event: dict, context) -> dict:
                 return _resp(404, {"error": "Пользователь не найден"})
             sub = get_subscription_payload(row[0], row[1], row[2], row[3] or 0, row[4])
             user_role = row[5]
-            ai_tokens = row[6] or 0
+            ai_balance_kop = row[6] or 0
             if user_role == "tester":
                 sub["subscription_active"] = True
                 sub["subscription_status"] = "active"
-            return _resp(200, {"login": login, "role": user_role, "ai_tokens_balance": ai_tokens, **sub})
+            return _resp(200, {"login": login, "role": user_role, "ai_balance_kopecks": ai_balance_kop, "ai_balance_rub": round(ai_balance_kop / 100, 2), **sub})
         finally:
             conn.close()
 
@@ -808,11 +809,12 @@ def handler(event: dict, context) -> dict:
         finally:
             conn.close()
 
-    # ── POST spend-tokens — списание токенов перед ИИ-генерацией ────────────
+    # ── POST spend-tokens — списание баланса в копейках за ИИ-генерацию ───────
+    # amount = количество токенов YandexGPT; списываем amount * 0.2 копейки (2 руб/1000 токенов)
     if method == "POST" and route in ("spend-tokens", "spend_tokens"):
         login = (body.get("login") or "").strip()
         try:
-            amount = int(body.get("amount") or 0)
+            amount = int(body.get("amount") or 0)  # токены YandexGPT
         except (TypeError, ValueError):
             amount = 0
         if not login:
@@ -820,47 +822,54 @@ def handler(event: dict, context) -> dict:
         if amount <= 0:
             return _resp(400, {"error": "Укажите amount > 0"})
 
+        # 2 руб / 1000 токенов = 0.2 коп/токен → в копейках (минимум 1 копейка)
+        kopecks_to_spend = max(round(amount * 0.2), 1)
+
         conn = get_conn()
         try:
             cur = conn.cursor()
             cur.execute(
-                f"SELECT ai_tokens_balance, role FROM {SCHEMA}.users WHERE login = %s",
+                f"SELECT ai_balance_kopecks, role, subscription_until FROM {SCHEMA}.users WHERE login = %s",
                 (login,)
             )
             row = cur.fetchone()
             if not row:
                 return _resp(404, {"error": "Пользователь не найден"})
-            balance, role = row[0] or 0, row[1]
-            # Tester и активная подписка — токены не тратятся
+            balance_kop, role, sub_until = row[0] or 0, row[1], row[2]
             now = datetime.utcnow()
+            # admin/tester и активная подписка — списание не производится
             if role in ("tester", "admin"):
-                return _resp(200, {"ok": True, "balance": balance})
-            cur.execute(
-                f"SELECT subscription_until FROM {SCHEMA}.users WHERE login = %s",
-                (login,)
-            )
-            sub_row = cur.fetchone()
-            sub_until = sub_row[0] if sub_row else None
+                return _resp(200, {"ok": True, "balance_kopecks": balance_kop, "balance_rub": round(balance_kop / 100, 2)})
             if sub_until and isinstance(sub_until, datetime) and sub_until > now:
-                return _resp(200, {"ok": True, "balance": balance})
-            if balance < amount:
-                return _resp(402, {"error": f"Недостаточно токенов. Баланс: {balance}, нужно: {amount}. Пополните баланс в личном кабинете."})
-            new_balance = balance - amount
+                return _resp(200, {"ok": True, "balance_kopecks": balance_kop, "balance_rub": round(balance_kop / 100, 2)})
+            if balance_kop < kopecks_to_spend:
+                need_rub = round(kopecks_to_spend / 100, 2)
+                have_rub = round(balance_kop / 100, 2)
+                return _resp(402, {"error": f"Недостаточно средств. Баланс: {have_rub} ₽, нужно: {need_rub} ₽. Пополните баланс в личном кабинете."})
+            new_balance_kop = balance_kop - kopecks_to_spend
             action_label = (body.get("action_label") or "ИИ-генерация").strip()[:64]
             cur.execute(
-                f"UPDATE {SCHEMA}.users SET ai_tokens_balance = %s WHERE login = %s",
-                (new_balance, login)
+                f"UPDATE {SCHEMA}.users SET ai_balance_kopecks = %s WHERE login = %s",
+                (new_balance_kop, login)
             )
             cur.execute(
-                f"INSERT INTO {SCHEMA}.ai_token_logs (login, action, tokens, balance_after) VALUES (%s, %s, %s, %s)",
-                (login, action_label, amount, new_balance)
+                f"""INSERT INTO {SCHEMA}.ai_token_logs
+                    (login, action, tokens, balance_after, amount_kopecks, balance_kopecks_after)
+                    VALUES (%s, %s, %s, %s, %s, %s)""",
+                (login, action_label, amount, new_balance_kop, kopecks_to_spend, new_balance_kop)
             )
             conn.commit()
-            return _resp(200, {"ok": True, "balance": new_balance, "spent": amount})
+            return _resp(200, {
+                "ok": True,
+                "balance_kopecks": new_balance_kop,
+                "balance_rub": round(new_balance_kop / 100, 2),
+                "spent_kopecks": kopecks_to_spend,
+                "spent_rub": round(kopecks_to_spend / 100, 2),
+            })
         finally:
             conn.close()
 
-    # ── GET get-tokens-balance — получить баланс токенов ────────────────────
+    # ── GET get-tokens-balance — получить баланс в рублях ───────────────────
     if method == "GET" and route in ("get-tokens-balance", "get_tokens_balance"):
         login = (qs.get("login") or "").strip()
         if not login:
@@ -868,41 +877,45 @@ def handler(event: dict, context) -> dict:
         conn = get_conn()
         try:
             cur = conn.cursor()
-            cur.execute(f"SELECT ai_tokens_balance FROM {SCHEMA}.users WHERE login = %s", (login,))
+            cur.execute(f"SELECT ai_balance_kopecks FROM {SCHEMA}.users WHERE login = %s", (login,))
             row = cur.fetchone()
             if not row:
                 return _resp(404, {"error": "Пользователь не найден"})
-            return _resp(200, {"balance": row[0] or 0})
+            kop = row[0] or 0
+            return _resp(200, {"balance_kopecks": kop, "balance_rub": round(kop / 100, 2)})
         finally:
             conn.close()
 
-    # ── POST add-tokens (admin) — начислить токены вручную ───────────────────
+    # ── POST add-tokens (admin) — пополнить баланс вручную в рублях ──────────
     if method == "POST" and route in ("add-tokens", "add_tokens"):
         if not check_admin_token(headers):
             return _resp(403, {"error": "Нет доступа"})
         login = (body.get("login") or "").strip()
         try:
-            amount = int(body.get("amount") or 0)
+            # amount = рубли (дробные)
+            amount_rub = float(body.get("amount") or 0)
         except (TypeError, ValueError):
-            amount = 0
-        if not login or amount <= 0:
+            amount_rub = 0
+        if not login or amount_rub <= 0:
             return _resp(400, {"error": "Укажите login и amount > 0"})
+        kopecks = round(amount_rub * 100)
         conn = get_conn()
         try:
             cur = conn.cursor()
             cur.execute(
-                f"UPDATE {SCHEMA}.users SET ai_tokens_balance = ai_tokens_balance + %s WHERE login = %s RETURNING ai_tokens_balance",
-                (amount, login)
+                f"UPDATE {SCHEMA}.users SET ai_balance_kopecks = ai_balance_kopecks + %s WHERE login = %s RETURNING ai_balance_kopecks",
+                (kopecks, login)
             )
             conn.commit()
             row = cur.fetchone()
             if not row:
                 return _resp(404, {"error": "Пользователь не найден"})
-            return _resp(200, {"ok": True, "balance": row[0]})
+            new_kop = row[0] or 0
+            return _resp(200, {"ok": True, "balance_kopecks": new_kop, "balance_rub": round(new_kop / 100, 2)})
         finally:
             conn.close()
 
-    # ── GET token-logs — история списаний токенов ─────────────────────────────
+    # ── GET token-logs — история списаний в рублях ────────────────────────────
     if method == "GET" and route in ("token-logs", "token_logs"):
         login = (qs.get("login") or "").strip()
         if not login:
@@ -912,7 +925,7 @@ def handler(event: dict, context) -> dict:
         try:
             cur = conn.cursor()
             cur.execute(
-                f"""SELECT action, tokens, balance_after, created_at
+                f"""SELECT action, tokens, amount_kopecks, balance_kopecks_after, created_at
                     FROM {SCHEMA}.ai_token_logs
                     WHERE login = %s
                     ORDER BY created_at DESC
@@ -924,8 +937,9 @@ def handler(event: dict, context) -> dict:
                 {
                     "action": r[0],
                     "tokens": r[1],
-                    "balance_after": r[2],
-                    "created_at": r[3].isoformat() if r[3] else None,
+                    "amount_rub": round((r[2] or 0) / 100, 2),
+                    "balance_rub_after": round((r[3] or 0) / 100, 2),
+                    "created_at": r[4].isoformat() if r[4] else None,
                 }
                 for r in rows
             ]

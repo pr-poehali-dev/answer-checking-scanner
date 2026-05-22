@@ -1,7 +1,14 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Icon from "@/components/ui/icon";
 import { appStore, useAppStore } from "@/store/appStore";
 import { authApi } from "@/lib/api";
+
+interface TokenLog {
+  action: string;
+  tokens: number;
+  balance_after: number;
+  created_at: string;
+}
 
 export function ProfileCard() {
   const { teacher } = useAppStore();
@@ -9,6 +16,17 @@ export function ProfileCard() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [logs, setLogs] = useState<TokenLog[]>([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+
+  useEffect(() => {
+    if (!teacher) return;
+    setLogsLoading(true);
+    authApi.getTokenLogs(teacher.login, 20)
+      .then(d => setLogs(d.logs || []))
+      .catch(() => setLogs([]))
+      .finally(() => setLogsLoading(false));
+  }, [teacher?.login]);
 
   const [form, setForm] = useState({
     first_name: teacher?.firstName || "",
@@ -138,6 +156,49 @@ export function ProfileCard() {
                 <p className="text-xs text-muted-foreground mb-0.5">Пароль</p>
                 <p className="text-sm font-medium text-muted-foreground">••••••••</p>
               </div>
+            </div>
+
+            {/* Баланс токенов */}
+            <div className="flex items-center gap-3 p-3 rounded-sm border border-border bg-muted/30">
+              <Icon name="Coins" size={18} className="text-primary" />
+              <div className="flex-1">
+                <p className="text-xs text-muted-foreground">Баланс токенов ИИ</p>
+                <p className="text-sm font-bold text-primary">{(teacher.aiTokens ?? 0).toLocaleString("ru-RU")} токенов</p>
+              </div>
+            </div>
+
+            {/* История списаний */}
+            <div className="border border-border rounded-sm overflow-hidden">
+              <div className="px-3 py-2 bg-muted border-b border-border flex items-center gap-2">
+                <Icon name="History" size={13} className="text-muted-foreground" />
+                <p className="text-xs font-semibold">История списаний</p>
+              </div>
+              {logsLoading ? (
+                <div className="flex items-center justify-center gap-2 py-6 text-xs text-muted-foreground">
+                  <Icon name="Loader2" size={14} className="animate-spin" />
+                  Загрузка…
+                </div>
+              ) : logs.length === 0 ? (
+                <p className="text-xs text-muted-foreground text-center py-6">Списаний ещё не было</p>
+              ) : (
+                <div className="divide-y divide-border">
+                  {logs.map((log, i) => (
+                    <div key={i} className="flex items-center gap-3 px-3 py-2">
+                      <Icon name="Zap" size={13} className="text-amber-500 flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-medium truncate">{log.action}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {new Date(log.created_at).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                        </p>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <p className="text-xs font-semibold text-destructive">−{log.tokens.toLocaleString("ru-RU")}</p>
+                        <p className="text-xs text-muted-foreground">{log.balance_after.toLocaleString("ru-RU")} ост.</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         ) : (

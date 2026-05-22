@@ -38,13 +38,13 @@ def _resp(status: int, body: dict) -> dict:
 
 # ─── ТОКЕНЫ ПОЛЬЗОВАТЕЛЯ ──────────────────────────────────────────────────────
 
-def spend_ai_tokens(login: str, amount: int) -> tuple[bool, str]:
+def spend_ai_tokens(login: str, amount: int, action_label: str = "Конспект") -> tuple[bool, str]:
     if not login:
         return True, ""
     try:
         req = urllib.request.Request(
             f"{AUTH_URL}?action=spend-tokens",
-            data=json.dumps({"login": login, "amount": amount}).encode("utf-8"),
+            data=json.dumps({"login": login, "amount": amount, "action_label": action_label}).encode("utf-8"),
             method="POST",
             headers={"Content-Type": "application/json"},
         )

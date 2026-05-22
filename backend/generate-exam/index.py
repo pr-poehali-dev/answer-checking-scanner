@@ -26,13 +26,13 @@ AUTH_URL = os.environ.get("AUTH_FUNCTION_URL", "https://functions.poehali.dev/b0
 TOKENS_COST_EXAM_TASK = 1500
 
 
-def spend_ai_tokens(login: str, amount: int) -> tuple[bool, str]:
+def spend_ai_tokens(login: str, amount: int, action_label: str = "Экзамен ОГЭ/ЕГЭ") -> tuple[bool, str]:
     if not login:
         return True, ""
     try:
         req = urllib.request.Request(
             f"{AUTH_URL}?action=spend-tokens",
-            data=json.dumps({"login": login, "amount": amount}).encode("utf-8"),
+            data=json.dumps({"login": login, "amount": amount, "action_label": action_label}).encode("utf-8"),
             method="POST",
             headers={"Content-Type": "application/json"},
         )

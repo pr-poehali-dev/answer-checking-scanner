@@ -846,9 +846,14 @@ def handler(event: dict, context) -> dict:
             if balance < amount:
                 return _resp(402, {"error": f"Недостаточно токенов. Баланс: {balance}, нужно: {amount}. Пополните баланс в личном кабинете."})
             new_balance = balance - amount
+            action_label = (body.get("action_label") or "ИИ-генерация").strip()[:64]
             cur.execute(
                 f"UPDATE {SCHEMA}.users SET ai_tokens_balance = %s WHERE login = %s",
                 (new_balance, login)
+            )
+            cur.execute(
+                f"INSERT INTO {SCHEMA}.ai_token_logs (login, action, tokens, balance_after) VALUES (%s, %s, %s, %s)",
+                (login, action_label, amount, new_balance)
             )
             conn.commit()
             return _resp(200, {"ok": True, "balance": new_balance, "spent": amount})
@@ -894,6 +899,37 @@ def handler(event: dict, context) -> dict:
             if not row:
                 return _resp(404, {"error": "Пользователь не найден"})
             return _resp(200, {"ok": True, "balance": row[0]})
+        finally:
+            conn.close()
+
+    # ── GET token-logs — история списаний токенов ─────────────────────────────
+    if method == "GET" and route in ("token-logs", "token_logs"):
+        login = (qs.get("login") or "").strip()
+        if not login:
+            return _resp(400, {"error": "Укажите login"})
+        limit_count = min(int(qs.get("limit") or 50), 100)
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"""SELECT action, tokens, balance_after, created_at
+                    FROM {SCHEMA}.ai_token_logs
+                    WHERE login = %s
+                    ORDER BY created_at DESC
+                    LIMIT %s""",
+                (login, limit_count)
+            )
+            rows = cur.fetchall()
+            logs = [
+                {
+                    "action": r[0],
+                    "tokens": r[1],
+                    "balance_after": r[2],
+                    "created_at": r[3].isoformat() if r[3] else None,
+                }
+                for r in rows
+            ]
+            return _resp(200, {"logs": logs})
         finally:
             conn.close()
 

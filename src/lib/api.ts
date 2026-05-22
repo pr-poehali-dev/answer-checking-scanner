@@ -182,6 +182,13 @@ export const authApi = {
       .then(r => r.json())
       .then(d => d as { members: { full_name: string; position: string; position_label: string; subject: string | null }[]; has_institution: boolean });
   },
+
+  getTokenLogs: (login: string, limit = 20) => {
+    const url = `${AUTH_URL}?action=token-logs&login=${encodeURIComponent(login)}&limit=${limit}`;
+    return fetch(url)
+      .then(r => r.json())
+      .then(d => d as { logs: { action: string; tokens: number; balance_after: number; created_at: string }[] });
+  },
 };
 
 // ── Institution API ───────────────────────────────────────────────────────────

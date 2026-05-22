@@ -259,8 +259,13 @@ def _yandex_chat(messages: list, max_tokens: int = 4000, temperature: float = 0.
             "x-folder-id": folder_id,
         },
     )
-    with urllib.request.urlopen(req, timeout=req_timeout) as r:
-        body = json.loads(r.read().decode())
+    try:
+        with urllib.request.urlopen(req, timeout=req_timeout) as r:
+            body = json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode(errors="ignore")
+        print(f"[YandexGPT] HTTP {e.code}: {err_body[:500]}")
+        raise RuntimeError(f"YandexGPT HTTP {e.code}: {err_body[:300]}")
     alternatives = (body.get("result") or {}).get("alternatives") or []
     if not alternatives:
         raise RuntimeError(f"YandexGPT пустой ответ: {body}")

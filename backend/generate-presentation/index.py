@@ -28,9 +28,9 @@ AUTH_URL = os.environ.get("AUTH_FUNCTION_URL", "https://functions.poehali.dev/b0
 TOKENS_COST_PRESENTATION = 4000
 
 
-def spend_ai_tokens(login: str, amount: int, action_label: str = "Презентация") -> tuple[bool, str]:
+def spend_ai_tokens(login: str, amount: int, action_label: str = "Презентация") -> tuple[bool, str, float, float]:
     if not login:
-        return True, ""
+        return True, "", 0.0, 0.0
     try:
         req = urllib.request.Request(
             f"{AUTH_URL}?action=spend-tokens",
@@ -39,8 +39,10 @@ def spend_ai_tokens(login: str, amount: int, action_label: str = "Презент
             headers={"Content-Type": "application/json"},
         )
         with urllib.request.urlopen(req, timeout=10) as r:
-            json.loads(r.read().decode())
-        return True, ""
+            resp = json.loads(r.read().decode())
+        spent_rub = float(resp.get("spent_rub") or 0)
+        balance_rub = float(resp.get("balance_rub") or 0)
+        return True, "", spent_rub, balance_rub
     except urllib.error.HTTPError as e:
         err_body = {}
         try:
@@ -48,10 +50,12 @@ def spend_ai_tokens(login: str, amount: int, action_label: str = "Презент
         except Exception:
             pass
         if e.code == 402:
-            return False, err_body.get("error", "Недостаточно токенов")
-        return True, ""
+            return False, err_body.get("error", "Недостаточно средств"), 0.0, 0.0
+        if e.code == 403:
+            return False, err_body.get("error", "Для использования ИИ необходима активная подписка."), 0.0, 0.0
+        return True, "", 0.0, 0.0
     except Exception:
-        return True, ""
+        return True, "", 0.0, 0.0
 
 
 from pptx import Presentation
@@ -1201,13 +1205,15 @@ def handler(event: dict, context) -> dict:
                 return _resp(429, {"error": "Слишком много запросов к ИИ-сервису — подождите 30 секунд."})
             return _resp(500, {"error": f"Ошибка генерации структуры: {msg}"})
 
-        spend_ai_tokens(login, max(tokens_used, 1))
+        _, _, spent_rub, balance_rub = spend_ai_tokens(login, max(tokens_used, 1))
 
         theme = pick_theme(topic)
         return _resp(200, {
             "outline": outline,
             "theme_name": theme["name"],
             "topic": topic,
+            "spent_rub": spent_rub,
+            "balance_rub": balance_rub,
         })
 
     # ── ШАГ 2: build — фото + PPTX (~15 сек) ───────────────────────────────
@@ -1309,7 +1315,7 @@ def handler(event: dict, context) -> dict:
             return _resp(429, {"error": "Слишком много запросов к ИИ-сервису — подождите 30 секунд."})
         return _resp(500, {"error": f"Ошибка генерации структуры: {msg}"})
 
-    spend_ai_tokens(login, max(tokens_used, 1))
+    _, _, spent_rub, balance_rub = spend_ai_tokens(login, max(tokens_used, 1))
 
     images = {}
     try:

@@ -81,7 +81,13 @@ export function SynopsisSection() {
         createdAt: new Date().toISOString(),
         docxB64: result.docx_b64,
         filename: result.filename,
+        spentRub: result.spent_rub,
+        balanceRub: result.balance_rub,
       };
+
+      if (result.balance_rub !== undefined) {
+        appStore.setAiBalance(Math.round(result.balance_rub * 100));
+      }
 
       appStore.addSynopsis(item);
       setCreated(item);

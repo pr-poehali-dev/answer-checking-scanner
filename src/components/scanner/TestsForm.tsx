@@ -136,11 +136,16 @@ export function TestsForm() {
       };
       appStore.addGeneratedTest(item);
 
+      if (result.balance_rub !== undefined) {
+        appStore.setAiBalance(Math.round(result.balance_rub * 100));
+      }
+
       // Скачиваем файл
       downloadDocx(result.docx_b64, result.filename);
 
+      const spentStr = (result.spent_rub ?? 0) > 0 ? ` · Списано: ${result.spent_rub!.toFixed(2)} ₽` : '';
       setSuccess(
-        `Готово! Работа №${result.workId} добавлена в раздел «Работы». ` +
+        `Готово! Работа №${result.workId} добавлена в раздел «Работы».${spentStr} ` +
         (uploadedToYadisk ? `Файл сохранён на Я.Диск.` : `Файл скачан локально.`)
       );
       setTopic("");

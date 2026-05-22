@@ -176,6 +176,8 @@ export interface SynopsisItem {
   createdAt: string;
   docxB64?: string;
   filename?: string;
+  spentRub?: number;
+  balanceRub?: number;
 }
 
 export interface GeneratedTestItem {

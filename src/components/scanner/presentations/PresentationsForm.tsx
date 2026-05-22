@@ -128,14 +128,19 @@ export function PresentationsForm() {
         yadiskPath, uploadedToYadisk, createdAt: new Date().toISOString(),
         outline: result.outline,
       };
+      if (result.balance_rub !== undefined) {
+        appStore.setAiBalance(Math.round(result.balance_rub * 100));
+      }
+
       appStore.addPresentation(item);
       downloadBase64(result.pptx_b64, result.filename);
 
+      const spentStr = (result.spent_rub ?? 0) > 0 ? ` · Списано: ${result.spent_rub!.toFixed(2)} ₽` : '';
       setSuccess(uploadedToYadisk
-        ? "Готово! Презентация сохранена на Я.Диск и скачана."
+        ? `Готово! Презентация сохранена на Я.Диск и скачана.${spentStr}`
         : yadiskConnected
-        ? "Презентация скачана. Проверьте подключение Я.Диска для автозагрузки."
-        : "Презентация скачана. Подключите Я.Диск в «Настройках» для автоматической загрузки.");
+        ? `Презентация скачана.${spentStr}`
+        : `Презентация скачана.${spentStr}`);
       setTopic("");
       setDescription("");
     } catch (e) {

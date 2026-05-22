@@ -26,9 +26,9 @@ AUTH_URL = os.environ.get("AUTH_FUNCTION_URL", "https://functions.poehali.dev/b0
 TOKENS_COST_EXAM_TASK = 1500
 
 
-def spend_ai_tokens(login: str, amount: int, action_label: str = "Экзамен ОГЭ/ЕГЭ") -> tuple[bool, str]:
+def spend_ai_tokens(login: str, amount: int, action_label: str = "Экзамен ОГЭ/ЕГЭ") -> tuple[bool, str, float, float]:
     if not login:
-        return True, ""
+        return True, "", 0.0, 0.0
     try:
         req = urllib.request.Request(
             f"{AUTH_URL}?action=spend-tokens",
@@ -37,8 +37,10 @@ def spend_ai_tokens(login: str, amount: int, action_label: str = "Экзамен
             headers={"Content-Type": "application/json"},
         )
         with urllib.request.urlopen(req, timeout=10) as r:
-            json.loads(r.read().decode())
-        return True, ""
+            resp = json.loads(r.read().decode())
+        spent_rub = float(resp.get("spent_rub") or 0)
+        balance_rub = float(resp.get("balance_rub") or 0)
+        return True, "", spent_rub, balance_rub
     except urllib.error.HTTPError as e:
         err_body = {}
         try:
@@ -46,10 +48,12 @@ def spend_ai_tokens(login: str, amount: int, action_label: str = "Экзамен
         except Exception:
             pass
         if e.code == 402:
-            return False, err_body.get("error", "Недостаточно токенов")
-        return True, ""
+            return False, err_body.get("error", "Недостаточно средств"), 0.0, 0.0
+        if e.code == 403:
+            return False, err_body.get("error", "Для использования ИИ необходима активная подписка."), 0.0, 0.0
+        return True, "", 0.0, 0.0
     except Exception:
-        return True, ""
+        return True, "", 0.0, 0.0
 
 
 from docx import Document
@@ -1145,9 +1149,9 @@ def handler(event: dict, context) -> dict:
                 }
             tasks.append(task)
 
-        spend_ai_tokens(login, max(total_tokens, 1))
+        _, _, spent_rub, balance_rub = spend_ai_tokens(login, max(total_tokens, 1))
 
-        return _resp(200, {"tasks": tasks, "examType": exam_type, "subject": subject})
+        return _resp(200, {"tasks": tasks, "examType": exam_type, "subject": subject, "spent_rub": spent_rub, "balance_rub": balance_rub})
 
     # ── Сборка docx из готовых заданий ────────────────────────────────────────
     if action == "build_docx":

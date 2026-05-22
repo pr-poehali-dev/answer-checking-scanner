@@ -23,10 +23,9 @@ AUTH_URL = os.environ.get("AUTH_FUNCTION_URL", "https://functions.poehali.dev/b0
 TOKENS_COST_TEST = 3500
 
 
-def spend_ai_tokens(login: str, amount: int, action_label: str = "Тест") -> tuple[bool, str]:
-    """Списывает токены через auth. Возвращает (ok, error_message)."""
+def spend_ai_tokens(login: str, amount: int, action_label: str = "Тест") -> tuple[bool, str, float, float]:
     if not login:
-        return True, ""
+        return True, "", 0.0, 0.0
     try:
         req = urllib.request.Request(
             f"{AUTH_URL}?action=spend-tokens",
@@ -35,8 +34,10 @@ def spend_ai_tokens(login: str, amount: int, action_label: str = "Тест") -> 
             headers={"Content-Type": "application/json"},
         )
         with urllib.request.urlopen(req, timeout=10) as r:
-            data = json.loads(r.read().decode())
-        return True, ""
+            resp = json.loads(r.read().decode())
+        spent_rub = float(resp.get("spent_rub") or 0)
+        balance_rub = float(resp.get("balance_rub") or 0)
+        return True, "", spent_rub, balance_rub
     except urllib.error.HTTPError as e:
         err_body = {}
         try:
@@ -44,10 +45,12 @@ def spend_ai_tokens(login: str, amount: int, action_label: str = "Тест") -> 
         except Exception:
             pass
         if e.code == 402:
-            return False, err_body.get("error", "Недостаточно токенов")
-        return True, ""
+            return False, err_body.get("error", "Недостаточно средств"), 0.0, 0.0
+        if e.code == 403:
+            return False, err_body.get("error", "Для использования ИИ необходима активная подписка."), 0.0, 0.0
+        return True, "", 0.0, 0.0
     except Exception:
-        return True, ""
+        return True, "", 0.0, 0.0
 
 
 from docx import Document
@@ -671,7 +674,7 @@ def handler(event: dict, context) -> dict:
         return _resp(500, {"error": f"Ошибка генерации вопросов: {msg}"})
 
     total_tokens_used = questions.get("total_tokens", 0)
-    spend_ai_tokens(login, max(total_tokens_used, 1))
+    _, _, spent_rub, balance_rub = spend_ai_tokens(login, max(total_tokens_used, 1))
 
     part1 = questions["part1"]
     part2 = questions["part2"]
@@ -724,4 +727,6 @@ def handler(event: dict, context) -> dict:
             "part1": part1,
             "part2": part2,
         },
+        "spent_rub": spent_rub,
+        "balance_rub": balance_rub,
     })

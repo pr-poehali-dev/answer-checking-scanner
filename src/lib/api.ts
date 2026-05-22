@@ -273,6 +273,8 @@ export interface SynopsisResponse {
   class_num: number;
   docx_b64?: string;
   filename?: string;
+  spent_rub?: number;
+  balance_rub?: number;
 }
 
 export const synopsisApi = {
@@ -491,6 +493,8 @@ export interface PresentationResponse {
   filename: string;
   size: number;
   outline: PresentationOutline;
+  spent_rub?: number;
+  balance_rub?: number;
 }
 
 async function fetchWithTimeout(url: string, body: object, timeoutMs: number): Promise<Response> {
@@ -540,7 +544,7 @@ export const presentationApi = {
 
     // ── Шаг 1: получаем структуру от GigaChat (до 85 сек) ────────────────
     onStage?.("ИИ генерирует структуру презентации…");
-    let outlineData: { outline: object; theme_name: string; topic: string };
+    let outlineData: { outline: object; theme_name: string; topic: string; spent_rub?: number; balance_rub?: number };
     try {
       const res1 = await fetchWithTimeout(
         `${PRESENTATION_URL}?action=outline`,
@@ -580,7 +584,10 @@ export const presentationApi = {
       );
       const d2 = await res2.json().catch(() => ({}));
       if (!res2.ok) throw new Error(d2.error || `Ошибка сборки PPTX (${res2.status})`);
-      return d2 as PresentationResponse;
+      const pptxResult = d2 as PresentationResponse;
+      pptxResult.spent_rub = outlineData.spent_rub;
+      pptxResult.balance_rub = outlineData.balance_rub;
+      return pptxResult;
     } catch (e) {
       const err = e as Error;
       if (err.name === "AbortError" || err.message.includes("Failed to fetch")) {
@@ -620,6 +627,8 @@ export interface TestResponse {
   maxScore: number;
   gradeScale: { grade1: number; grade2: number; grade3: number; grade4: number; grade5: number };
   questions: { part1: TestQuestionPart1[]; part2: TestQuestionPart2[] };
+  spent_rub?: number;
+  balance_rub?: number;
 }
 
 export const testApi = {
@@ -690,6 +699,8 @@ export interface ExamResponse {
   totalPoints: number;
   tasks: ExamTask[];
   size: number;
+  spent_rub?: number;
+  balance_rub?: number;
 }
 
 const BATCH_SIZE = 1;

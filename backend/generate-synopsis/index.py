@@ -38,9 +38,9 @@ def _resp(status: int, body: dict) -> dict:
 
 # ─── ТОКЕНЫ ПОЛЬЗОВАТЕЛЯ ──────────────────────────────────────────────────────
 
-def spend_ai_tokens(login: str, amount: int, action_label: str = "Конспект") -> tuple[bool, str]:
+def spend_ai_tokens(login: str, amount: int, action_label: str = "Конспект") -> tuple[bool, str, float, float]:
     if not login:
-        return True, ""
+        return True, "", 0.0, 0.0
     try:
         req = urllib.request.Request(
             f"{AUTH_URL}?action=spend-tokens",
@@ -49,8 +49,10 @@ def spend_ai_tokens(login: str, amount: int, action_label: str = "Конспек
             headers={"Content-Type": "application/json"},
         )
         with urllib.request.urlopen(req, timeout=10) as r:
-            json.loads(r.read().decode())
-        return True, ""
+            resp = json.loads(r.read().decode())
+        spent_rub = float(resp.get("spent_rub") or 0)
+        balance_rub = float(resp.get("balance_rub") or 0)
+        return True, "", spent_rub, balance_rub
     except urllib.error.HTTPError as e:
         err_body = {}
         try:
@@ -58,10 +60,12 @@ def spend_ai_tokens(login: str, amount: int, action_label: str = "Конспек
         except Exception:
             pass
         if e.code == 402:
-            return False, err_body.get("error", "Недостаточно токенов")
-        return True, ""
+            return False, err_body.get("error", "Недостаточно средств"), 0.0, 0.0
+        if e.code == 403:
+            return False, err_body.get("error", "Для использования ИИ необходима активная подписка."), 0.0, 0.0
+        return True, "", 0.0, 0.0
     except Exception:
-        return True, ""
+        return True, "", 0.0, 0.0
 
 
 # ─── YANDEXGPT API ────────────────────────────────────────────────────────────
@@ -413,7 +417,7 @@ def handler(event: dict, context) -> dict:
     )
 
     word_count = len(md_text.split())
-    spend_ai_tokens(login, max(tokens_used, 1))
+    _, _, spent_rub, balance_rub = spend_ai_tokens(login, max(tokens_used, 1))
 
     docx_bytes = build_docx(
         md_text=md_text,
@@ -434,4 +438,6 @@ def handler(event: dict, context) -> dict:
         "topic": topic,
         "subject": subject,
         "class_num": class_num,
+        "spent_rub": spent_rub,
+        "balance_rub": balance_rub,
     })

@@ -192,6 +192,11 @@ export function SynopsisForm({
             <div className="flex items-center gap-2">
               <Icon name="CircleCheck" size={15} className="text-green-600" fallback="CheckCircle" />
               <p className="text-sm font-semibold text-green-700">Конспект готов!</p>
+              {created.spentRub !== undefined && created.spentRub > 0 && (
+                <span className="text-xs text-muted-foreground ml-2">
+                  Списано: {created.spentRub.toFixed(2)} ₽
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs text-muted-foreground">{formatWordCount(created.wordCount)}</span>

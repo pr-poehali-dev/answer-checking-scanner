@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import Icon from "@/components/ui/icon";
-import { useAppStore } from "@/store/appStore";
+import { appStore, useAppStore } from "@/store/appStore";
 import { examApi, type ExamResponse } from "@/lib/api";
 import { downloadDocx } from "./TestsForm";
 import { yadisk, ROOT_FOLDER } from "@/lib/yadisk";
@@ -135,8 +135,13 @@ export function ExamsSection() {
       };
       saveHistory([item, ...history]);
 
+      if (result.balance_rub !== undefined) {
+        appStore.setAiBalance(Math.round(result.balance_rub * 100));
+      }
+
+      const spentStr = (result.spent_rub ?? 0) > 0 ? ` · Списано: ${result.spent_rub!.toFixed(2)} ₽` : '';
       setSuccess(
-        `Вариант ${result.variantNum} готов! ${result.totalTasks} заданий, ${result.totalPoints} баллов. ` +
+        `Вариант ${result.variantNum} готов! ${result.totalTasks} заданий, ${result.totalPoints} баллов.${spentStr} ` +
         (yadiskPath ? "Сохранён на Я.Диск." : "Скачан локально.")
       );
     } catch (e) {

@@ -1,16 +1,13 @@
 """
-Чат с ИИ через GigaChat API (Сбер).
+Чат с ИИ через YandexGPT Pro API.
 POST / — { messages: [{role, content}], system?: str }
 -> { reply: str }
 """
 import json
 import os
-import ssl
-import uuid
-import urllib.parse
+import time
 import urllib.request
 import urllib.error
-from datetime import datetime, timedelta
 
 CORS = {
     "Access-Control-Allow-Origin": "*",
@@ -18,7 +15,7 @@ CORS = {
     "Access-Control-Allow-Headers": "Content-Type, X-Authorization",
 }
 
-_TOKEN_CACHE: dict = {"token": None, "expires_at": None}
+YANDEX_GPT_URL = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
 
 
 def _resp(status, body):
@@ -29,48 +26,9 @@ def _resp(status, body):
     }
 
 
-def _ssl_ctx():
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    return ctx
-
-
-def get_gigachat_token() -> str:
-    now = datetime.utcnow()
-    if _TOKEN_CACHE["token"] and _TOKEN_CACHE["expires_at"] and _TOKEN_CACHE["expires_at"] > now:
-        return _TOKEN_CACHE["token"]
-    auth_key = os.environ.get("GIGACHAT_AUTH_KEY", "").strip()
-    if not auth_key:
-        raise RuntimeError("GIGACHAT_AUTH_KEY не задан")
-    rq_uid = str(uuid.uuid4())
-    data = urllib.parse.urlencode({"scope": "GIGACHAT_API_PERS"}).encode()
-    req = urllib.request.Request(
-        "https://ngw.devices.sberbank.ru:9443/api/v2/oauth",
-        data=data, method="POST",
-        headers={
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Accept": "application/json",
-            "RqUID": rq_uid,
-            "Authorization": f"Basic {auth_key}",
-        },
-    )
-    with urllib.request.urlopen(req, timeout=20, context=_ssl_ctx()) as r:
-        body = json.loads(r.read().decode())
-    token = body.get("access_token")
-    if not token:
-        raise RuntimeError(f"GigaChat не вернул access_token: {body}")
-    expires_in_ms = body.get("expires_at")
-    expires_at = (datetime.utcfromtimestamp(expires_in_ms / 1000) - timedelta(minutes=2)
-                  if expires_in_ms else datetime.utcnow() + timedelta(minutes=25))
-    _TOKEN_CACHE["token"] = token
-    _TOKEN_CACHE["expires_at"] = expires_at
-    return token
-
-
 def handler(event: dict, context) -> dict:
     """
-    Чат с GigaChat. POST { messages: [{role, content}], system?: str } -> { reply: str }
+    Чат с YandexGPT. POST { messages: [{role, content}], system?: str } -> { reply: str }
     """
     if event.get("httpMethod") == "OPTIONS":
         return {"statusCode": 200, "headers": CORS, "body": ""}
@@ -83,61 +41,66 @@ def handler(event: dict, context) -> dict:
         return _resp(400, {"error": "Некорректный JSON"})
 
     messages = body.get("messages", [])
-    system = body.get("system", "Ты умный помощник-ассистент. Отвечай на русском языке, развёрнуто и по делу.")
+    system_text = body.get("system", "Ты умный помощник-ассистент. Отвечай на русском языке, развёрнуто и по делу.")
 
     if not messages:
         return _resp(400, {"error": "messages обязателен"})
 
-    chat_messages = [{"role": "system", "content": system}] + [
-        {"role": m["role"], "content": m["content"]}
-        for m in messages
-        if m.get("role") in ("user", "assistant") and m.get("content")
-    ]
+    api_key = os.environ.get("YANDEXGPT_API_KEY", "").strip()
+    folder_id = os.environ.get("YANDEXGPT_FOLDER_ID", "").strip()
+    if not api_key or not folder_id:
+        return _resp(500, {"error": "YANDEXGPT_API_KEY или YANDEXGPT_FOLDER_ID не заданы"})
 
-    last_err = "Нет доступных моделей"
-    for model in ("GigaChat-2", "GigaChat", "GigaChat-Lite"):
+    yandex_messages = [{"role": "system", "text": system_text}]
+    for m in messages:
+        role = m.get("role", "user")
+        if role in ("user", "assistant") and m.get("content"):
+            yandex_messages.append({"role": role, "text": m["content"]})
+
+    payload = {
+        "modelUri": f"gpt://{folder_id}/yandexgpt/latest",
+        "completionOptions": {
+            "stream": False,
+            "temperature": 0.7,
+            "maxTokens": "1500",
+        },
+        "messages": yandex_messages,
+    }
+
+    last_err = "Нет ответа"
+    for attempt in range(1, 4):
         try:
-            token = get_gigachat_token()
-            payload = {
-                "model": model,
-                "messages": chat_messages,
-                "temperature": 0.7,
-                "max_tokens": 1500,
-                "stream": False,
-            }
             req = urllib.request.Request(
-                "https://gigachat.devices.sberbank.ru/api/v1/chat/completions",
+                YANDEX_GPT_URL,
                 data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
                 method="POST",
                 headers={
                     "Content-Type": "application/json",
-                    "Accept": "application/json",
-                    "Authorization": f"Bearer {token}",
-                    "Connection": "close",
+                    "Authorization": f"Api-Key {api_key}",
+                    "x-folder-id": folder_id,
                 },
             )
-            with urllib.request.urlopen(req, timeout=25, context=_ssl_ctx()) as r:
+            with urllib.request.urlopen(req, timeout=25) as r:
                 data = json.loads(r.read().decode())
-            choices = data.get("choices") or []
-            if not choices:
-                last_err = f"Пустой ответ ({model})"
+            alternatives = (data.get("result") or {}).get("alternatives") or []
+            if not alternatives:
+                last_err = f"Пустой ответ YandexGPT"
                 continue
-            reply = choices[0].get("message", {}).get("content", "").strip()
+            reply = alternatives[0].get("message", {}).get("text", "").strip()
             if not reply:
-                last_err = f"Пустой content ({model})"
+                last_err = "Пустой текст YandexGPT"
                 continue
             return _resp(200, {"reply": reply})
         except urllib.error.HTTPError as e:
             err_text = e.read().decode(errors="ignore")[:200]
             if e.code in (401, 403):
-                _TOKEN_CACHE["token"] = None
-                return _resp(502, {"error": f"GigaChat auth error {e.code}"})
-            if e.code == 404:
-                last_err = f"Модель недоступна ({model})"
-                continue
-            last_err = f"GigaChat HTTP {e.code}: {err_text}"
+                return _resp(502, {"error": f"YandexGPT auth error {e.code}"})
+            last_err = f"YandexGPT HTTP {e.code}: {err_text}"
+            if attempt < 3:
+                time.sleep(1.5)
         except Exception as e:
             last_err = str(e)
-            _TOKEN_CACHE["token"] = None
+            if attempt < 3:
+                time.sleep(1.5)
 
     return _resp(502, {"error": last_err})

@@ -3,7 +3,7 @@
 POST / — { image: base64, questionsCount?: 20, optionsCount?: 4, answerKey?: "АБВГ..." }
 -> { studentCode, answers[], confidence[], analysis }
 """
-# v32: adaptive threshold + code anchors
+# v33: section-split clustering, header skip, code threshold fix
 import json, base64, math
 import numpy as np
 import cv2
@@ -284,20 +284,36 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
             if key not in dedup_seen:
                 dedup_seen.add(key)
                 dedup_cells.append(c)
-        rows_all = _cluster_rows(dedup_cells, tol=row_tol)
-        # Оставляем только строки с нужным числом ячеек
-        answer_rows_cells = [r for r in rows_all if len(r) == options_count]
 
-        # Если не хватает строк — смягчаем: берём строки с близким числом ячеек
-        if len(answer_rows_cells) < questions_count // 2:
-            answer_rows_cells = []
-            for r in rows_all:
-                if len(r) >= options_count:
-                    # Слишком много ячеек — берём options_count с равномерным шагом
-                    step = len(r) / options_count
-                    answer_rows_cells.append([r[int(i * step)] for i in range(options_count)])
-                elif len(r) == options_count - 1:
-                    answer_rows_cells.append(r)
+        # Отбрасываем ячейки из верхних 8% сетки — там заголовок "А Б В Г"
+        header_cutoff = grid_y0 + grid_h * 0.08
+        dedup_cells = [c for c in dedup_cells if c[1] > header_cutoff]
+
+        # Определяем число колонок, разбиваем ячейки по секциям
+        n_blank_cols = 1 if questions_count <= 15 else (2 if questions_count <= 40 else 3)
+        section_w = grid_w / n_blank_cols
+
+        answer_rows_cells = []
+        for sec in range(n_blank_cols):
+            sec_x0 = grid_x0 + sec * section_w
+            sec_x1 = grid_x0 + (sec + 1) * section_w
+            # Ячейки только этой секции
+            sec_cells = [c for c in dedup_cells if sec_x0 - med_side <= c[0] <= sec_x1 + med_side]
+            rows_sec = _cluster_rows(sec_cells, tol=row_tol)
+            # Берём только строки с нужным числом ячеек
+            good_rows = [r for r in rows_sec if len(r) == options_count]
+            # Смягчаем: строки с ≥ options_count — обрезаем, с options_count-1 — берём
+            if len(good_rows) < (questions_count // n_blank_cols) // 2:
+                good_rows = []
+                for r in rows_sec:
+                    if len(r) >= options_count:
+                        good_rows.append(r[:options_count])
+                    elif len(r) == options_count - 1:
+                        good_rows.append(r)
+            answer_rows_cells.extend(good_rows)
+
+        # Сортируем итоговые строки: левая колонка (q1-10) потом правая (q11-20)
+        # Уже добавлены в порядке секций, дополнительная сортировка не нужна
 
         dbg_rows_dist = ["cells_detected", len(answer_rows_cells),
                          f"raw={len(raw_cells)}", f"dedup={len(dedup_cells)}", f"grid={int(grid_w)}x{int(grid_h)}"]
@@ -426,18 +442,23 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
         dbg_code["step_y"]  = round(step_y, 1)
         dbg_code["r_est"]   = r_est
 
+        # Для кружков берём отдельный порог — кружки закрашены сильнее крестиков
+        code_zone_pixels = gray[c_y0:c_y1, int(circ_x0):int(circ_x0 + circ_w)]
+        code_bg = float(np.median(code_zone_pixels)) if code_zone_pixels.size > 0 else 180
+        thr_code = max(80, min(160, int(code_bg * 0.55)))
+
         for row_i in range(n_rows_code):
             cy_c = int(c_y0 + row_i * step_y + step_y / 2)
             d_vals = []
             for col_i in range(n_cols_code):
                 cx_c = int(circ_x0 + col_i * step_x + step_x / 2)
-                # Меряем центр кружка с фикс. порогом
-                rsz = max(3, int(r_est * 0.7))
+                # Меряем центр кружка — берём 60% радиуса
+                rsz = max(3, int(r_est * 0.6))
                 x1 = max(0, cx_c - rsz); y1 = max(0, cy_c - rsz)
                 x2 = min(w, cx_c + rsz); y2 = min(h, cy_c + rsz)
                 if x2 > x1 and y2 > y1:
                     roi = gray[y1:y2, x1:x2]
-                    bw_r = (roi < thr_value).astype(np.uint8)
+                    bw_r = (roi < thr_code).astype(np.uint8)
                     d_vals.append(float(np.mean(bw_r)))
                 else:
                     d_vals.append(0.0)
@@ -448,14 +469,16 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
             sorted_d = sorted(d_vals, reverse=True)
             second = sorted_d[1] if len(sorted_d) > 1 else 0.0
             gap_c = best_f - second
-            # Закрашенный кружок: ≥30% тёмных пикселей и разрыв ≥10%
-            if best_f > 0.30 and gap_c > 0.10:
+            norm_gap_c = gap_c / max(best_f, 0.01)
+            # Закрашенный кружок: ≥20% тёмных пикселей и норм. разрыв ≥20%
+            if best_f > 0.20 and (gap_c > 0.08 or norm_gap_c > 0.20):
                 code += str(best_i)
-                code_confs.append(round(min(0.99, gap_c * 2 + 0.3), 2))
+                code_confs.append(round(min(0.99, norm_gap_c * 0.5 + gap_c * 2 + 0.2), 2))
             else:
                 code += "?"; code_confs.append(0.0)
             if row_i == 0:
                 dbg_code["row0_fills"] = [round(v, 3) for v in d_vals]
+                dbg_code["thr_code"] = thr_code
     else:
         dbg_code["error"] = "no_code_anchors"
 

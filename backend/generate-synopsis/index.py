@@ -70,7 +70,7 @@ YANDEX_GPT_URL = "https://llm.api.cloud.yandex.net/foundationModels/v1/completio
 
 
 def yandex_chat(messages: list, max_tokens: int = 8000, temperature: float = 0.4,
-                req_timeout: int = 120) -> str:
+                req_timeout: int = 120) -> tuple[str, int]:
     api_key = os.environ.get("YANDEXGPT_API_KEY", "").strip()
     folder_id = os.environ.get("YANDEXGPT_FOLDER_ID", "").strip()
     if not api_key or not folder_id:
@@ -110,11 +110,13 @@ def yandex_chat(messages: list, max_tokens: int = 8000, temperature: float = 0.4
     text = alternatives[0].get("message", {}).get("text", "").strip()
     if not text:
         raise RuntimeError("YandexGPT вернул пустой текст")
-    return text
+    usage = (body.get("result") or {}).get("usage") or {}
+    tokens_used = int(usage.get("totalTokens") or usage.get("completionTokens") or 0)
+    return text, tokens_used
 
 
 # Псевдоним для совместимости
-def gigachat_chat(messages: list, max_tokens: int = 8000, req_timeout: int = 120) -> str:
+def gigachat_chat(messages: list, max_tokens: int = 8000, req_timeout: int = 120) -> tuple[str, int]:
     return yandex_chat(messages, max_tokens=max_tokens, req_timeout=req_timeout)
 
 
@@ -378,12 +380,7 @@ def handler(event: dict, context) -> dict:
     if class_num not in range(1, 12):
         return _resp(400, {"error": "class_num должен быть от 1 до 11"})
 
-    # Списание токенов
-    ok, err_msg = spend_ai_tokens(login, TOKENS_COST_SYNOPSIS)
-    if not ok:
-        return _resp(402, {"error": err_msg})
-
-    md_text = gigachat_chat(
+    md_text, tokens_used = gigachat_chat(
         messages=[
             {"role": "system", "content": (
                 "Ты — опытный учитель-методист с 20-летним стажем, эксперт по ФГОС. "
@@ -416,6 +413,7 @@ def handler(event: dict, context) -> dict:
     )
 
     word_count = len(md_text.split())
+    spend_ai_tokens(login, max(tokens_used, 1))
 
     docx_bytes = build_docx(
         md_text=md_text,

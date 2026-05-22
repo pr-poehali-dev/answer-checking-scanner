@@ -677,7 +677,7 @@ OGE_SUBJECTS = sorted(FIPИ_STRUCTURES["ОГЭ"].keys())
 EGE_SUBJECTS = sorted(FIPИ_STRUCTURES["ЕГЭ"].keys())
 
 
-def gigachat_chat(messages: list, max_tokens: int = 3000, req_timeout: int = 65) -> str:
+def gigachat_chat(messages: list, max_tokens: int = 3000, req_timeout: int = 65) -> tuple[str, int]:
     api_key = os.environ.get("YANDEXGPT_API_KEY", "").strip()
     folder_id = os.environ.get("YANDEXGPT_FOLDER_ID", "").strip()
     if not api_key or not folder_id:
@@ -713,7 +713,9 @@ def gigachat_chat(messages: list, max_tokens: int = 3000, req_timeout: int = 65)
             text = alternatives[0].get("message", {}).get("text", "").strip()
             if not text:
                 raise RuntimeError("YandexGPT вернул пустой текст")
-            return text
+            usage = (body.get("result") or {}).get("usage") or {}
+            tokens_used = int(usage.get("totalTokens") or usage.get("completionTokens") or 0)
+            return text, tokens_used
         except urllib.error.HTTPError as e:
             err_text = e.read().decode(errors="ignore")[:300]
             if e.code in (401, 403):
@@ -756,7 +758,7 @@ def extract_json_obj(text: str) -> dict:
     return json.loads(text)
 
 
-def generate_task(task_def: dict, exam_type: str, subject: str) -> dict:
+def generate_task(task_def: dict, exam_type: str, subject: str) -> tuple[dict, int]:
     """Генерирует одно задание по шаблону ФИПИ через ИИ."""
     num = task_def["num"]
     topic = task_def["topic"]
@@ -806,7 +808,7 @@ def generate_task(task_def: dict, exam_type: str, subject: str) -> dict:
         f"{format_prompt}"
     )
 
-    raw = gigachat_chat(
+    raw, tokens_used = gigachat_chat(
         [{"role": "system", "content": system}, {"role": "user", "content": user}],
         max_tokens=1200,
         req_timeout=65,
@@ -822,7 +824,7 @@ def generate_task(task_def: dict, exam_type: str, subject: str) -> dict:
         "options": data.get("options", []),
         "answer": str(data.get("answer", "")),
         "explanation": data.get("explanation", ""),
-    }
+    }, tokens_used
 
 
 # ─── СОЗДАНИЕ DOCX ────────────────────────────────────────────────────────────
@@ -1115,25 +1117,20 @@ def handler(event: dict, context) -> dict:
             if err:
                 return err
 
-        # Списываем токены пропорционально количеству заданий в батче
-        batch_size = len(batch_indices) if batch_indices is not None else len(structure["parts"])
-        tokens_to_spend = TOKENS_COST_EXAM_TASK * max(1, batch_size)
-        ok, tok_err = spend_ai_tokens(login, tokens_to_spend)
-        if not ok:
-            return _resp(402, {"error": tok_err})
-
         parts = structure["parts"]
         if batch_indices is None:
             # Генерируем все (для обратной совместимости — не используется)
             batch_indices = list(range(len(parts)))
 
         tasks = []
+        total_tokens = 0
         for idx in batch_indices:
             if idx < 0 or idx >= len(parts):
                 continue
             task_def = parts[idx]
             try:
-                task = generate_task(task_def, exam_type, subject)
+                task, _tok = generate_task(task_def, exam_type, subject)
+                total_tokens += _tok
             except Exception as e:
                 task = {
                     "num": task_def["num"],
@@ -1147,6 +1144,8 @@ def handler(event: dict, context) -> dict:
                     "explanation": f"Ошибка: {str(e)[:80]}",
                 }
             tasks.append(task)
+
+        spend_ai_tokens(login, max(total_tokens, 1))
 
         return _resp(200, {"tasks": tasks, "examType": exam_type, "subject": subject})
 

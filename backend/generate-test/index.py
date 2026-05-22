@@ -78,7 +78,7 @@ YANDEX_GPT_URL = "https://llm.api.cloud.yandex.net/foundationModels/v1/completio
 
 
 def gigachat_chat(messages: list, max_tokens: int = 2400, temperature: float = 0.4,
-                  req_timeout: int = 60, max_retries: int = 3) -> str:
+                  req_timeout: int = 60, max_retries: int = 3) -> tuple[str, int]:
     api_key = os.environ.get("YANDEXGPT_API_KEY", "").strip()
     folder_id = os.environ.get("YANDEXGPT_FOLDER_ID", "").strip()
     if not api_key or not folder_id:
@@ -114,7 +114,9 @@ def gigachat_chat(messages: list, max_tokens: int = 2400, temperature: float = 0
             text = alternatives[0].get("message", {}).get("text", "").strip()
             if not text:
                 raise RuntimeError("YandexGPT вернул пустой текст")
-            return text
+            usage = (body.get("result") or {}).get("usage") or {}
+            tokens_used = int(usage.get("totalTokens") or usage.get("completionTokens") or 0)
+            return text, tokens_used
         except urllib.error.HTTPError as e:
             err_text = e.read().decode(errors="ignore")[:300]
             if e.code in (401, 403):
@@ -147,10 +149,10 @@ def extract_json(text: str) -> dict:
 LETTERS = ["А", "Б", "В", "Г", "Д"]
 
 
-def _generate_part1(work_type: str, subject: str, class_num: int, topic: str, description: str, count: int) -> list:
+def _generate_part1(work_type: str, subject: str, class_num: int, topic: str, description: str, count: int) -> tuple[list, int]:
     """Часть 1: вопросы с 4 вариантами ответа. Генерируется отдельным запросом."""
     if count <= 0:
-        return []
+        return [], 0
     system = (
         "Ты учитель-методист РФ. Создаёшь школьные тестовые вопросы строго по теме. "
         "Каждый вопрос имеет РОВНО 4 варианта ответа (А, Б, В, Г), из них 1 правильный. "
@@ -176,7 +178,7 @@ def _generate_part1(work_type: str, subject: str, class_num: int, topic: str, de
         f"- Вопросы разнообразные, проверяющие понимание темы"
     )
     max_tok = min(180 * count + 500, 3200)
-    raw = gigachat_chat(
+    raw, _tok = gigachat_chat(
         [{"role": "system", "content": system}, {"role": "user", "content": user}],
         max_tokens=max_tok,
         temperature=0.5,
@@ -219,13 +221,13 @@ def _generate_part1(work_type: str, subject: str, class_num: int, topic: str, de
             ans = "А"
         result.append({"question": text, "options": opts, "answer": ans})
 
-    return result
+    return result, _tok
 
 
-def _generate_part2(work_type: str, subject: str, class_num: int, topic: str, description: str, count: int) -> list:
+def _generate_part2(work_type: str, subject: str, class_num: int, topic: str, description: str, count: int) -> tuple[list, int]:
     """Часть 2: открытые вопросы. Генерируется отдельным запросом."""
     if count <= 0:
-        return []
+        return [], 0
     system = (
         "Ты учитель-методист РФ. Создаёшь открытые вопросы школьной программы. "
         "Возвращай ТОЛЬКО валидный JSON без markdown."
@@ -245,7 +247,7 @@ def _generate_part2(work_type: str, subject: str, class_num: int, topic: str, de
         f"РОВНО {count} элементов. Вопросы разнообразные."
     )
     max_tok = min(140 * count + 400, 3000)
-    raw = gigachat_chat(
+    raw, _tok = gigachat_chat(
         [{"role": "system", "content": system}, {"role": "user", "content": user}],
         max_tokens=max_tok,
         temperature=0.5,
@@ -269,21 +271,21 @@ def _generate_part2(work_type: str, subject: str, class_num: int, topic: str, de
             continue
         result.append({"question": text, "answer": ans})
 
-    return result
+    return result, _tok
 
 
 def generate_questions(work_type: str, subject: str, class_num: int, topic: str, description: str,
                        part1_count: int, part2_count: int) -> dict:
     """Запрашивает у GigaChat вопросы РАЗДЕЛЬНО для каждой части, чтобы гарантировать обе."""
-    part1 = _generate_part1(work_type, subject, class_num, topic, description, part1_count)
-    part2 = _generate_part2(work_type, subject, class_num, topic, description, part2_count)
+    part1, tok1 = _generate_part1(work_type, subject, class_num, topic, description, part1_count)
+    part2, tok2 = _generate_part2(work_type, subject, class_num, topic, description, part2_count)
 
     if part1_count > 0 and not part1:
         raise RuntimeError("ИИ не вернул валидных вопросов для части 1. Попробуйте ещё раз.")
     if part2_count > 0 and not part2:
         raise RuntimeError("ИИ не вернул валидных вопросов для части 2. Попробуйте ещё раз.")
 
-    return {"part1": part1, "part2": part2}
+    return {"part1": part1, "part2": part2, "total_tokens": tok1 + tok2}
 
 
 # ─── DOCX BUILDER ──────────────────────────────────────────────────────────
@@ -640,11 +642,6 @@ def handler(event: dict, context) -> dict:
     if part1_count + part2_count == 0:
         return _resp(400, {"error": "Должен быть хотя бы один вопрос (часть 1 или часть 2)"})
 
-    # Списываем токены
-    ok, tok_err = spend_ai_tokens(login, TOKENS_COST_TEST)
-    if not ok:
-        return _resp(402, {"error": tok_err})
-
     # Проверяем лимит AI-запросов для trial-пользователей
     if login:
         try:
@@ -672,6 +669,9 @@ def handler(event: dict, context) -> dict:
         if "timed out" in msg.lower() or "timeout" in msg.lower():
             return _resp(504, {"error": "Сервис GigaChat сейчас перегружен. Подождите минуту и попробуйте снова."})
         return _resp(500, {"error": f"Ошибка генерации вопросов: {msg}"})
+
+    total_tokens_used = questions.get("total_tokens", 0)
+    spend_ai_tokens(login, max(total_tokens_used, 1))
 
     part1 = questions["part1"]
     part2 = questions["part2"]

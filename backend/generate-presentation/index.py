@@ -234,7 +234,7 @@ YANDEX_GPT_URL = "https://llm.api.cloud.yandex.net/foundationModels/v1/completio
 
 
 def _yandex_chat(messages: list, max_tokens: int = 4000, temperature: float = 0.2,
-                 req_timeout: int = 90) -> str:
+                 req_timeout: int = 90) -> tuple[str, int]:
     api_key = os.environ.get("YANDEXGPT_API_KEY", "").strip()
     folder_id = os.environ.get("YANDEXGPT_FOLDER_ID", "").strip()
     if not api_key or not folder_id:
@@ -272,7 +272,9 @@ def _yandex_chat(messages: list, max_tokens: int = 4000, temperature: float = 0.
     text = alternatives[0].get("message", {}).get("text", "").strip()
     if not text:
         raise RuntimeError("YandexGPT вернул пустой текст")
-    return text
+    usage = (body.get("result") or {}).get("usage") or {}
+    tokens_used = int(usage.get("totalTokens") or usage.get("completionTokens") or 0)
+    return text, tokens_used
 
 
 def get_gigachat_token():
@@ -280,11 +282,11 @@ def get_gigachat_token():
 
 
 def openrouter_chat(messages: list, max_tokens: int = 4000, temperature: float = 0.2,
-                    req_timeout: int = 90) -> str:
+                    req_timeout: int = 90) -> tuple[str, int]:
     return _yandex_chat(messages, max_tokens=max_tokens, temperature=temperature, req_timeout=req_timeout)
 
 
-def gigachat_with_fallback(messages: list, max_tokens: int = 3000) -> str:
+def gigachat_with_fallback(messages: list, max_tokens: int = 3000) -> tuple[str, int]:
     return _yandex_chat(messages, max_tokens=max_tokens)
 
 
@@ -464,7 +466,7 @@ def fetch_image_for_slide(slide_title: str, topic: str) -> bytes | None:
 
 # ─── ГЕНЕРАЦИЯ СТРУКТУРЫ ─────────────────────────────────────────────────────
 
-def generate_outline(topic: str, description: str, slides_count: int, audience: str) -> dict:
+def generate_outline(topic: str, description: str, slides_count: int, audience: str) -> tuple[dict, int]:
     """Генерирует развёрнутую структуру презентации строго по ФГОС."""
     audience_str = audience or "школьники"
 
@@ -492,7 +494,7 @@ def generate_outline(topic: str, description: str, slides_count: int, audience: 
     # ~300 токенов на слайд (5 тезисов × ~25 слов + заголовок + fact + 3 queries + запас)
     max_tok = min(300 * slides_count + 800, 7000)
 
-    raw = gigachat_with_fallback(
+    raw, tokens_used = gigachat_with_fallback(
         [{"role": "system", "content": system}, {"role": "user", "content": user}],
         max_tokens=max_tok,
     )
@@ -540,7 +542,7 @@ def generate_outline(topic: str, description: str, slides_count: int, audience: 
         "contents": [str(c).strip() for c in contents if str(c).strip()][:slides_count],
         "slides": norm_slides,
         "conclusion": [str(c).strip() for c in (data.get("conclusion") or []) if str(c).strip()][:5],
-    }
+    }, tokens_used
 
 
 # ─── PPTX BUILDER ────────────────────────────────────────────────────────────
@@ -1169,11 +1171,6 @@ def handler(event: dict, context) -> dict:
         if not topic:
             return _resp(400, {"error": "Укажите тему урока"})
 
-        # Списываем токены перед генерацией
-        ok, tok_err = spend_ai_tokens(login, TOKENS_COST_PRESENTATION)
-        if not ok:
-            return _resp(402, {"error": tok_err})
-
         # Проверяем лимит AI-запросов для trial-пользователей
         if login:
             try:
@@ -1195,7 +1192,7 @@ def handler(event: dict, context) -> dict:
                 pass
 
         try:
-            outline = generate_outline(topic, description, slides_count, audience)
+            outline, tokens_used = generate_outline(topic, description, slides_count, audience)
         except Exception as e:
             msg = str(e)
             if "timed out" in msg.lower() or "timeout" in msg.lower():
@@ -1203,6 +1200,8 @@ def handler(event: dict, context) -> dict:
             if "429" in msg or "rate" in msg.lower():
                 return _resp(429, {"error": "Слишком много запросов к ИИ-сервису — подождите 30 секунд."})
             return _resp(500, {"error": f"Ошибка генерации структуры: {msg}"})
+
+        spend_ai_tokens(login, max(tokens_used, 1))
 
         theme = pick_theme(topic)
         return _resp(200, {
@@ -1279,10 +1278,6 @@ def handler(event: dict, context) -> dict:
     if not topic:
         return _resp(400, {"error": "Укажите тему урока"})
 
-    ok, tok_err = spend_ai_tokens(login, TOKENS_COST_PRESENTATION)
-    if not ok:
-        return _resp(402, {"error": tok_err})
-
     if login:
         try:
             limit_req = urllib.request.Request(
@@ -1305,7 +1300,7 @@ def handler(event: dict, context) -> dict:
     theme = pick_theme(topic)
 
     try:
-        outline = generate_outline(topic, description, slides_count, audience)
+        outline, tokens_used = generate_outline(topic, description, slides_count, audience)
     except Exception as e:
         msg = str(e)
         if "timed out" in msg.lower() or "timeout" in msg.lower():
@@ -1313,6 +1308,8 @@ def handler(event: dict, context) -> dict:
         if "429" in msg or "rate" in msg.lower():
             return _resp(429, {"error": "Слишком много запросов к ИИ-сервису — подождите 30 секунд."})
         return _resp(500, {"error": f"Ошибка генерации структуры: {msg}"})
+
+    spend_ai_tokens(login, max(tokens_used, 1))
 
     images = {}
     try:

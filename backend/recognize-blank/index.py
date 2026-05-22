@@ -3,7 +3,7 @@
 POST / — { image: base64, questionsCount?: 20, optionsCount?: 4, answerKey?: "АБВГ..." }
 -> { studentCode, answers[], confidence[], analysis }
 """
-# v34: geometry_grid as primary method, fixed code circle coords
+# v35: fixed ocrEngine field mapping, reanalyze mode without image
 import json, base64, math
 import numpy as np
 import cv2
@@ -519,9 +519,6 @@ def handler(event: dict, context) -> dict:
                     "body": json.dumps({"error": "Некорректный JSON"})}
 
     image_b64 = body.get("image") or body.get("image_b64") or ""
-    if not image_b64:
-        return {"statusCode": 400, "headers": CORS,
-                "body": json.dumps({"error": "Поле image обязательно"})}
 
     try:
         questions_count = int(body.get("questionsCount") or body.get("questions_count") or 20)
@@ -532,6 +529,26 @@ def handler(event: dict, context) -> dict:
         questions_count, options_count = 20, 4
 
     answer_key = str(body.get("answerKey") or body.get("answer_key") or "").strip()
+
+    # Режим reanalyze: нет изображения, но есть готовые answers
+    if not image_b64:
+        answers_list = body.get("answers") or []
+        if not answers_list:
+            return {"statusCode": 400, "headers": CORS,
+                    "body": json.dumps({"error": "Поле image или answers обязательно"})}
+        student_code = str(body.get("studentCode") or body.get("student_code") or "")
+        analysis = _analyze(answers_list, answer_key)
+        resp = {
+            "studentCode": student_code,
+            "answers": answers_list,
+            "confidences": [],
+            "squaresFound": 0,
+            "answerRows": len(answers_list),
+        }
+        if analysis:
+            resp["analysis"] = {k: v for k, v in analysis.items() if k != "_dbg"}
+        return {"statusCode": 200, "headers": {**CORS, "Content-Type": "application/json"},
+                "body": json.dumps(resp, ensure_ascii=False)}
 
     try:
         result = _recognize(image_b64, questions_count, options_count)

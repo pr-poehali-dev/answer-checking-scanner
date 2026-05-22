@@ -50,11 +50,12 @@ export async function recognizeBlank(
   const answers_part1 = all.slice(0, part1Count);
   const answers_part2 = all.slice(part1Count, part1Count + part2Count);
 
+  // Backend возвращает: {q, answer, correct (строка-ключ), ok (bool)}
   const details: AnalysisDetail[] = (resp.analysis.details || []).map(d => ({
     question: d.q,
-    student: d.student,
-    key: d.key,
-    correct: d.correct,
+    student: d.answer ?? d.student ?? "",
+    key: d.correct ?? d.key ?? "",
+    correct: d.ok ?? (typeof d.correct === "boolean" ? d.correct : false),
     part: d.q <= part1Count ? 1 : 2,
   }));
 

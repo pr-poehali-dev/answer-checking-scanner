@@ -18,8 +18,27 @@ export function mdLineToRtf(line: string): string {
 }
 
 export function downloadDocx(item: SynopsisItem) {
-  const lines = item.text.split("\n");
+  // Если есть настоящий DOCX от бэкенда — скачиваем его
+  if (item.docxB64) {
+    const binary = atob(item.docxB64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const blob = new Blob([bytes], {
+      type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = item.filename || `Конспект_${item.topic.slice(0, 40)}_${item.classNum}кл.docx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return;
+  }
 
+  // Fallback для старых конспектов без docxB64 — генерируем RTF
+  const lines = item.text.split("\n");
   const rtfParts: string[] = [
     "{\\rtf1\\ansi\\deff0",
     "{\\fonttbl{\\f0\\froman Times New Roman;}}",
@@ -27,7 +46,6 @@ export function downloadDocx(item: SynopsisItem) {
     "\\widowctrl\\hyphauto",
     "\\margl1800\\margr1800\\margt1400\\margb1400",
   ];
-
   for (const line of lines) {
     if (line.trim() === "" || line === "---") {
       rtfParts.push("\\pard\\sb60\\par");
@@ -48,10 +66,8 @@ export function downloadDocx(item: SynopsisItem) {
       rtfParts.push(`\\pard\\sb60\\sa60\\f0\\fs22 ${mdLineToRtf(line)}\\par`);
     }
   }
-
   rtfParts.push("}");
   const rtf = rtfParts.join("\n");
-
   const blob = new Blob([rtf], { type: "application/msword" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");

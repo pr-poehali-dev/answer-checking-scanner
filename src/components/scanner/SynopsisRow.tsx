@@ -45,7 +45,7 @@ export function SynopsisRow({ item, onGoPresentation, onGoTest }: Props) {
           <button
             onClick={() => downloadDocx(item)}
             className="p-1.5 text-muted-foreground hover:text-green-600 transition-colors"
-            title="Скачать конспект (.doc)"
+            title="Скачать конспект (.docx)"
           >
             <Icon name="Download" size={14} />
           </button>

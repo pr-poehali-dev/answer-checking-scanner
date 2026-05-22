@@ -264,6 +264,8 @@ export interface SynopsisResponse {
   topic: string;
   subject: string;
   class_num: number;
+  docx_b64?: string;
+  filename?: string;
 }
 
 export const synopsisApi = {

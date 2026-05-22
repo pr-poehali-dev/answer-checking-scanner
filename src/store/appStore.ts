@@ -174,6 +174,8 @@ export interface SynopsisItem {
   text: string;
   wordCount: number;
   createdAt: string;
+  docxB64?: string;
+  filename?: string;
 }
 
 export interface GeneratedTestItem {

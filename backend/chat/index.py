@@ -1,9 +1,16 @@
 """
-Чат с ИИ через OpenRouter API — бесплатные модели (Llama 3, Gemma и др.)
+Чат с ИИ через GigaChat API (Сбер).
 POST / — { messages: [{role, content}], system?: str }
 -> { reply: str }
 """
-import json, os, requests
+import json
+import os
+import ssl
+import uuid
+import urllib.parse
+import urllib.request
+import urllib.error
+from datetime import datetime, timedelta
 
 CORS = {
     "Access-Control-Allow-Origin": "*",
@@ -11,17 +18,7 @@ CORS = {
     "Access-Control-Allow-Headers": "Content-Type, X-Authorization",
 }
 
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-# Бесплатные модели по приоритету (fallback при 404 и 429)
-FREE_MODELS = [
-    "meta-llama/llama-3.3-70b-instruct:free",
-    "deepseek/deepseek-r1-0528:free",
-    "google/gemma-3-27b-it:free",
-    "qwen/qwen3-235b-a22b:free",
-    "microsoft/phi-4-reasoning-plus:free",
-    "nousresearch/hermes-3-llama-3.1-405b:free",
-    "minimax/minimax-m2.5:free",
-]
+_TOKEN_CACHE: dict = {"token": None, "expires_at": None}
 
 
 def _resp(status, body):
@@ -32,10 +29,48 @@ def _resp(status, body):
     }
 
 
+def _ssl_ctx():
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
+
+
+def get_gigachat_token() -> str:
+    now = datetime.utcnow()
+    if _TOKEN_CACHE["token"] and _TOKEN_CACHE["expires_at"] and _TOKEN_CACHE["expires_at"] > now:
+        return _TOKEN_CACHE["token"]
+    auth_key = os.environ.get("GIGACHAT_AUTH_KEY", "").strip()
+    if not auth_key:
+        raise RuntimeError("GIGACHAT_AUTH_KEY не задан")
+    rq_uid = str(uuid.uuid4())
+    data = urllib.parse.urlencode({"scope": "GIGACHAT_API_PERS"}).encode()
+    req = urllib.request.Request(
+        "https://ngw.devices.sberbank.ru:9443/api/v2/oauth",
+        data=data, method="POST",
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "application/json",
+            "RqUID": rq_uid,
+            "Authorization": f"Basic {auth_key}",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=20, context=_ssl_ctx()) as r:
+        body = json.loads(r.read().decode())
+    token = body.get("access_token")
+    if not token:
+        raise RuntimeError(f"GigaChat не вернул access_token: {body}")
+    expires_in_ms = body.get("expires_at")
+    expires_at = (datetime.utcfromtimestamp(expires_in_ms / 1000) - timedelta(minutes=2)
+                  if expires_in_ms else datetime.utcnow() + timedelta(minutes=25))
+    _TOKEN_CACHE["token"] = token
+    _TOKEN_CACHE["expires_at"] = expires_at
+    return token
+
+
 def handler(event: dict, context) -> dict:
     """
-    Отправляет сообщение в OpenRouter (Llama 3.1 бесплатно) и возвращает ответ.
-    POST { messages: [{role: 'user'|'assistant', content: str}], system?: str }
+    Чат с GigaChat. POST { messages: [{role, content}], system?: str } -> { reply: str }
     """
     if event.get("httpMethod") == "OPTIONS":
         return {"statusCode": 200, "headers": CORS, "body": ""}
@@ -53,10 +88,6 @@ def handler(event: dict, context) -> dict:
     if not messages:
         return _resp(400, {"error": "messages обязателен"})
 
-    api_key = os.environ.get("OPENROUTER_API_KEY", "")
-    if not api_key:
-        return _resp(500, {"error": "OpenRouter не настроен"})
-
     chat_messages = [{"role": "system", "content": system}] + [
         {"role": m["role"], "content": m["content"]}
         for m in messages
@@ -64,54 +95,49 @@ def handler(event: dict, context) -> dict:
     ]
 
     last_err = "Нет доступных моделей"
-    for model in FREE_MODELS:
+    for model in ("GigaChat-2", "GigaChat", "GigaChat-Lite"):
         try:
-            resp = requests.post(
-                OPENROUTER_URL,
+            token = get_gigachat_token()
+            payload = {
+                "model": model,
+                "messages": chat_messages,
+                "temperature": 0.7,
+                "max_tokens": 1500,
+                "stream": False,
+            }
+            req = urllib.request.Request(
+                "https://gigachat.devices.sberbank.ru/api/v1/chat/completions",
+                data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                method="POST",
                 headers={
-                    "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
-                    "HTTP-Referer": "https://poehali.dev",
-                    "X-Title": "AOUSPT Chat",
+                    "Accept": "application/json",
+                    "Authorization": f"Bearer {token}",
+                    "Connection": "close",
                 },
-                json={
-                    "model": model,
-                    "messages": chat_messages,
-                    "temperature": 0.7,
-                    "max_tokens": 1500,
-                },
-                timeout=25,
             )
-            resp.raise_for_status()
-            data = resp.json()
-            # Provider returned error — ошибка в теле 200-ответа
-            if data.get("error"):
-                err_msg = data["error"].get("message", str(data["error"])) if isinstance(data["error"], dict) else str(data["error"])
-                last_err = f"Provider error ({model}): {err_msg}"
-                continue
+            with urllib.request.urlopen(req, timeout=25, context=_ssl_ctx()) as r:
+                data = json.loads(r.read().decode())
             choices = data.get("choices") or []
             if not choices:
                 last_err = f"Пустой ответ ({model})"
-                continue
-            finish_reason = choices[0].get("finish_reason", "")
-            if finish_reason == "error":
-                last_err = f"finish_reason=error ({model})"
                 continue
             reply = choices[0].get("message", {}).get("content", "").strip()
             if not reply:
                 last_err = f"Пустой content ({model})"
                 continue
             return _resp(200, {"reply": reply})
-        except requests.HTTPError as e:
-            try:
-                err_msg = e.response.json().get("error", {}).get("message", "")
-            except Exception:
-                err_msg = str(e)
-            last_err = f"API error {e.response.status_code}: {err_msg}"
-            if e.response.status_code in (400, 403, 404, 429, 500, 502, 503):
+        except urllib.error.HTTPError as e:
+            err_text = e.read().decode(errors="ignore")[:200]
+            if e.code in (401, 403):
+                _TOKEN_CACHE["token"] = None
+                return _resp(502, {"error": f"GigaChat auth error {e.code}"})
+            if e.code == 404:
+                last_err = f"Модель недоступна ({model})"
                 continue
-            return _resp(502, {"error": last_err})
+            last_err = f"GigaChat HTTP {e.code}: {err_text}"
         except Exception as e:
             last_err = str(e)
-            continue
+            _TOKEN_CACHE["token"] = None
+
     return _resp(502, {"error": last_err})

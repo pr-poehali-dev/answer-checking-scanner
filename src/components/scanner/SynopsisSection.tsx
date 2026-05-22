@@ -79,6 +79,8 @@ export function SynopsisSection() {
         text: result.text,
         wordCount: result.word_count,
         createdAt: new Date().toISOString(),
+        docxB64: result.docx_b64,
+        filename: result.filename,
       };
 
       appStore.addSynopsis(item);

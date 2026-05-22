@@ -200,7 +200,7 @@ export function SynopsisForm({
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-sm transition-colors border border-green-600 text-green-700 hover:bg-green-50"
               >
                 <Icon name="Download" size={12} />
-                Скачать .doc
+                Скачать .docx
               </button>
               <button
                 onClick={() => onGoTest(created)}

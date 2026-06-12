@@ -28,6 +28,20 @@
       "expectedStatus": 401
     },
     {
+      "name": "Messages without operator password returns 401",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "messages", "id": 1},
+      "expectedStatus": 401
+    },
+    {
+      "name": "Send message without operator password returns 401",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "send_message", "id": 1, "message": "hi"},
+      "expectedStatus": 401
+    },
+    {
       "name": "Unknown action returns 400",
       "method": "POST",
       "path": "/",

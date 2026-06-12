@@ -27,7 +27,23 @@ interface Application {
   operator_comment?: string;
   reviewed_at?: string;
   created_at: string;
+  oo_admin_login?: string;
+  oo_admin_password?: string;
+  operator_number?: string;
 }
+
+interface Message {
+  id: number;
+  direction: string;
+  subject?: string;
+  body: string;
+  operator_number?: string;
+  to_email?: string;
+  email_sent?: boolean;
+  created_at: string;
+}
+
+const OP_NUM_KEY = "sjou_operator_number_v1";
 
 const STATUS_META: Record<string, { label: string; cls: string; icon: string }> = {
   pending: { label: "На рассмотрении", cls: "bg-amber-100 text-amber-700", icon: "Clock" },
@@ -47,6 +63,15 @@ export default function SjouOperatorPage() {
   const [selected, setSelected] = useState<Application | null>(null);
   const [comment, setComment] = useState("");
   const [reviewing, setReviewing] = useState(false);
+  const [operatorNumber, setOperatorNumber] = useState(() => localStorage.getItem(OP_NUM_KEY) || "");
+
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [msgText, setMsgText] = useState("");
+  const [sendingMsg, setSendingMsg] = useState(false);
+
+  useEffect(() => {
+    localStorage.setItem(OP_NUM_KEY, operatorNumber);
+  }, [operatorNumber]);
 
   const load = useCallback(
     async (password: string, status: string) => {
@@ -93,6 +118,31 @@ export default function SjouOperatorPage() {
     load(pwd, filter);
   };
 
+  const loadMessages = useCallback(
+    async (appId: number) => {
+      try {
+        const res = await fetch(API, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "messages", id: appId, operator_password: pwd }),
+        });
+        const data = await res.json();
+        setMessages(data.messages || []);
+      } catch {
+        setMessages([]);
+      }
+    },
+    [pwd],
+  );
+
+  const openApp = (a: Application) => {
+    setSelected(a);
+    setComment(a.operator_comment || "");
+    setMsgText("");
+    setMessages([]);
+    loadMessages(a.id);
+  };
+
   const review = async (decision: "approved" | "rejected") => {
     if (!selected) return;
     setReviewing(true);
@@ -100,7 +150,15 @@ export default function SjouOperatorPage() {
       const res = await fetch(API, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "review", id: selected.id, decision, comment, operator_password: pwd }),
+        body: JSON.stringify({
+          action: "review",
+          id: selected.id,
+          decision,
+          comment,
+          inn: selected.inn,
+          operator_number: operatorNumber,
+          operator_password: pwd,
+        }),
       });
       if (!res.ok) throw new Error();
       setSelected(null);
@@ -110,6 +168,31 @@ export default function SjouOperatorPage() {
       setAuthError("Ошибка при сохранении решения");
     } finally {
       setReviewing(false);
+    }
+  };
+
+  const sendMessage = async () => {
+    if (!selected || !msgText.trim()) return;
+    setSendingMsg(true);
+    try {
+      const res = await fetch(API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "send_message",
+          id: selected.id,
+          message: msgText.trim(),
+          operator_number: operatorNumber,
+          operator_password: pwd,
+        }),
+      });
+      if (!res.ok) throw new Error();
+      setMsgText("");
+      loadMessages(selected.id);
+    } catch {
+      setAuthError("Ошибка при отправке сообщения");
+    } finally {
+      setSendingMsg(false);
     }
   };
 
@@ -162,13 +245,24 @@ export default function SjouOperatorPage() {
             <Icon name="ShieldCheck" size={22} />
             <div className="font-bold">Панель оператора СЖОУ</div>
           </div>
-          <button
-            onClick={() => { localStorage.removeItem(PWD_KEY); setAuthed(false); setPwd(""); }}
-            className="text-sm text-slate-300 hover:text-white flex items-center gap-1.5"
-          >
-            <Icon name="LogOut" size={15} />
-            Выйти
-          </button>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1.5">
+              <Icon name="BadgeCheck" size={15} className="text-slate-400" />
+              <input
+                value={operatorNumber}
+                onChange={(e) => setOperatorNumber(e.target.value)}
+                placeholder="Номер оператора"
+                className="bg-slate-800 text-white text-sm rounded-lg px-3 py-1.5 w-36 placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+              />
+            </div>
+            <button
+              onClick={() => { localStorage.removeItem(PWD_KEY); setAuthed(false); setPwd(""); }}
+              className="text-sm text-slate-300 hover:text-white flex items-center gap-1.5"
+            >
+              <Icon name="LogOut" size={15} />
+              Выйти
+            </button>
+          </div>
         </div>
       </header>
 
@@ -213,7 +307,7 @@ export default function SjouOperatorPage() {
               return (
                 <button
                   key={a.id}
-                  onClick={() => { setSelected(a); setComment(a.operator_comment || ""); }}
+                  onClick={() => openApp(a)}
                   className="bg-white rounded-xl border border-slate-200 p-5 text-left hover:shadow-md transition-shadow flex items-start justify-between gap-4"
                 >
                   <div className="min-w-0">
@@ -310,17 +404,42 @@ export default function SjouOperatorPage() {
                 </div>
               )}
 
+              {selected.status === "approved" && selected.oo_admin_login && (
+                <div className="px-4 py-3 rounded-lg bg-blue-50 border border-blue-200 text-sm">
+                  <div className="text-xs font-semibold text-blue-700 mb-2 flex items-center gap-1.5">
+                    <Icon name="KeyRound" size={14} />
+                    Данные доступа администратора ОО
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <div className="text-xs text-slate-400">Логин</div>
+                      <code className="text-slate-800 font-medium">{selected.oo_admin_login}</code>
+                    </div>
+                    <div>
+                      <div className="text-xs text-slate-400">Пароль</div>
+                      <code className="text-slate-800 font-medium">{selected.oo_admin_password}</code>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {selected.status === "pending" ? (
                 <>
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1.5">Комментарий (необязательно)</label>
+                    <label className="block text-sm font-medium text-slate-700 mb-1.5">Сообщение организации (необязательно)</label>
                     <textarea
                       value={comment}
                       onChange={(e) => setComment(e.target.value)}
                       rows={3}
-                      placeholder="Причина решения или примечание для организации..."
+                      placeholder="Сообщение, которое получит организация в письме..."
                       className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
                     />
+                    {!operatorNumber && (
+                      <p className="text-xs text-amber-600 mt-1.5 flex items-center gap-1">
+                        <Icon name="AlertTriangle" size={12} />
+                        Укажите номер оператора в шапке — он будет в подписи письма.
+                      </p>
+                    )}
                   </div>
                   <div className="flex gap-3">
                     <button
@@ -346,6 +465,59 @@ export default function SjouOperatorPage() {
                   Заявка {STATUS_META[selected.status].label.toLowerCase()} · {fmtDate(selected.reviewed_at)}
                 </div>
               )}
+
+              {/* Переписка по почте */}
+              <div className="pt-2 border-t border-slate-200">
+                <div className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-1.5">
+                  <Icon name="Mail" size={15} />
+                  Переписка по почте
+                </div>
+
+                {messages.length === 0 ? (
+                  <p className="text-sm text-slate-400 mb-3">Писем пока нет.</p>
+                ) : (
+                  <div className="space-y-2 mb-3 max-h-60 overflow-y-auto">
+                    {messages.map((m) => (
+                      <div key={m.id} className="px-3.5 py-2.5 rounded-lg bg-slate-50 border border-slate-200">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs font-semibold text-slate-600">
+                            {m.subject || "Письмо"}
+                          </span>
+                          <span className="text-xs text-slate-400 flex items-center gap-1">
+                            {m.email_sent ? (
+                              <Icon name="CheckCheck" size={12} className="text-green-600" />
+                            ) : (
+                              <Icon name="AlertCircle" size={12} className="text-amber-500" />
+                            )}
+                            {fmtDate(m.created_at)}
+                          </span>
+                        </div>
+                        <div className="text-sm text-slate-700 whitespace-pre-wrap">{m.body}</div>
+                        {m.operator_number && (
+                          <div className="text-xs text-slate-400 mt-1">Оператор №{m.operator_number}</div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex gap-2">
+                  <textarea
+                    value={msgText}
+                    onChange={(e) => setMsgText(e.target.value)}
+                    rows={2}
+                    placeholder="Написать письмо организации..."
+                    className="flex-1 px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                  />
+                  <button
+                    onClick={sendMessage}
+                    disabled={sendingMsg || !msgText.trim()}
+                    className="px-4 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center justify-center"
+                  >
+                    {sendingMsg ? <Icon name="Loader2" size={18} className="animate-spin" /> : <Icon name="Send" size={18} />}
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>

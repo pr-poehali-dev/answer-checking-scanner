@@ -3,11 +3,17 @@ API заявок на регистрацию образовательных ор
 POST /         (action=submit)  — подать заявку (публично) + загрузить файл заявления
 POST /         (action=list)    — список заявок для оператора (требует пароль оператора)
 POST /         (action=review)  — одобрить/отклонить заявку с комментарием (оператор)
+                                  + автоматическое письмо организации на email
 """
 import json
 import os
 import base64
 import uuid
+import smtplib
+import ssl
+from email.mime.text import MIMEText
+from email.header import Header
+from email.utils import formataddr
 import psycopg2
 import boto3
 
@@ -160,6 +166,85 @@ def handle_list(event: dict, body: dict) -> dict:
         conn.close()
 
 
+def _send_email(to_email: str, subject: str, html_body: str) -> bool:
+    host = os.environ.get("SMTP_HOST")
+    user = os.environ.get("SMTP_USER")
+    password = os.environ.get("SMTP_PASSWORD")
+    port = int(os.environ.get("SMTP_PORT", "465") or "465")
+    if not (host and user and password and to_email):
+        return False
+    msg = MIMEText(html_body, "html", "utf-8")
+    msg["Subject"] = Header(subject, "utf-8")
+    msg["From"] = formataddr((str(Header("СЖОУ", "utf-8")), user))
+    msg["To"] = to_email
+    try:
+        if port == 465:
+            ctx = ssl.create_default_context()
+            with smtplib.SMTP_SSL(host, port, context=ctx, timeout=15) as s:
+                s.login(user, password)
+                s.sendmail(user, [to_email], msg.as_string())
+        else:
+            with smtplib.SMTP(host, port, timeout=15) as s:
+                s.starttls(context=ssl.create_default_context())
+                s.login(user, password)
+                s.sendmail(user, [to_email], msg.as_string())
+        return True
+    except Exception:
+        return False
+
+
+def _build_email(app: dict, decision: str, comment: str) -> tuple:
+    name = app.get("oo_full_name", "")
+    contact = app.get("contact_name", "")
+    if decision == "approved":
+        subject = "СЖОУ: заявка вашей организации одобрена"
+        status_html = (
+            '<p style="font-size:16px;color:#16a34a;font-weight:600">'
+            "Ваша заявка на регистрацию в системе СЖОУ одобрена!</p>"
+        )
+        next_html = (
+            "<p>В ближайшее время с вами свяжется специалист СЖОУ для настройки "
+            "доступа и добавления участников вашей организации.</p>"
+        )
+    else:
+        subject = "СЖОУ: заявка вашей организации отклонена"
+        status_html = (
+            '<p style="font-size:16px;color:#dc2626;font-weight:600">'
+            "К сожалению, ваша заявка на регистрацию в СЖОУ отклонена.</p>"
+        )
+        next_html = (
+            "<p>Вы можете подать заявку повторно, устранив указанные замечания, "
+            "или связаться с оператором для уточнения деталей.</p>"
+        )
+    comment_html = (
+        f'<div style="margin:16px 0;padding:14px 16px;background:#f1f5f9;'
+        f'border-radius:8px;color:#334155"><b>Комментарий оператора:</b><br>{comment}</div>'
+        if comment else ""
+    )
+    html = f"""
+    <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#1e293b">
+      <div style="background:linear-gradient(135deg,#2563eb,#4f46e5);padding:24px;
+                  border-radius:12px 12px 0 0;color:#fff">
+        <div style="font-size:20px;font-weight:800">СЖОУ</div>
+        <div style="font-size:13px;opacity:.85">Электронный журнал и дневник</div>
+      </div>
+      <div style="border:1px solid #e2e8f0;border-top:none;border-radius:0 0 12px 12px;padding:24px">
+        <p>Здравствуйте, {contact}!</p>
+        {status_html}
+        <p style="color:#475569">Организация: <b>{name}</b></p>
+        {comment_html}
+        {next_html}
+        <hr style="border:none;border-top:1px solid #e2e8f0;margin:20px 0">
+        <p style="font-size:12px;color:#94a3b8">
+          Это автоматическое письмо системы СЖОУ. Данные хранятся на серверах в России
+          в соответствии с требованиями Минпросвещения РФ.
+        </p>
+      </div>
+    </div>
+    """
+    return subject, html
+
+
 def handle_review(event: dict, body: dict) -> dict:
     if not _check_operator(event):
         return _resp(401, {"error": "Неверный пароль оператора"})
@@ -174,15 +259,28 @@ def handle_review(event: dict, body: dict) -> dict:
         cur.execute(
             f"""UPDATE {TABLE}
             SET status=%s, operator_comment=%s, reviewed_at=NOW()
-            WHERE id=%s RETURNING id""",
+            WHERE id=%s
+            RETURNING oo_full_name, contact_name, contact_email""",
             (decision, comment, int(app_id)),
         )
-        if not cur.fetchone():
+        row = cur.fetchone()
+        if not row:
             return _resp(404, {"error": "Заявка не найдена"})
         conn.commit()
-        return _resp(200, {"ok": True})
     finally:
         conn.close()
+
+    app_data = {
+        "oo_full_name": row[0],
+        "contact_name": row[1],
+        "contact_email": row[2],
+    }
+    email_sent = False
+    if app_data["contact_email"]:
+        subject, html = _build_email(app_data, decision, comment or "")
+        email_sent = _send_email(app_data["contact_email"], subject, html)
+
+    return _resp(200, {"ok": True, "email_sent": email_sent})
 
 
 def handler(event: dict, context) -> dict:

@@ -9,6 +9,7 @@ import NotFound from "./pages/NotFound";
 import YadiskCallback from "./pages/YadiskCallback";
 import OfertaPage from "./pages/OfertaPage";
 import PrivacyPage from "./pages/PrivacyPage";
+import SjouPage from "./pages/SjouPage";
 
 const queryClient = new QueryClient();
 
@@ -23,6 +24,7 @@ const App = () => (
           <Route path="/yadisk-callback" element={<YadiskCallback />} />
           <Route path="/oferta" element={<OfertaPage />} />
           <Route path="/privacy" element={<PrivacyPage />} />
+          <Route path="/sjou" element={<SjouPage />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Icon from "@/components/ui/icon";
+import OoRegisterModal from "@/components/sjou/OoRegisterModal";
 
 type Role = "teacher" | "student" | "parent" | "admin";
 
@@ -92,6 +93,7 @@ const COMPLIANCE: { icon: string; title: string; text: string }[] = [
 export default function SjouPage() {
   const navigate = useNavigate();
   const [loginOpen, setLoginOpen] = useState(false);
+  const [ooRegOpen, setOoRegOpen] = useState(false);
   const [role, setRole] = useState<Role>("teacher");
   const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
@@ -130,10 +132,17 @@ export default function SjouPage() {
           <div className="flex items-center gap-2">
             <button
               onClick={() => navigate("/")}
-              className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 text-sm text-slate-600 hover:text-slate-900 transition-colors"
+              className="hidden lg:inline-flex items-center gap-1.5 px-3 py-2 text-sm text-slate-600 hover:text-slate-900 transition-colors"
             >
               <Icon name="ArrowLeft" size={14} />
               На главную
+            </button>
+            <button
+              onClick={() => setOoRegOpen(true)}
+              className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold rounded-lg border border-blue-600 text-blue-700 hover:bg-blue-50 transition-colors"
+            >
+              <Icon name="Building2" size={15} />
+              Регистрация ОО
             </button>
             <button
               onClick={() => openLogin()}
@@ -169,13 +178,13 @@ export default function SjouPage() {
               <Icon name="LogIn" size={18} />
               Войти в систему
             </button>
-            <a
-              href="#roles"
+            <button
+              onClick={() => setOoRegOpen(true)}
               className="inline-flex items-center gap-2 px-7 py-3.5 rounded-xl bg-white/10 text-white font-semibold hover:bg-white/20 transition-colors border border-white/30"
             >
-              Узнать больше
-              <Icon name="ArrowDown" size={18} />
-            </a>
+              <Icon name="Building2" size={18} />
+              Регистрация ОО
+            </button>
           </div>
         </div>
       </section>
@@ -279,11 +288,11 @@ export default function SjouPage() {
         </div>
         <div className="text-center mt-12">
           <button
-            onClick={() => openLogin()}
+            onClick={() => setOoRegOpen(true)}
             className="inline-flex items-center gap-2 px-8 py-4 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-700 transition-colors shadow-lg"
           >
-            <Icon name="LogIn" size={18} />
-            Войти в СЖОУ
+            <Icon name="Building2" size={18} />
+            Зарегистрировать организацию
           </button>
         </div>
       </section>
@@ -391,6 +400,8 @@ export default function SjouPage() {
           </div>
         </div>
       )}
+
+      {ooRegOpen && <OoRegisterModal onClose={() => setOoRegOpen(false)} />}
     </div>
   );
 }

@@ -1,0 +1,38 @@
+{
+  "tests": [
+    {
+      "name": "OPTIONS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    },
+    {
+      "name": "Submit without required fields returns 400",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "submit", "oo_full_name": ""},
+      "expectedStatus": 400
+    },
+    {
+      "name": "List without operator password returns 401",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "list"},
+      "expectedStatus": 401
+    },
+    {
+      "name": "Review without operator password returns 401",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "review", "id": 1, "decision": "approved"},
+      "expectedStatus": 401
+    },
+    {
+      "name": "Unknown action returns 400",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "nope"},
+      "expectedStatus": 400
+    }
+  ]
+}

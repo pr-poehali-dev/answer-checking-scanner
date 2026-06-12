@@ -75,12 +75,25 @@ def _check_operator(event: dict) -> bool:
     pwd = headers.get("X-Operator-Password") or headers.get("x-operator-password")
     if not pwd:
         return False
-    valid = {
-        os.environ.get("SJOU_OPERATOR_PASSWORD"),
-        os.environ.get("ADMIN_PASSWORD"),
-    }
-    valid.discard(None)
+    pwd = pwd.strip()
+    valid = set()
+    for key in ("SJOU_OPERATOR_PASSWORD", "ADMIN_PASSWORD"):
+        v = os.environ.get(key)
+        if v:
+            valid.add(v.strip())
     return pwd in valid
+
+
+def _operator_debug(event: dict) -> dict:
+    headers = event.get("headers", {})
+    pwd = headers.get("X-Operator-Password") or headers.get("x-operator-password") or ""
+    return {
+        "got_password_len": len(pwd.strip()),
+        "sjou_pwd_set": bool(os.environ.get("SJOU_OPERATOR_PASSWORD")),
+        "admin_pwd_set": bool(os.environ.get("ADMIN_PASSWORD")),
+        "sjou_pwd_len": len((os.environ.get("SJOU_OPERATOR_PASSWORD") or "").strip()),
+        "admin_pwd_len": len((os.environ.get("ADMIN_PASSWORD") or "").strip()),
+    }
 
 
 def _row_to_dict(r) -> dict:
@@ -156,7 +169,7 @@ def handle_submit(body: dict) -> dict:
 
 def handle_list(event: dict, body: dict) -> dict:
     if not _check_operator(event):
-        return _resp(401, {"error": "Неверный пароль оператора"})
+        return _resp(401, {"error": "Неверный пароль оператора", "debug": _operator_debug(event)})
     status = (body.get("status") or "").strip()
     conn = get_conn()
     try:

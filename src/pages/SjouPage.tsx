@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Icon from "@/components/ui/icon";
 import OoRegisterModal from "@/components/sjou/OoRegisterModal";
+import { saveSession } from "@/components/sjou/cabinet/api";
 
 type Role = "teacher" | "student" | "parent" | "admin";
 
@@ -99,12 +100,10 @@ export default function SjouPage() {
   const [password, setPassword] = useState("");
   const [loggingIn, setLoggingIn] = useState(false);
   const [loginError, setLoginError] = useState("");
-  const [loggedUser, setLoggedUser] = useState<{ oo_full_name: string; contact_name: string } | null>(null);
 
   const openLogin = (r?: Role) => {
     if (r) setRole(r);
     setLoginError("");
-    setLoggedUser(null);
     setLoginOpen(true);
   };
 
@@ -127,7 +126,13 @@ export default function SjouPage() {
         setLoginError(data.error || "Ошибка входа");
         return;
       }
-      setLoggedUser({ oo_full_name: data.oo_full_name, contact_name: data.contact_name });
+      saveSession({
+        login: login.trim(),
+        password: password.trim(),
+        oo_full_name: data.oo_full_name,
+        contact_name: data.contact_name,
+      });
+      navigate("/sjou-cabinet");
     } catch {
       setLoginError("Ошибка соединения. Попробуйте ещё раз.");
     } finally {
@@ -369,22 +374,6 @@ export default function SjouPage() {
               <p className="text-sm text-blue-100">Выберите роль и войдите в систему</p>
             </div>
 
-            {loggedUser ? (
-              <div className="p-8 text-center">
-                <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4">
-                  <Icon name="CheckCircle2" size={36} className="text-green-600" />
-                </div>
-                <h4 className="text-lg font-bold mb-1">Вы вошли в систему</h4>
-                <p className="text-sm text-slate-600 mb-1">{loggedUser.oo_full_name}</p>
-                <p className="text-sm text-slate-400 mb-6">{loggedUser.contact_name}</p>
-                <button
-                  onClick={() => setLoginOpen(false)}
-                  className="px-6 py-2.5 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors"
-                >
-                  Продолжить
-                </button>
-              </div>
-            ) : (
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">Я вхожу как</label>
@@ -455,7 +444,6 @@ export default function SjouPage() {
                 Защищённое соединение. Данные хранятся на серверах СЖОУ в России.
               </p>
             </form>
-            )}
           </div>
         </div>
       )}

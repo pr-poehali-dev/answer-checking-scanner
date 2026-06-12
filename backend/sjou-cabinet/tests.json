@@ -1,0 +1,31 @@
+{
+  "tests": [
+    {
+      "name": "OPTIONS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    },
+    {
+      "name": "No credentials returns 401",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "overview"},
+      "expectedStatus": 401
+    },
+    {
+      "name": "Wrong credentials returns 401",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "classes_list", "login": "nope", "password": "nope"},
+      "expectedStatus": 401
+    },
+    {
+      "name": "Class add wrong creds returns 401",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "class_add", "login": "x", "password": "y", "name": "1А"},
+      "expectedStatus": 401
+    }
+  ]
+}

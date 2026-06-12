@@ -11,6 +11,7 @@ import OfertaPage from "./pages/OfertaPage";
 import PrivacyPage from "./pages/PrivacyPage";
 import SjouPage from "./pages/SjouPage";
 import SjouOperatorPage from "./pages/SjouOperatorPage";
+import SjouCabinetPage from "./pages/SjouCabinetPage";
 
 const queryClient = new QueryClient();
 
@@ -27,6 +28,7 @@ const App = () => (
           <Route path="/privacy" element={<PrivacyPage />} />
           <Route path="/sjou" element={<SjouPage />} />
           <Route path="/sjou-operator" element={<SjouOperatorPage />} />
+          <Route path="/sjou-cabinet" element={<SjouCabinetPage />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>

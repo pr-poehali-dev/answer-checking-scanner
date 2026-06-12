@@ -37,8 +37,9 @@ export default function SjouOperatorPage() {
           body: JSON.stringify({ action: "list", status, operator_password: password }),
         });
         if (res.status === 401) {
+          const d = await res.json().catch(() => ({}));
           setAuthed(false);
-          setAuthError("Неверный пароль оператора");
+          setAuthError("Неверный пароль оператора " + (d.debug ? JSON.stringify(d.debug) : ""));
           localStorage.removeItem(PWD_KEY);
           return;
         }

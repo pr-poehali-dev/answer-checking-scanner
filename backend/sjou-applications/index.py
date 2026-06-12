@@ -94,6 +94,23 @@ def _check_operator(event: dict, body: dict = None) -> bool:
     return pwd in valid
 
 
+def _auth_debug(event: dict, body: dict = None) -> dict:
+    headers = event.get("headers", {})
+    pwd = (
+        (body or {}).get("operator_password")
+        or headers.get("X-Operator-Password")
+        or headers.get("x-operator-password")
+        or ""
+    )
+    return {
+        "got_len": len(pwd.strip()),
+        "sjou_set": bool(os.environ.get("SJOU_OPERATOR_PASSWORD")),
+        "sjou_len": len((os.environ.get("SJOU_OPERATOR_PASSWORD") or "").strip()),
+        "admin_set": bool(os.environ.get("ADMIN_PASSWORD")),
+        "admin_len": len((os.environ.get("ADMIN_PASSWORD") or "").strip()),
+    }
+
+
 APP_COLS = [
     "id", "oo_full_name", "oo_short_name", "oo_type", "inn", "ogrn",
     "legal_address", "actual_address", "region", "director_name",
@@ -171,7 +188,7 @@ def handle_submit(body: dict) -> dict:
 
 def handle_list(event: dict, body: dict) -> dict:
     if not _check_operator(event, body):
-        return _resp(401, {"error": "Неверный пароль оператора"})
+        return _resp(401, {"error": "Неверный пароль оператора", "debug": _auth_debug(event, body)})
     status = (body.get("status") or "").strip()
     conn = get_conn()
     try:

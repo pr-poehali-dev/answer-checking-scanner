@@ -1,0 +1,45 @@
+{
+  "tests": [
+    {
+      "name": "OPTIONS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    },
+    {
+      "name": "Login without credentials returns 401",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "login"},
+      "expectedStatus": 401
+    },
+    {
+      "name": "Login wrong credentials returns 401",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "login", "login": "nope", "password": "nope"},
+      "expectedStatus": 401
+    },
+    {
+      "name": "Teacher action wrong creds returns 401",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "t_classes", "login": "x", "password": "y"},
+      "expectedStatus": 401
+    },
+    {
+      "name": "Student dashboard wrong creds returns 401",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "s_dashboard", "login": "x", "password": "y"},
+      "expectedStatus": 401
+    },
+    {
+      "name": "Parent children wrong creds returns 401",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "p_children", "login": "x", "password": "y"},
+      "expectedStatus": 401
+    }
+  ]
+}

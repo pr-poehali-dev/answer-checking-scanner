@@ -7,9 +7,15 @@ POST action=teachers_list / teacher_add / teacher_delete
 POST action=students_list / student_add / student_delete
 POST action=lessons_list / lesson_add / lesson_delete   — расписание
 POST action=journal / grade_set / grade_delete          — журнал оценок
+POST action=homework_list / homework_add / homework_delete
+POST action=announce_list / announce_add / announce_delete
+При добавлении учителя/ученика автоматически создаётся аккаунт (логин/пароль).
 """
 import json
 import os
+import secrets
+import string
+import re
 import psycopg2
 
 CORS = {
@@ -25,6 +31,56 @@ TEACHERS = f"{SCHEMA}.sjou_teachers"
 STUDENTS = f"{SCHEMA}.sjou_students"
 LESSONS = f"{SCHEMA}.sjou_lessons"
 GRADES = f"{SCHEMA}.sjou_grades"
+ACCOUNTS = f"{SCHEMA}.sjou_accounts"
+PARENT_CHILDREN = f"{SCHEMA}.sjou_parent_children"
+HOMEWORK = f"{SCHEMA}.sjou_homework"
+ANNOUNCE = f"{SCHEMA}.sjou_announcements"
+
+TRANSLIT = {
+    'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'e',
+    'ж': 'zh', 'з': 'z', 'и': 'i', 'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm',
+    'н': 'n', 'о': 'o', 'п': 'p', 'р': 'r', 'с': 's', 'т': 't', 'у': 'u',
+    'ф': 'f', 'х': 'h', 'ц': 'c', 'ч': 'ch', 'ш': 'sh', 'щ': 'sch',
+    'ъ': '', 'ы': 'y', 'ь': '', 'э': 'e', 'ю': 'yu', 'я': 'ya',
+}
+
+
+def _translit(s: str) -> str:
+    out = []
+    for ch in (s or '').strip().lower():
+        if ch in TRANSLIT:
+            out.append(TRANSLIT[ch])
+        elif ch.isalnum():
+            out.append(ch)
+    return re.sub(r'[^a-z0-9]', '', ''.join(out))
+
+
+def _gen_password(length: int = 8) -> str:
+    alphabet = string.ascii_lowercase + string.digits
+    return "".join(secrets.choice(alphabet) for _ in range(length))
+
+
+def _gen_account(cur, app_id: int, role: str, full_name: str,
+                 teacher_id=None, student_id=None) -> tuple:
+    """Создаёт аккаунт с уникальным логином и паролем. Возвращает (account_id, login, password)."""
+    prefix = {"teacher": "t", "student": "s", "parent": "p"}.get(role, "u")
+    base = (_translit(full_name) or role)[:20]
+    candidate = f"{prefix}_{base}"
+    n = 1
+    while True:
+        cur.execute(f"SELECT 1 FROM {ACCOUNTS} WHERE login=%s", (candidate,))
+        if not cur.fetchone():
+            break
+        n += 1
+        candidate = f"{prefix}_{base}{n}"
+    password = _gen_password()
+    cur.execute(
+        f"""INSERT INTO {ACCOUNTS}
+            (application_id, role, login, password, full_name, teacher_id, student_id)
+            VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+        (app_id, role, candidate, password, full_name, teacher_id, student_id),
+    )
+    return cur.fetchone()[0], candidate, password
 
 
 def get_conn():
@@ -127,8 +183,18 @@ def handler(event: dict, context) -> dict:
                 f"""SELECT id, full_name, subject, email, phone
                     FROM {TEACHERS} WHERE application_id=%s ORDER BY full_name""",
                 (app_id,))
+            rows = cur.fetchall()
             cols = ["id", "full_name", "subject", "email", "phone"]
-            return _resp(200, {"teachers": [dict(zip(cols, r)) for r in cur.fetchall()]})
+            teachers = [dict(zip(cols, r)) for r in rows]
+            cur.execute(
+                f"SELECT teacher_id, login, password FROM {ACCOUNTS} WHERE application_id=%s AND role='teacher'",
+                (app_id,))
+            accmap = {r[0]: {"login": r[1], "password": r[2]} for r in cur.fetchall()}
+            for t in teachers:
+                acc = accmap.get(t["id"])
+                t["login"] = acc["login"] if acc else None
+                t["password"] = acc["password"] if acc else None
+            return _resp(200, {"teachers": teachers})
 
         if action == "teacher_add":
             full_name = (body.get("full_name") or "").strip()
@@ -142,13 +208,15 @@ def handler(event: dict, context) -> dict:
                  (body.get("email") or "").strip() or None,
                  (body.get("phone") or "").strip() or None))
             new_id = cur.fetchone()[0]
+            _, acc_login, acc_pwd = _gen_account(cur, app_id, "teacher", full_name, teacher_id=new_id)
             conn.commit()
-            return _resp(200, {"ok": True, "id": new_id})
+            return _resp(200, {"ok": True, "id": new_id, "login": acc_login, "password": acc_pwd})
 
         if action == "teacher_delete":
             tid = body.get("id")
             if not tid:
                 return _resp(400, {"error": "Нужен id"})
+            cur.execute(f"DELETE FROM {ACCOUNTS} WHERE teacher_id=%s AND application_id=%s", (int(tid), app_id))
             cur.execute(f"DELETE FROM {TEACHERS} WHERE id=%s AND application_id=%s", (int(tid), app_id))
             conn.commit()
             return _resp(200, {"ok": True})
@@ -171,7 +239,29 @@ def handler(event: dict, context) -> dict:
                         WHERE s.application_id=%s ORDER BY s.full_name""",
                     (app_id,))
             cols = ["id", "full_name", "birth_date", "parent_name", "parent_phone", "class_id", "class_name"]
-            return _resp(200, {"students": [dict(zip(cols, r)) for r in cur.fetchall()]})
+            students = [dict(zip(cols, r)) for r in cur.fetchall()]
+            # Аккаунт ученика
+            cur.execute(
+                f"SELECT student_id, login, password FROM {ACCOUNTS} WHERE application_id=%s AND role='student'",
+                (app_id,))
+            smap = {r[0]: {"login": r[1], "password": r[2]} for r in cur.fetchall()}
+            # Аккаунты родителей по детям
+            cur.execute(
+                f"""SELECT pc.student_id, a.login, a.password
+                    FROM {PARENT_CHILDREN} pc JOIN {ACCOUNTS} a ON a.id=pc.parent_account_id
+                    WHERE a.application_id=%s""",
+                (app_id,))
+            pmap = {}
+            for sid, plogin, ppwd in cur.fetchall():
+                pmap.setdefault(sid, {"login": plogin, "password": ppwd})
+            for s in students:
+                acc = smap.get(s["id"])
+                s["login"] = acc["login"] if acc else None
+                s["password"] = acc["password"] if acc else None
+                pacc = pmap.get(s["id"])
+                s["parent_login"] = pacc["login"] if pacc else None
+                s["parent_password"] = pacc["password"] if pacc else None
+            return _resp(200, {"students": students})
 
         if action == "student_add":
             full_name = (body.get("full_name") or "").strip()
@@ -182,23 +272,48 @@ def handler(event: dict, context) -> dict:
                 class_id = int(class_id) if class_id not in (None, "") else None
             except (ValueError, TypeError):
                 class_id = None
+            parent_name = (body.get("parent_name") or "").strip() or None
             cur.execute(
                 f"""INSERT INTO {STUDENTS}
                     (application_id, class_id, full_name, birth_date, parent_name, parent_phone)
                     VALUES (%s,%s,%s,%s,%s,%s) RETURNING id""",
                 (app_id, class_id, full_name,
                  (body.get("birth_date") or "").strip() or None,
-                 (body.get("parent_name") or "").strip() or None,
+                 parent_name,
                  (body.get("parent_phone") or "").strip() or None))
             new_id = cur.fetchone()[0]
+            # Аккаунт ученика
+            _, s_login, s_pwd = _gen_account(cur, app_id, "student", full_name, student_id=new_id)
+            result = {"ok": True, "id": new_id, "login": s_login, "password": s_pwd}
+            # Аккаунт родителя (привязан к ребёнку), создаём если указано имя родителя
+            if parent_name:
+                p_acc_id, p_login, p_pwd = _gen_account(cur, app_id, "parent", parent_name)
+                cur.execute(
+                    f"INSERT INTO {PARENT_CHILDREN} (parent_account_id, student_id) VALUES (%s,%s)",
+                    (p_acc_id, new_id))
+                result["parent_login"] = p_login
+                result["parent_password"] = p_pwd
             conn.commit()
-            return _resp(200, {"ok": True, "id": new_id})
+            return _resp(200, result)
 
         if action == "student_delete":
             sid = body.get("id")
             if not sid:
                 return _resp(400, {"error": "Нужен id"})
-            cur.execute(f"DELETE FROM {STUDENTS} WHERE id=%s AND application_id=%s", (int(sid), app_id))
+            sid = int(sid)
+            # Удаляем оценки, ДЗ-связи отсутствуют, аккаунт ученика и родительские связи
+            cur.execute(
+                f"""DELETE FROM {PARENT_CHILDREN} WHERE student_id=%s
+                    AND parent_account_id IN (SELECT id FROM {ACCOUNTS} WHERE application_id=%s)""",
+                (sid, app_id))
+            # Удаляем родительские аккаунты, у которых не осталось детей
+            cur.execute(
+                f"""DELETE FROM {ACCOUNTS} WHERE role='parent' AND application_id=%s
+                    AND id NOT IN (SELECT parent_account_id FROM {PARENT_CHILDREN})""",
+                (app_id,))
+            cur.execute(f"DELETE FROM {GRADES} WHERE student_id=%s AND application_id=%s", (sid, app_id))
+            cur.execute(f"DELETE FROM {ACCOUNTS} WHERE student_id=%s AND application_id=%s", (sid, app_id))
+            cur.execute(f"DELETE FROM {STUDENTS} WHERE id=%s AND application_id=%s", (sid, app_id))
             conn.commit()
             return _resp(200, {"ok": True})
 
@@ -303,6 +418,78 @@ def handler(event: dict, context) -> dict:
             if not gid:
                 return _resp(400, {"error": "Нужен id"})
             cur.execute(f"DELETE FROM {GRADES} WHERE id=%s AND application_id=%s", (int(gid), app_id))
+            conn.commit()
+            return _resp(200, {"ok": True})
+
+        # ── Домашние задания ──
+        if action == "homework_list":
+            class_id = body.get("class_id")
+            if not class_id:
+                return _resp(400, {"error": "Нужен class_id"})
+            cur.execute(
+                f"""SELECT id, subject, due_date, text, author_name, created_at
+                    FROM {HOMEWORK} WHERE application_id=%s AND class_id=%s
+                    ORDER BY due_date DESC, id DESC""",
+                (app_id, int(class_id)))
+            cols = ["id", "subject", "due_date", "text", "author_name", "created_at"]
+            return _resp(200, {"homework": [dict(zip(cols, r)) for r in cur.fetchall()]})
+
+        if action == "homework_add":
+            class_id = body.get("class_id")
+            subject = (body.get("subject") or "").strip()
+            due = (body.get("due_date") or "").strip()
+            text = (body.get("text") or "").strip()
+            if not class_id or not subject or not due or not text:
+                return _resp(400, {"error": "Укажите класс, предмет, дату и текст задания"})
+            cur.execute(
+                f"""INSERT INTO {HOMEWORK} (application_id, class_id, subject, due_date, text, author_name)
+                    VALUES (%s,%s,%s,%s,%s,%s) RETURNING id""",
+                (app_id, int(class_id), subject, due, text, (body.get("author_name") or "").strip() or None))
+            new_id = cur.fetchone()[0]
+            conn.commit()
+            return _resp(200, {"ok": True, "id": new_id})
+
+        if action == "homework_delete":
+            hid = body.get("id")
+            if not hid:
+                return _resp(400, {"error": "Нужен id"})
+            cur.execute(f"DELETE FROM {HOMEWORK} WHERE id=%s AND application_id=%s", (int(hid), app_id))
+            conn.commit()
+            return _resp(200, {"ok": True})
+
+        # ── Объявления ──
+        if action == "announce_list":
+            cur.execute(
+                f"""SELECT a.id, a.class_id, c.name, a.title, a.body, a.author_name, a.created_at
+                    FROM {ANNOUNCE} a LEFT JOIN {CLASSES} c ON c.id=a.class_id
+                    WHERE a.application_id=%s ORDER BY a.created_at DESC""",
+                (app_id,))
+            cols = ["id", "class_id", "class_name", "title", "body", "author_name", "created_at"]
+            return _resp(200, {"announcements": [dict(zip(cols, r)) for r in cur.fetchall()]})
+
+        if action == "announce_add":
+            title = (body.get("title") or "").strip()
+            text = (body.get("body") or "").strip()
+            if not title or not text:
+                return _resp(400, {"error": "Укажите заголовок и текст"})
+            class_id = body.get("class_id")
+            try:
+                class_id = int(class_id) if class_id not in (None, "") else None
+            except (ValueError, TypeError):
+                class_id = None
+            cur.execute(
+                f"""INSERT INTO {ANNOUNCE} (application_id, class_id, title, body, author_name)
+                    VALUES (%s,%s,%s,%s,%s) RETURNING id""",
+                (app_id, class_id, title, text, (body.get("author_name") or "").strip() or None))
+            new_id = cur.fetchone()[0]
+            conn.commit()
+            return _resp(200, {"ok": True, "id": new_id})
+
+        if action == "announce_delete":
+            aid = body.get("id")
+            if not aid:
+                return _resp(400, {"error": "Нужен id"})
+            cur.execute(f"DELETE FROM {ANNOUNCE} WHERE id=%s AND application_id=%s", (int(aid), app_id))
             conn.commit()
             return _resp(200, {"ok": True})
 

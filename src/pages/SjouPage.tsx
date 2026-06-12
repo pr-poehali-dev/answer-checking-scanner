@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Icon from "@/components/ui/icon";
 import OoRegisterModal from "@/components/sjou/OoRegisterModal";
-import { saveSession } from "@/components/sjou/cabinet/api";
+import { saveSession, AUTH_API } from "@/components/sjou/cabinet/api";
 
 type Role = "teacher" | "student" | "parent" | "admin";
 
@@ -116,10 +116,10 @@ export default function SjouPage() {
     }
     setLoggingIn(true);
     try {
-      const res = await fetch("https://functions.poehali.dev/2188b28c-bef1-4cf5-9016-f25d4b79fa8a", {
+      const res = await fetch(AUTH_API, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "oo_login", login: login.trim(), password: password.trim() }),
+        body: JSON.stringify({ action: "login", login: login.trim(), password: password.trim() }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -130,9 +130,16 @@ export default function SjouPage() {
         login: login.trim(),
         password: password.trim(),
         oo_full_name: data.oo_full_name,
-        contact_name: data.contact_name,
+        full_name: data.full_name,
+        role: data.role,
       });
-      navigate("/sjou-cabinet");
+      const dest: Record<string, string> = {
+        admin: "/sjou-cabinet",
+        teacher: "/sjou-teacher",
+        student: "/sjou-student",
+        parent: "/sjou-parent",
+      };
+      navigate(dest[data.role as string] || "/sjou-cabinet");
     } catch {
       setLoginError("Ошибка соединения. Попробуйте ещё раз.");
     } finally {
@@ -434,11 +441,9 @@ export default function SjouPage() {
                 <span>Войти</span>
               </button>
 
-              {role !== "admin" && (
-                <p className="text-xs text-center text-amber-600">
-                  Сейчас доступен вход администратора ОО. Доступ для учителей, учеников и родителей появится позже.
-                </p>
-              )}
+              <p className="text-xs text-center text-slate-400">
+                Логин и пароль выдаёт администратор вашей организации.
+              </p>
 
               <p className="text-xs text-center text-slate-500">
                 Защищённое соединение. Данные хранятся на серверах СЖОУ в России.

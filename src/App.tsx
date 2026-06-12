@@ -12,6 +12,9 @@ import PrivacyPage from "./pages/PrivacyPage";
 import SjouPage from "./pages/SjouPage";
 import SjouOperatorPage from "./pages/SjouOperatorPage";
 import SjouCabinetPage from "./pages/SjouCabinetPage";
+import SjouTeacherPage from "./pages/SjouTeacherPage";
+import SjouStudentPage from "./pages/SjouStudentPage";
+import SjouParentPage from "./pages/SjouParentPage";
 
 const queryClient = new QueryClient();
 
@@ -29,6 +32,9 @@ const App = () => (
           <Route path="/sjou" element={<SjouPage />} />
           <Route path="/sjou-operator" element={<SjouOperatorPage />} />
           <Route path="/sjou-cabinet" element={<SjouCabinetPage />} />
+          <Route path="/sjou-teacher" element={<SjouTeacherPage />} />
+          <Route path="/sjou-student" element={<SjouStudentPage />} />
+          <Route path="/sjou-parent" element={<SjouParentPage />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>

@@ -79,15 +79,21 @@ export default function TeachersSection({ session, onChanged }: Props) {
         <div className="grid sm:grid-cols-2 gap-3">
           {items.map((t) => (
             <div key={t.id} className="bg-white rounded-xl border border-slate-200 p-4 flex items-start justify-between">
-              <div>
+              <div className="min-w-0">
                 <div className="font-bold">{t.full_name}</div>
                 {t.subject && <div className="text-sm text-blue-600">{t.subject}</div>}
                 <div className="text-xs text-slate-400 mt-1 space-x-3">
                   {t.email && <span>{t.email}</span>}
                   {t.phone && <span>{t.phone}</span>}
                 </div>
+                {t.login && (
+                  <div className="mt-2 inline-flex flex-wrap gap-x-3 gap-y-1 px-2.5 py-1.5 rounded-lg bg-blue-50 text-xs">
+                    <span className="text-slate-500">Логин: <code className="text-blue-700 font-semibold">{t.login}</code></span>
+                    <span className="text-slate-500">Пароль: <code className="text-blue-700 font-semibold">{t.password}</code></span>
+                  </div>
+                )}
               </div>
-              <button onClick={() => remove(t.id)} className="text-slate-300 hover:text-red-500 transition-colors">
+              <button onClick={() => remove(t.id)} className="text-slate-300 hover:text-red-500 transition-colors flex-shrink-0">
                 <Icon name="Trash2" size={16} />
               </button>
             </div>

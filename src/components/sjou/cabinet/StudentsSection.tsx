@@ -95,17 +95,33 @@ export default function StudentsSection({ session, onChanged }: Props) {
               <tr>
                 <th className="text-left px-4 py-2.5 font-medium">ФИО</th>
                 <th className="text-left px-4 py-2.5 font-medium">Класс</th>
-                <th className="text-left px-4 py-2.5 font-medium hidden sm:table-cell">Родитель</th>
+                <th className="text-left px-4 py-2.5 font-medium">Доступы</th>
                 <th className="px-4 py-2.5"></th>
               </tr>
             </thead>
             <tbody>
               {items.map((s) => (
-                <tr key={s.id} className="border-t border-slate-100">
+                <tr key={s.id} className="border-t border-slate-100 align-top">
                   <td className="px-4 py-2.5 font-medium">{s.full_name}</td>
                   <td className="px-4 py-2.5 text-slate-500">{s.class_name || "—"}</td>
-                  <td className="px-4 py-2.5 text-slate-500 hidden sm:table-cell">
-                    {s.parent_name || "—"}{s.parent_phone ? `, ${s.parent_phone}` : ""}
+                  <td className="px-4 py-2.5 text-xs">
+                    {s.login && (
+                      <div className="mb-1">
+                        <span className="text-slate-400">Ученик: </span>
+                        <code className="text-blue-700 font-semibold">{s.login}</code>
+                        <span className="text-slate-400"> / </span>
+                        <code className="text-blue-700 font-semibold">{s.password}</code>
+                      </div>
+                    )}
+                    {s.parent_login && (
+                      <div>
+                        <span className="text-slate-400">Родитель: </span>
+                        <code className="text-purple-700 font-semibold">{s.parent_login}</code>
+                        <span className="text-slate-400"> / </span>
+                        <code className="text-purple-700 font-semibold">{s.parent_password}</code>
+                      </div>
+                    )}
+                    {!s.login && <span className="text-slate-300">—</span>}
                   </td>
                   <td className="px-4 py-2.5 text-right">
                     <button onClick={() => remove(s.id)} className="text-slate-300 hover:text-red-500 transition-colors">

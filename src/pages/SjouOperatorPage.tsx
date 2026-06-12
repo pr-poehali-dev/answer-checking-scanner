@@ -37,9 +37,8 @@ export default function SjouOperatorPage() {
           body: JSON.stringify({ action: "list", status, operator_password: password }),
         });
         if (res.status === 401) {
-          const d = await res.json().catch(() => ({}));
           setAuthed(false);
-          setAuthError("Неверный пароль оператора " + (d.debug ? JSON.stringify(d.debug) : ""));
+          setAuthError("Неверный пароль оператора");
           localStorage.removeItem(PWD_KEY);
           return;
         }
@@ -56,11 +55,6 @@ export default function SjouOperatorPage() {
     },
     [],
   );
-
-  useEffect(() => {
-    if (pwd) load(pwd, filter);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   useEffect(() => {
     if (authed) load(pwd, filter);

@@ -36,8 +36,8 @@ export default function OperatorLogin({ pwd, setPwd, authError, loading, doLogin
           disabled={loading}
           className="w-full py-3 rounded-lg bg-slate-900 text-white font-semibold hover:bg-slate-800 transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
         >
-          {loading ? <Icon name="Loader2" size={18} className="animate-spin" /> : <Icon name="LogIn" size={18} />}
-          Войти
+          {loading && <Icon name="Loader2" size={18} className="animate-spin" />}
+          <span>Войти</span>
         </button>
       </form>
     </div>

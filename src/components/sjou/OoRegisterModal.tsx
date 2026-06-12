@@ -45,8 +45,9 @@ export default function OoRegisterModal({ onClose }: Props) {
   const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (!f) return;
-    if (f.size > 10 * 1024 * 1024) {
-      setError("Файл больше 10 МБ");
+    if (f.size > 3 * 1024 * 1024) {
+      setError("Файл слишком большой. Максимум 3 МБ — сожмите PDF или загрузите фото меньшего размера.");
+      e.target.value = "";
       return;
     }
     const reader = new FileReader();
@@ -92,8 +93,10 @@ export default function OoRegisterModal({ onClose }: Props) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Ошибка отправки");
       setDone(true);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Ошибка отправки");
+    } catch {
+      setError(
+        "Не удалось отправить заявку. Проверьте интернет-соединение. Если прикреплён файл — попробуйте загрузить файл меньшего размера.",
+      );
     } finally {
       setSubmitting(false);
     }
@@ -239,7 +242,7 @@ export default function OoRegisterModal({ onClose }: Props) {
                   <div className="text-sm font-medium text-slate-700 truncate">
                     {fileName || "Загрузить файл заявления"}
                   </div>
-                  <div className="text-xs text-slate-400">PDF, DOC, DOCX, JPG, PNG — до 10 МБ</div>
+                  <div className="text-xs text-slate-400">PDF, DOC, DOCX, JPG, PNG — до 3 МБ</div>
                 </div>
                 {fileName && <Icon name="CheckCircle2" size={18} className="text-green-600" />}
                 <input type="file" className="hidden" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" onChange={onFile} />

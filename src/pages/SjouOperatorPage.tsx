@@ -55,8 +55,8 @@ export default function SjouOperatorPage() {
       try {
         const res = await fetch(API, {
           method: "POST",
-          headers: { "Content-Type": "application/json", "X-Operator-Password": password },
-          body: JSON.stringify({ action: "list", status }),
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list", status, operator_password: password }),
         });
         if (res.status === 401) {
           setAuthed(false);
@@ -99,8 +99,8 @@ export default function SjouOperatorPage() {
     try {
       const res = await fetch(API, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-Operator-Password": pwd },
-        body: JSON.stringify({ action: "review", id: selected.id, decision, comment }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "review", id: selected.id, decision, comment, operator_password: pwd }),
       });
       if (!res.ok) throw new Error();
       setSelected(null);

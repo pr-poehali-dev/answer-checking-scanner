@@ -26,6 +26,20 @@
       "path": "/",
       "body": {"action": "class_add", "login": "x", "password": "y", "name": "1А"},
       "expectedStatus": 401
+    },
+    {
+      "name": "Journal wrong creds returns 401",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "journal", "login": "x", "password": "y", "class_id": 1, "subject": "Алгебра"},
+      "expectedStatus": 401
+    },
+    {
+      "name": "Grade set wrong creds returns 401",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "grade_set", "login": "x", "password": "y", "class_id": 1, "student_id": 1, "subject": "Алгебра", "grade_date": "2026-06-12", "grade_value": 5},
+      "expectedStatus": 401
     }
   ]
 }

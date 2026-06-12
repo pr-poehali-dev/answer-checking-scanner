@@ -5,14 +5,18 @@ import { OoSession, loadSession, clearSession, cabinetCall } from "@/components/
 import ClassesSection from "@/components/sjou/cabinet/ClassesSection";
 import TeachersSection from "@/components/sjou/cabinet/TeachersSection";
 import StudentsSection from "@/components/sjou/cabinet/StudentsSection";
+import ScheduleSection from "@/components/sjou/cabinet/ScheduleSection";
+import JournalSection from "@/components/sjou/cabinet/JournalSection";
 
-type Tab = "overview" | "classes" | "teachers" | "students";
+type Tab = "overview" | "classes" | "teachers" | "students" | "schedule" | "journal";
 
 const NAV: { id: Tab; label: string; icon: string }[] = [
   { id: "overview", label: "Обзор", icon: "LayoutDashboard" },
   { id: "classes", label: "Классы", icon: "School" },
   { id: "teachers", label: "Учителя", icon: "GraduationCap" },
   { id: "students", label: "Ученики", icon: "Users" },
+  { id: "schedule", label: "Расписание", icon: "CalendarDays" },
+  { id: "journal", label: "Журнал оценок", icon: "BookOpenCheck" },
 ];
 
 interface Overview {
@@ -117,6 +121,8 @@ export default function SjouCabinetPage() {
         {tab === "classes" && <ClassesSection session={session} onChanged={loadOverview} />}
         {tab === "teachers" && <TeachersSection session={session} onChanged={loadOverview} />}
         {tab === "students" && <StudentsSection session={session} onChanged={loadOverview} />}
+        {tab === "schedule" && <ScheduleSection session={session} />}
+        {tab === "journal" && <JournalSection session={session} />}
       </div>
     </div>
   );

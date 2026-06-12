@@ -34,6 +34,30 @@ export interface StudentItem {
   class_name?: string;
 }
 
+export interface LessonItem {
+  id: number;
+  subject: string;
+  day_of_week: number;
+  lesson_number: number;
+  room?: string;
+  teacher_id?: number;
+  teacher_name?: string;
+}
+
+export interface JournalStudent {
+  id: number;
+  full_name: string;
+}
+
+export interface JournalGrade {
+  id: number;
+  student_id: number;
+  grade_value: number;
+  comment?: string;
+}
+
+export const WEEKDAYS = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"];
+
 export function loadSession(): OoSession | null {
   try {
     const raw = localStorage.getItem(SESSION_KEY);

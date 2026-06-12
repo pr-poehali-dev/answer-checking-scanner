@@ -42,6 +42,20 @@
       "expectedStatus": 401
     },
     {
+      "name": "OO login without credentials returns 400",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "oo_login", "login": "", "password": ""},
+      "expectedStatus": 400
+    },
+    {
+      "name": "OO login with wrong credentials returns 401",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "oo_login", "login": "nope", "password": "nope"},
+      "expectedStatus": 401
+    },
+    {
       "name": "Unknown action returns 400",
       "method": "POST",
       "path": "/",

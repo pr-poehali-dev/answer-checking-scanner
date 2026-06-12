@@ -454,6 +454,39 @@ def handle_send_message(event: dict, body: dict) -> dict:
         conn.close()
 
 
+def handle_oo_login(body: dict) -> dict:
+    """Вход администратора ОО по логину/паролю, выданным при одобрении заявки."""
+    login = (body.get("login") or "").strip()
+    password = (body.get("password") or "").strip()
+    if not login or not password:
+        return _resp(400, {"error": "Укажите логин и пароль"})
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            f"""SELECT id, oo_full_name, oo_short_name, contact_name, status
+                FROM {TABLE}
+                WHERE oo_admin_login=%s AND oo_admin_password=%s""",
+            (login, password),
+        )
+        row = cur.fetchone()
+        if not row:
+            return _resp(401, {"error": "Неверный логин или пароль"})
+        app_id, oo_full_name, oo_short_name, contact_name, status = row
+        if status != "approved":
+            return _resp(403, {"error": "Доступ организации не активирован"})
+        return _resp(200, {
+            "ok": True,
+            "id": app_id,
+            "oo_full_name": oo_full_name,
+            "oo_short_name": oo_short_name,
+            "contact_name": contact_name,
+            "login": login,
+        })
+    finally:
+        conn.close()
+
+
 def handler(event: dict, context) -> dict:
     """Заявки ОО в СЖОУ: подача, список для оператора, рассмотрение."""
     method = event.get("httpMethod", "POST")
@@ -476,4 +509,6 @@ def handler(event: dict, context) -> dict:
         return handle_messages(event, body)
     if action == "send_message":
         return handle_send_message(event, body)
+    if action == "oo_login":
+        return handle_oo_login(body)
     return _resp(400, {"error": "Неизвестное действие"})

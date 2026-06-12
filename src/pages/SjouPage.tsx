@@ -97,15 +97,42 @@ export default function SjouPage() {
   const [role, setRole] = useState<Role>("teacher");
   const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
+  const [loggingIn, setLoggingIn] = useState(false);
+  const [loginError, setLoginError] = useState("");
+  const [loggedUser, setLoggedUser] = useState<{ oo_full_name: string; contact_name: string } | null>(null);
 
   const openLogin = (r?: Role) => {
     if (r) setRole(r);
+    setLoginError("");
+    setLoggedUser(null);
     setLoginOpen(true);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Точка входа в систему — подключим к серверу СЖОУ на следующем шаге
+    setLoginError("");
+    if (!login.trim() || !password.trim()) {
+      setLoginError("Введите логин и пароль");
+      return;
+    }
+    setLoggingIn(true);
+    try {
+      const res = await fetch("https://functions.poehali.dev/2188b28c-bef1-4cf5-9016-f25d4b79fa8a", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "oo_login", login: login.trim(), password: password.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setLoginError(data.error || "Ошибка входа");
+        return;
+      }
+      setLoggedUser({ oo_full_name: data.oo_full_name, contact_name: data.contact_name });
+    } catch {
+      setLoginError("Ошибка соединения. Попробуйте ещё раз.");
+    } finally {
+      setLoggingIn(false);
+    }
   };
 
   return (
@@ -342,6 +369,22 @@ export default function SjouPage() {
               <p className="text-sm text-blue-100">Выберите роль и войдите в систему</p>
             </div>
 
+            {loggedUser ? (
+              <div className="p-8 text-center">
+                <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4">
+                  <Icon name="CheckCircle2" size={36} className="text-green-600" />
+                </div>
+                <h4 className="text-lg font-bold mb-1">Вы вошли в систему</h4>
+                <p className="text-sm text-slate-600 mb-1">{loggedUser.oo_full_name}</p>
+                <p className="text-sm text-slate-400 mb-6">{loggedUser.contact_name}</p>
+                <button
+                  onClick={() => setLoginOpen(false)}
+                  className="px-6 py-2.5 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors"
+                >
+                  Продолжить
+                </button>
+              </div>
+            ) : (
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">Я вхожу как</label>
@@ -386,17 +429,33 @@ export default function SjouPage() {
                 />
               </div>
 
+              {loginError && (
+                <div className="flex items-center gap-2 px-3.5 py-2.5 rounded-lg bg-red-50 text-red-700 text-sm">
+                  <Icon name="AlertCircle" size={16} />
+                  {loginError}
+                </div>
+              )}
+
               <button
                 type="submit"
-                className="w-full py-3 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors"
+                disabled={loggingIn}
+                className="w-full py-3 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
               >
-                Войти
+                {loggingIn && <Icon name="Loader2" size={18} className="animate-spin" />}
+                <span>Войти</span>
               </button>
+
+              {role !== "admin" && (
+                <p className="text-xs text-center text-amber-600">
+                  Сейчас доступен вход администратора ОО. Доступ для учителей, учеников и родителей появится позже.
+                </p>
+              )}
 
               <p className="text-xs text-center text-slate-500">
                 Защищённое соединение. Данные хранятся на серверах СЖОУ в России.
               </p>
             </form>
+            )}
           </div>
         </div>
       )}

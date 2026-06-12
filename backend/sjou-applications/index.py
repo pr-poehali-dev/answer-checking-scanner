@@ -73,7 +73,14 @@ def _upload_statement(file_b64: str, file_name: str) -> tuple:
 def _check_operator(event: dict) -> bool:
     headers = event.get("headers", {})
     pwd = headers.get("X-Operator-Password") or headers.get("x-operator-password")
-    return bool(pwd) and pwd == os.environ.get("ADMIN_PASSWORD")
+    if not pwd:
+        return False
+    valid = {
+        os.environ.get("SJOU_OPERATOR_PASSWORD"),
+        os.environ.get("ADMIN_PASSWORD"),
+    }
+    valid.discard(None)
+    return pwd in valid
 
 
 def _row_to_dict(r) -> dict:

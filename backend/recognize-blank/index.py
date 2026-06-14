@@ -375,11 +375,13 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
     # Координаты первой строки для отладки
     _r0 = answer_rows_cells[0] if answer_rows_cells else []
     _r0_coords = [(c[0], c[1]) for c in _r0]
+    _sq_x_start_dbg = next((v for v in sq_x_start_per_sec if v is not None), None)
+    _sq_x_start_dbg = int(_sq_x_start_dbg) if _sq_x_start_dbg is not None else -1
     dbg_rows_dist = ["geometry_grid", len(answer_rows_cells),
                      f"raw={len(raw_cells)}", f"grid={int(grid_w)}x{int(grid_h)}",
                      f"sq_step={round(sq_step,1)}", f"row_step={round(row_step,1)}",
                      f"grid_x0={int(grid_x0)}", f"grid_y0={int(grid_y0)}",
-                     f"sq_x_start={int(sq_x_start)}", f"cell_w={cell_w}",
+                     f"sq_x_start={_sq_x_start_dbg}", f"cell_w={cell_w}",
                      f"row0_xy={_r0_coords}"]
 
     answer_rows_cells = answer_rows_cells[:questions_count]

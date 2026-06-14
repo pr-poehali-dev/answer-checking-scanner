@@ -3,7 +3,7 @@
 POST / — { image: base64, questionsCount?: 20, optionsCount?: 4, answerKey?: "АБВГ..." }
 -> { studentCode, answers[], confidence[], analysis }
 """
-# v41: adaptive darkness (full-square read) + darkest-blob code circle reading
+# v42: revert to fixed-threshold darkness (72% read) + uniform 5-row code grid
 import json, base64, math
 import numpy as np
 import cv2
@@ -187,13 +187,12 @@ def _find_answer_cells(gray, zone_y0, zone_y1, options_count):
 # ── Тёмность ROI ──────────────────────────────────────────────────────────────
 def _darkness(gray, cx, cy, cw, ch, thr_value: int = 100) -> float:
     """
-    Доля тёмных пикселей внутри квадрата (1.0 = всё чёрное, 0.0 = белое).
-    cw/ch = РАЗМЕР КВАДРАТА (полный). Берём ~80% этого размера, чтобы захватить
-    крестик целиком (его линии идут по диагоналям до углов), но не задеть рамку.
-    Порог адаптивный: всё, что заметно темнее локального фона, считаем "чернилами".
+    Доля ТЁМНЫХ пикселей (чернил ручки) внутри квадрата.
+    cw/ch = РАЗМЕР КВАДРАТА (полный). Читаем 72% центра — крестик попадает почти
+    целиком, но НЕ задеваем рамку и серую печатную букву-подпись (А/Б/В/Г) у края.
+    Порог ФИКСИРОВАННЫЙ — серая буква (~120-150) не считается, только чернила (<thr).
     """
-    # 80% от размера квадрата — крестик/заливка попадают полностью
-    sz = int(min(cw, ch) * 0.80)
+    sz = int(min(cw, ch) * 0.72)
     sz = max(10, sz)
     x1 = max(0, cx - sz // 2)
     y1 = max(0, cy - sz // 2)
@@ -204,12 +203,7 @@ def _darkness(gray, cx, cy, cw, ch, thr_value: int = 100) -> float:
     roi = gray[y1:y2, x1:x2]
     if roi.size == 0:
         return 0.0
-    # Локальный фон = самые светлые пиксели ячейки (90-й перцентиль)
-    local_bg = float(np.percentile(roi, 90))
-    # Адаптивный порог: темнее (фон - 45) ИЛИ темнее фикс. порога — что строже
-    adapt_thr = local_bg - 45
-    eff_thr = max(thr_value, min(adapt_thr, local_bg - 20))
-    bw = (roi < eff_thr).astype(np.uint8)
+    bw = (roi < thr_value).astype(np.uint8)
     return float(np.mean(bw))
 
 
@@ -444,10 +438,8 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
                                "norm_gap": round(norm_gap, 4),
                                "thr": thr_value,
                                "chosen": chosen})
-        # Помеченный квадрат: достаточно тёмных пикселей И заметно темнее остальных.
-        # Адаптивный _darkness даёт ~0.15-0.5 для крестика и ~0.7-1.0 для заливки,
-        # пустые/буквы-подписи дают <0.10. Требуем явное превосходство над вторым.
-        is_marked = max_f > 0.12 and (gap > 0.05 and norm_gap > 0.25)
+        # Помеченный квадрат: ≥7% тёмных пикселей И заметный разрыв с остальными
+        is_marked = max_f > 0.07 and (gap > 0.03 or norm_gap > 0.18)
         if is_marked:
             answers.append(opts[idx] if idx < len(opts) else "")
             confidences.append(round(min(0.99, norm_gap * 0.7 + gap * 2 + 0.2), 2))
@@ -523,28 +515,40 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
                 circ_w  = c_w * (1.0 - num_frac_c)
                 step_x  = circ_w / n_cols_code
                 col_centers_x = [circ_x0 + col_i * step_x + step_x / 2 for col_i in range(n_cols_code)]
-            # Y-калибровка
+            # Y-калибровка: строим РАВНОМЕРНУЮ сетку из 5 строк между крайними
+            # детектированными кружками. Допуск кластера = радиус (строки кода
+            # разнесены минимум на 2 радиуса, внутри строки кружки на одной Y).
             ys_c = sorted([c[1] for c in detected_circles])
             y_cls_c = []
             for y in ys_c:
                 placed = False
                 for cl in y_cls_c:
-                    if abs(np.mean(cl) - y) <= r_med * 1.2:
+                    if abs(np.mean(cl) - y) <= r_med * 1.5:
                         cl.append(y); placed = True; break
                 if not placed:
                     y_cls_c.append([y])
-            y_cls_c.sort(key=lambda cl: -len(cl))
-            top_y = y_cls_c[:n_rows_code]
-            if len(top_y) == n_rows_code:
-                row_ys_c = sorted([float(np.mean(cl)) for cl in top_y])
-                step_y = float(np.median(np.diff(row_ys_c)))
-                circ_y_start = row_ys_c[0]
-                row_centers_y = row_ys_c
+            # Кластеры с достаточным числом кружков = реальные строки
+            real_rows = sorted([float(np.mean(cl)) for cl in y_cls_c if len(cl) >= 3])
+            if len(real_rows) >= 2:
+                y_top = real_rows[0]
+                y_bot = real_rows[-1]
+                # Если нашли не все 5 строк — экстраполируем равномерно по шагу
+                if len(real_rows) >= n_rows_code:
+                    row_centers_y = real_rows[:n_rows_code]
+                else:
+                    span = y_bot - y_top
+                    # шаг по найденным крайним строкам (предполагаем равные интервалы)
+                    est_step = span / (len(real_rows) - 1)
+                    row_centers_y = [y_top + i * est_step for i in range(n_rows_code)]
+                step_y = float(np.median(np.diff(row_centers_y))) if len(row_centers_y) > 1 else 40.0
+                circ_y_start = row_centers_y[0]
             else:
                 step_y = c_h / n_rows_code if c_h > 0 else 40
                 circ_y_start = c_y0 + step_y / 2
                 row_centers_y = [circ_y_start + ri * step_y for ri in range(n_rows_code)]
             r_est = max(3, int(r_med))
+            dbg_code["y_clusters"] = len(y_cls_c)
+            dbg_code["real_rows"] = len(real_rows)
         else:
             # Фоллбэк — геометрия
             num_frac_c = 0.125
@@ -589,6 +593,8 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
         # Это устойчиво к небольшому смещению сетки кружков.
         search_r = max(int(r_est * 0.9), int(min(step_x, step_y) * 0.40))
         read_r   = max(3, int(r_est * 0.6))
+        all_rows_minbright = []
+        all_rows_pick = []
         for row_i in range(n_rows_code):
             cy_c = int(row_centers_y[row_i]) if row_i < len(row_centers_y) else int(circ_y_start + row_i * step_y)
             raw_vals = []
@@ -617,17 +623,24 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
             gap_c   = best_f - second
             # Закрашенный кружок: абсолютно тёмный (<110) И заметно темнее фона строки
             darkness_abs = row_bg - raw_vals[best_i]
+            picked = "?"
             if raw_vals[best_i] < 120 and darkness_abs > 25 and gap_c > 0.30:
+                picked = str(best_i)
                 code += str(best_i)
                 code_confs.append(round(min(0.99, gap_c * 0.8 + 0.2), 2))
             else:
                 code += "?"; code_confs.append(0.0)
+            all_rows_minbright.append(round(min_v, 1))
+            all_rows_pick.append(picked)
             if row_i == 0:
                 dbg_code["row0_fills"]    = [round(v, 3) for v in d_vals]
                 dbg_code["row0_raw"]      = [round(v, 1) for v in raw_vals]
                 dbg_code["row0_darkness"] = round(darkness_abs, 1)
                 dbg_code["row0_minbright"] = round(raw_vals[best_i], 1)
                 dbg_code["thr_code"]      = thr_code
+        dbg_code["rows_minbright"] = all_rows_minbright
+        dbg_code["rows_pick"] = all_rows_pick
+        dbg_code["row_centers_y"] = [int(y) for y in row_centers_y]
     else:
         dbg_code["error"] = "no_code_anchors"
 

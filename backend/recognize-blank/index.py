@@ -3,7 +3,7 @@
 POST / — { image: base64, questionsCount?: 20, optionsCount?: 4, answerKey?: "АБВГ..." }
 -> { studentCode, answers[], confidence[], analysis }
 """
-# v40: snap-to-detected cells for answers + fixed code circle column centering
+# v41: adaptive darkness (full-square read) + darkest-blob code circle reading
 import json, base64, math
 import numpy as np
 import cv2
@@ -187,14 +187,14 @@ def _find_answer_cells(gray, zone_y0, zone_y1, options_count):
 # ── Тёмность ROI ──────────────────────────────────────────────────────────────
 def _darkness(gray, cx, cy, cw, ch, thr_value: int = 100) -> float:
     """
-    Средняя яркость инвертированная (1.0 = чёрное, 0.0 = белое).
-    Берём ТОЛЬКО центральные 50% ячейки — без рамки квадрата и буквы-подписи.
-    Используем ФИКСИРОВАННЫЙ порог (не Otsu) — чтобы пустые ячейки давали 0.
+    Доля тёмных пикселей внутри квадрата (1.0 = всё чёрное, 0.0 = белое).
+    cw/ch = РАЗМЕР КВАДРАТА (полный). Берём ~80% этого размера, чтобы захватить
+    крестик целиком (его линии идут по диагоналям до углов), но не задеть рамку.
+    Порог адаптивный: всё, что заметно темнее локального фона, считаем "чернилами".
     """
-    # Берём центральные ~65% по обеим осям — захватываем крестик целиком,
-    # но не задеваем рамку квадрата и букву-подпись
-    sz = int(min(cw, ch) * 0.65)
-    sz = max(8, sz)
+    # 80% от размера квадрата — крестик/заливка попадают полностью
+    sz = int(min(cw, ch) * 0.80)
+    sz = max(10, sz)
     x1 = max(0, cx - sz // 2)
     y1 = max(0, cy - sz // 2)
     x2 = min(gray.shape[1], cx + sz // 2)
@@ -204,8 +204,12 @@ def _darkness(gray, cx, cy, cw, ch, thr_value: int = 100) -> float:
     roi = gray[y1:y2, x1:x2]
     if roi.size == 0:
         return 0.0
-    # Фиксированный порог: пиксель тёмнее thr_value → "чёрный"
-    bw = (roi < thr_value).astype(np.uint8)
+    # Локальный фон = самые светлые пиксели ячейки (90-й перцентиль)
+    local_bg = float(np.percentile(roi, 90))
+    # Адаптивный порог: темнее (фон - 45) ИЛИ темнее фикс. порога — что строже
+    adapt_thr = local_bg - 45
+    eff_thr = max(thr_value, min(adapt_thr, local_bg - 20))
+    bw = (roi < eff_thr).astype(np.uint8)
     return float(np.mean(bw))
 
 
@@ -392,8 +396,8 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
             for oi in range(options_count):
                 cx_calc = sq_x_first + oi * sq_step
                 cx_s, cy_s, side_s = _snap(cx_calc, cy_cell)
-                # Размер для чтения = реальный размер квадрата (или калиброванный)
-                cw_read = max(8, int(side_s * 0.85))
+                # Передаём ПОЛНЫЙ размер квадрата — _darkness сам возьмёт 80% центра
+                cw_read = max(10, int(side_s))
                 row.append((int(cx_s), int(cy_s), cw_read, cw_read, sq_step))
             answer_rows_cells.append(row)
 
@@ -440,8 +444,10 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
                                "norm_gap": round(norm_gap, 4),
                                "thr": thr_value,
                                "chosen": chosen})
-        # Помеченный квадрат: ≥7% тёмных пикселей И либо абс. разрыв ≥2%, либо норм. разрыв ≥12%
-        is_marked = max_f > 0.07 and (gap > 0.02 or norm_gap > 0.12)
+        # Помеченный квадрат: достаточно тёмных пикселей И заметно темнее остальных.
+        # Адаптивный _darkness даёт ~0.15-0.5 для крестика и ~0.7-1.0 для заливки,
+        # пустые/буквы-подписи дают <0.10. Требуем явное превосходство над вторым.
+        is_marked = max_f > 0.12 and (gap > 0.05 and norm_gap > 0.25)
         if is_marked:
             answers.append(opts[idx] if idx < len(opts) else "")
             confidences.append(round(min(0.99, norm_gap * 0.7 + gap * 2 + 0.2), 2))
@@ -579,36 +585,39 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
         code_bg = float(np.median(code_zone_pixels)) if code_zone_pixels.size > 0 else 160
         thr_code = max(60, min(160, int(code_bg * 0.70)))
 
+        # Окно поиска заливки: ищем самое тёмное пятно вокруг расчётного центра.
+        # Это устойчиво к небольшому смещению сетки кружков.
+        search_r = max(int(r_est * 0.9), int(min(step_x, step_y) * 0.40))
+        read_r   = max(3, int(r_est * 0.6))
         for row_i in range(n_rows_code):
             cy_c = int(row_centers_y[row_i]) if row_i < len(row_centers_y) else int(circ_y_start + row_i * step_y)
-            # Сначала собираем средние яркости центров кружков (не бинарные fills)
             raw_vals = []
             for col_i in range(n_cols_code):
                 cx_c = int(col_centers_x[col_i]) if col_i < len(col_centers_x) else int(circ_x0 + col_i * step_x + step_x / 2)
-                rsz = max(3, int(r_est * 0.55))
-                x1 = max(0, cx_c - rsz); y1 = max(0, cy_c - rsz)
-                x2 = min(w, cx_c + rsz); y2 = min(h, cy_c + rsz)
-                if x2 > x1 and y2 > y1:
-                    roi = gray[y1:y2, x1:x2]
-                    raw_vals.append(float(np.mean(roi)))
-                else:
-                    raw_vals.append(255.0)
-            # Относительный метод: самый тёмный кружок в строке
+                # Зона поиска вокруг центра
+                sx1 = max(0, cx_c - search_r); sy1 = max(0, cy_c - search_r)
+                sx2 = min(w, cx_c + search_r); sy2 = min(h, cy_c + search_r)
+                if sx2 <= sx1 or sy2 <= sy1:
+                    raw_vals.append(255.0); continue
+                area = gray[sy1:sy2, sx1:sx2]
+                # Сглаживаем, чтобы минимум брался по пятну, а не по одному пикселю
+                area_blur = cv2.blur(area, (read_r, read_r))
+                # Самое тёмное пятно в зоне поиска = яркость заливки (если есть)
+                raw_vals.append(float(np.min(area_blur)))
             if not raw_vals:
                 code += "?"; code_confs.append(0.0); continue
             min_v   = min(raw_vals)
             max_v   = max(raw_vals)
             row_bg  = max_v  # самый светлый = фон
-            # Нормируем: 1.0 = самый тёмный (закрашен), 0.0 = фон
             d_vals  = [max(0.0, (row_bg - v) / max(row_bg - min_v, 1.0)) for v in raw_vals]
             best_i  = int(np.argmax(d_vals))
             best_f  = d_vals[best_i]
             sorted_d = sorted(d_vals, reverse=True)
             second  = sorted_d[1] if len(sorted_d) > 1 else 0.0
             gap_c   = best_f - second
-            # Кружок закрашен если он значительно темнее остальных
-            darkness_abs = row_bg - raw_vals[best_i]  # абс. разница яркостей
-            if darkness_abs > 8 and gap_c > 0.20:
+            # Закрашенный кружок: абсолютно тёмный (<110) И заметно темнее фона строки
+            darkness_abs = row_bg - raw_vals[best_i]
+            if raw_vals[best_i] < 120 and darkness_abs > 25 and gap_c > 0.30:
                 code += str(best_i)
                 code_confs.append(round(min(0.99, gap_c * 0.8 + 0.2), 2))
             else:
@@ -617,6 +626,7 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
                 dbg_code["row0_fills"]    = [round(v, 3) for v in d_vals]
                 dbg_code["row0_raw"]      = [round(v, 1) for v in raw_vals]
                 dbg_code["row0_darkness"] = round(darkness_abs, 1)
+                dbg_code["row0_minbright"] = round(raw_vals[best_i], 1)
                 dbg_code["thr_code"]      = thr_code
     else:
         dbg_code["error"] = "no_code_anchors"

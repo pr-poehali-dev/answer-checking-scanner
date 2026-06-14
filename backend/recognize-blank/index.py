@@ -3,7 +3,7 @@
 POST / — { image: base64, questionsCount?: 20, optionsCount?: 4, answerKey?: "АБВГ..." }
 -> { studentCode, answers[], confidence[], analysis }
 """
-# v39: detector-based calibration for both answers grid and code circles
+# v40: snap-to-detected cells for answers + fixed code circle column centering
 import json, base64, math
 import numpy as np
 import cv2
@@ -191,9 +191,10 @@ def _darkness(gray, cx, cy, cw, ch, thr_value: int = 100) -> float:
     Берём ТОЛЬКО центральные 50% ячейки — без рамки квадрата и буквы-подписи.
     Используем ФИКСИРОВАННЫЙ порог (не Otsu) — чтобы пустые ячейки давали 0.
     """
-    # Берём центральные 50% по обеим осям — это сердцевина крестика
-    sz = int(min(cw, ch) * 0.50)
-    sz = max(4, sz)
+    # Берём центральные ~65% по обеим осям — захватываем крестик целиком,
+    # но не задеваем рамку квадрата и букву-подпись
+    sz = int(min(cw, ch) * 0.65)
+    sz = max(8, sz)
     x1 = max(0, cx - sz // 2)
     y1 = max(0, cy - sz // 2)
     x2 = min(gray.shape[1], cx + sz // 2)
@@ -355,6 +356,26 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
         if len(top_y_clusters) == rows_per_col:
             row_ys_calibrated = sorted([float(np.mean(cl)) for cl in top_y_clusters])
 
+    # Радиус привязки расчётной ячейки к реально найденному квадрату
+    snap_r = sq_step * 0.6
+    snapped_count = 0
+
+    def _snap(cx_calc, cy_calc):
+        """Возвращает (cx, cy, side) ближайшего детектированного квадрата или расчётные координаты."""
+        nonlocal snapped_count
+        best = None
+        best_d = snap_r
+        for c in raw_cells:
+            d = math.hypot(c[0] - cx_calc, c[1] - cy_calc)
+            if d < best_d:
+                best_d = d
+                best = c
+        if best is not None:
+            snapped_count += 1
+            # best = (cx, cy, cw, ch, side) — берём реальный размер квадрата
+            return best[0], best[1], best[4]
+        return int(cx_calc), int(cy_calc), cell_size_med
+
     answer_rows_cells = []
     for sec in range(n_blank_cols):
         sec_x0     = grid_x0 + sec * section_w
@@ -367,9 +388,13 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
                 cy_cell = row_ys_calibrated[ri]
             else:
                 cy_cell = grid_y0 + ri * row_step + row_step / 2
-            row = [(int(sq_x_first + oi * sq_step), int(cy_cell),
-                    cell_w, cell_h, sq_step)
-                   for oi in range(options_count)]
+            row = []
+            for oi in range(options_count):
+                cx_calc = sq_x_first + oi * sq_step
+                cx_s, cy_s, side_s = _snap(cx_calc, cy_cell)
+                # Размер для чтения = реальный размер квадрата (или калиброванный)
+                cw_read = max(8, int(side_s * 0.85))
+                row.append((int(cx_s), int(cy_s), cw_read, cw_read, sq_step))
             answer_rows_cells.append(row)
 
     # Координаты первой строки для отладки
@@ -382,6 +407,7 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
                      f"sq_step={round(sq_step,1)}", f"row_step={round(row_step,1)}",
                      f"grid_x0={int(grid_x0)}", f"grid_y0={int(grid_y0)}",
                      f"sq_x_start={_sq_x_start_dbg}", f"cell_w={cell_w}",
+                     f"snapped={snapped_count}/{questions_count*options_count}",
                      f"row0_xy={_r0_coords}"]
 
     answer_rows_cells = answer_rows_cells[:questions_count]
@@ -481,7 +507,8 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
             if len(top_x) == n_cols_code:
                 col_xs = sorted([float(np.mean(cl)) for cl in top_x])
                 step_x = float(np.median(np.diff(col_xs)))
-                # circ_x0 — это начало последовательности так, чтобы col_i=0 был col_xs[0]
+                # col_centers_x — ЦЕНТРЫ колонок (по детектированным кружкам)
+                col_centers_x = col_xs
                 circ_x0 = col_xs[0] - step_x / 2
                 circ_w  = step_x * n_cols_code
             else:
@@ -489,6 +516,7 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
                 circ_x0 = c_inner_x0 + c_w * num_frac_c
                 circ_w  = c_w * (1.0 - num_frac_c)
                 step_x  = circ_w / n_cols_code
+                col_centers_x = [circ_x0 + col_i * step_x + step_x / 2 for col_i in range(n_cols_code)]
             # Y-калибровка
             ys_c = sorted([c[1] for c in detected_circles])
             y_cls_c = []
@@ -505,9 +533,11 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
                 row_ys_c = sorted([float(np.mean(cl)) for cl in top_y])
                 step_y = float(np.median(np.diff(row_ys_c)))
                 circ_y_start = row_ys_c[0]
+                row_centers_y = row_ys_c
             else:
                 step_y = c_h / n_rows_code if c_h > 0 else 40
                 circ_y_start = c_y0 + step_y / 2
+                row_centers_y = [circ_y_start + ri * step_y for ri in range(n_rows_code)]
             r_est = max(3, int(r_med))
         else:
             # Фоллбэк — геометрия
@@ -518,6 +548,8 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
             step_y  = c_h / n_rows_code if c_h > 0 else 40
             circ_y_start = c_y0 + step_y / 2
             r_est   = max(3, int(min(step_x, step_y) * 0.38))
+            col_centers_x = [circ_x0 + col_i * step_x + step_x / 2 for col_i in range(n_cols_code)]
+            row_centers_y = [circ_y_start + ri * step_y for ri in range(n_rows_code)]
 
         dbg_code["circ_x0"] = int(circ_x0)
         dbg_code["circ_y0"] = c_y0
@@ -536,8 +568,8 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
         # Сэмпл пикселей первой строки (центры кружков)
         _first_row_pixels = []
         for col_i in range(min(5, n_cols_code)):
-            cx_s = int(circ_x0 + col_i * (circ_w / n_cols_code) + circ_w / n_cols_code / 2)
-            cy_s = int(c_y0 + step_y / 2)
+            cx_s = int(col_centers_x[col_i]) if col_i < len(col_centers_x) else int(circ_x0 + col_i * step_x + step_x / 2)
+            cy_s = int(row_centers_y[0]) if row_centers_y else int(c_y0 + step_y / 2)
             if 0 <= cy_s < h and 0 <= cx_s < w:
                 _first_row_pixels.append(int(gray[cy_s, cx_s]))
         dbg_code["pixel_samples"] = _first_row_pixels
@@ -548,11 +580,11 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
         thr_code = max(60, min(160, int(code_bg * 0.70)))
 
         for row_i in range(n_rows_code):
-            cy_c = int(circ_y_start + row_i * step_y)
+            cy_c = int(row_centers_y[row_i]) if row_i < len(row_centers_y) else int(circ_y_start + row_i * step_y)
             # Сначала собираем средние яркости центров кружков (не бинарные fills)
             raw_vals = []
             for col_i in range(n_cols_code):
-                cx_c = int(circ_x0 + col_i * step_x + step_x / 2)
+                cx_c = int(col_centers_x[col_i]) if col_i < len(col_centers_x) else int(circ_x0 + col_i * step_x + step_x / 2)
                 rsz = max(3, int(r_est * 0.55))
                 x1 = max(0, cx_c - rsz); y1 = max(0, cy_c - rsz)
                 x2 = min(w, cx_c + rsz); y2 = min(h, cy_c + rsz)

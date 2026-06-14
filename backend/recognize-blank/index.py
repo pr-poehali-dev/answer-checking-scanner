@@ -3,7 +3,7 @@
 POST / — { image: base64, questionsCount?: 20, optionsCount?: 4, answerKey?: "АБВГ..." }
 -> { studentCode, answers[], confidence[], analysis }
 """
-# v42: revert to fixed-threshold darkness (72% read) + uniform 5-row code grid
+# v43: corner-based anchor selection (nearest-to-corner) — ignores filled cells
 import json, base64, math
 import numpy as np
 import cv2
@@ -99,36 +99,45 @@ def _find_anchors(gray):
 
 
 def _select_corner_anchors(cands, img_w, img_h):
+    """
+    Выбираем 4 угловых репера. Реперы — это чёрные квадраты по краям листа.
+    ВАЖНО: закрашенные клетки-ответы тоже чёрные и квадратные, поэтому
+    выбираем кандидатов, максимально близких к 4 углам И достаточно крупных.
+    """
     if len(cands) < 2:
         return None
-    med = float(np.median([c[4] for c in cands]))
-    same = [c for c in cands if abs(c[4] - med) / max(med, 1) < 0.5] or cands
-    same.sort(key=lambda c: c[0])
-    left  = [c for c in same if c[0] < img_w * 0.40] or same[:len(same)//2]
-    right = [c for c in same if c[0] > img_w * 0.60] or same[len(same)//2:]
-    if not left or not right:
+
+    # Реперы крупнее обычных клеток. Берём кандидатов с размером >= 60-го перцентиля,
+    # но если таких мало — оставляем всех.
+    sides = sorted([c[4] for c in cands])
+    big_thr = sides[int(len(sides) * 0.55)] if len(sides) >= 4 else 0
+    big = [c for c in cands if c[4] >= big_thr * 0.85] or cands
+
+    corners = {
+        "tl": (0, 0),
+        "tr": (img_w, 0),
+        "bl": (0, img_h),
+        "br": (img_w, img_h),
+    }
+
+    def nearest_to(px, py, pool):
+        return min(pool, key=lambda c: (c[0] - px) ** 2 + (c[1] - py) ** 2)
+
+    lt = nearest_to(*corners["tl"], big)
+    rt = nearest_to(*corners["tr"], big)
+    lb = nearest_to(*corners["bl"], big)
+    rb = nearest_to(*corners["br"], big)
+
+    # Если какие-то углы совпали (нашёлся один и тот же квадрат) — провал
+    chosen = [lt, rt, lb, rb]
+    uniq = {(c[0], c[1]) for c in chosen}
+    if len(uniq) < 3:
         return None
-    lt = min(left,  key=lambda c: c[1])
-    lb = max(left,  key=lambda c: c[1])
-    rt = min(right, key=lambda c: c[1])
-    rb = max(right, key=lambda c: c[1])
-    has_l = lt[1] != lb[1]
-    has_r = rt[1] != rb[1]
-    if not has_l and has_r:
-        lb = (lt[0], rb[1], lt[2], lt[3], lt[4])
-    elif not has_r and has_l:
-        rb = (rt[0], lb[1], rt[2], rt[3], rt[4])
-    gh = abs(lb[1] - lt[1])
+
     gw = abs(rt[0] - lt[0])
-    if gh < img_h * 0.05:
-        ref_h = abs(rb[1] - rt[1]) if has_r else abs(lb[1] - lt[1])
-        if ref_h > img_h * 0.05:
-            lt = (lt[0], rt[1], lt[2], lt[3], lt[4])
-            lb = (lt[0], rb[1], lt[2], lt[3], lt[4])
-            gh = ref_h
-        else:
-            return None
-    if gw < img_w * 0.25:
+    gh = abs(lb[1] - lt[1])
+    # Реперы должны охватывать значительную часть листа
+    if gw < img_w * 0.45 or gh < img_h * 0.25:
         return None
     return lt, rt, lb, rb
 
@@ -263,6 +272,8 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
     grid_y1 = bl_a[1]
     grid_w  = grid_x1 - grid_x0
     grid_h  = grid_y1 - grid_y0
+    dbg_corners = {"tl": (tl[0], tl[1]), "tr": (tr[0], tr[1]),
+                   "bl": (bl_a[0], bl_a[1]), "br": (br[0], br[1])}
 
     # 2. Детектировать квадраты ответов напрямую
     raw_cells = _find_answer_cells(gray, grid_y0, grid_y1, options_count)
@@ -406,6 +417,7 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
                      f"grid_x0={int(grid_x0)}", f"grid_y0={int(grid_y0)}",
                      f"sq_x_start={_sq_x_start_dbg}", f"cell_w={cell_w}",
                      f"snapped={snapped_count}/{questions_count*options_count}",
+                     f"corners={dbg_corners}",
                      f"row0_xy={_r0_coords}"]
 
     answer_rows_cells = answer_rows_cells[:questions_count]

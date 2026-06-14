@@ -3,10 +3,23 @@
 POST / — { image: base64, questionsCount?: 20, optionsCount?: 4, answerKey?: "АБВГ..." }
 -> { studentCode, answers[], confidence[], analysis }
 """
-# v43: corner-based anchor selection (nearest-to-corner) — ignores filled cells
+# v44b: TEMPLATE-based grid — calibrate built-in template by 4 anchors
 import json, base64, math
 import numpy as np
 import cv2
+from template import build_answer_template, build_code_template
+
+
+def _project(u, v, tl, tr, bl, br):
+    """Билинейная проекция точки (u,v)∈[0,1]² на четырёхугольник якорей.
+    tl,tr,bl,br — (x,y) пиксельные координаты якорей."""
+    top_x = tl[0] + (tr[0] - tl[0]) * u
+    top_y = tl[1] + (tr[1] - tl[1]) * u
+    bot_x = bl[0] + (br[0] - bl[0]) * u
+    bot_y = bl[1] + (br[1] - bl[1]) * u
+    px = top_x + (bot_x - top_x) * v
+    py = top_y + (bot_y - top_y) * v
+    return int(round(px)), int(round(py))
 
 CORS = {
     "Access-Control-Allow-Origin": "*",
@@ -98,46 +111,45 @@ def _find_anchors(gray):
     return candidates
 
 
-def _select_corner_anchors(cands, img_w, img_h):
+def _select_corner_anchors(cands, img_w, img_h, x_off=0, y_off=0,
+                            min_w_frac=0.45, min_h_frac=0.15):
     """
-    Выбираем 4 угловых репера. Реперы — это чёрные квадраты по краям листа.
-    ВАЖНО: закрашенные клетки-ответы тоже чёрные и квадратные, поэтому
-    выбираем кандидатов, максимально близких к 4 углам И достаточно крупных.
+    Выбираем 4 угловых репера ИЗ ЗОНЫ. Реперы — чёрные квадраты у левого/правого
+    краёв. Закрашенные клетки-ответы тоже чёрные, поэтому берём только кандидатов
+    у самых краёв зоны (по X) и максимально разнесённых по Y.
+    Координаты cands — абсолютные; x_off/y_off — левый/верхний край зоны поиска.
+    Возвращает (tl, tr, bl, br) в абсолютных координатах.
     """
     if len(cands) < 2:
         return None
 
-    # Реперы крупнее обычных клеток. Берём кандидатов с размером >= 60-го перцентиля,
-    # но если таких мало — оставляем всех.
+    # Якоря крупные — отсекаем мелкий мусор по размеру
     sides = sorted([c[4] for c in cands])
-    big_thr = sides[int(len(sides) * 0.55)] if len(sides) >= 4 else 0
-    big = [c for c in cands if c[4] >= big_thr * 0.85] or cands
+    big_thr = sides[len(sides) // 2] if len(sides) >= 4 else 0
+    pool = [c for c in cands if c[4] >= big_thr * 0.7] or cands
 
-    corners = {
-        "tl": (0, 0),
-        "tr": (img_w, 0),
-        "bl": (0, img_h),
-        "br": (img_w, img_h),
-    }
-
-    def nearest_to(px, py, pool):
-        return min(pool, key=lambda c: (c[0] - px) ** 2 + (c[1] - py) ** 2)
-
-    lt = nearest_to(*corners["tl"], big)
-    rt = nearest_to(*corners["tr"], big)
-    lb = nearest_to(*corners["bl"], big)
-    rb = nearest_to(*corners["br"], big)
-
-    # Если какие-то углы совпали (нашёлся один и тот же квадрат) — провал
-    chosen = [lt, rt, lb, rb]
-    uniq = {(c[0], c[1]) for c in chosen}
-    if len(uniq) < 3:
+    # Локальный X относительно зоны
+    xs = [c[0] - x_off for c in pool]
+    zone_w = max(img_w, 1)
+    # Левая группа: X в левой трети зоны; правая: в правой трети
+    left = [c for c in pool if (c[0] - x_off) < zone_w * 0.33]
+    right = [c for c in pool if (c[0] - x_off) > zone_w * 0.67]
+    if not left or not right:
+        # запасной вариант: половина по медиане X
+        mx = float(np.median([c[0] for c in pool]))
+        left = [c for c in pool if c[0] <= mx]
+        right = [c for c in pool if c[0] > mx]
+    if not left or not right:
         return None
 
+    lt = min(left, key=lambda c: c[1])
+    lb = max(left, key=lambda c: c[1])
+    rt = min(right, key=lambda c: c[1])
+    rb = max(right, key=lambda c: c[1])
+
     gw = abs(rt[0] - lt[0])
-    gh = abs(lb[1] - lt[1])
-    # Реперы должны охватывать значительную часть листа
-    if gw < img_w * 0.45 or gh < img_h * 0.25:
+    gh = max(abs(lb[1] - lt[1]), abs(rb[1] - rt[1]))
+    if gw < img_w * min_w_frac or gh < img_h * min_h_frac:
         return None
     return lt, rt, lb, rb
 
@@ -240,15 +252,19 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
     h, w = gray.shape
     opts = RU_OPTS[:options_count]
 
-    # 1. Найти якоря
-    ans_zone_h = int(h * 0.80)
-    cands = _find_anchors(gray[:ans_zone_h, :])
-    anchors = _select_corner_anchors(cands, w, ans_zone_h)
-    if not anchors:
-        cands = _find_anchors(gray)
-        anchors = _select_corner_anchors(cands, w, h)
+    dbg_anchors_total = len(_find_anchors(gray))
 
-    dbg_anchors = len(cands)
+    # ── 1. ЯКОРЯ ОТВЕТОВ — 4 крупных квадрата в верхних ~75% листа ────────────
+    ans_zone_h = int(h * 0.78)
+    cands_ans = _find_anchors(gray[:ans_zone_h, :])
+    anchors = _select_corner_anchors(cands_ans, w, ans_zone_h,
+                                     min_w_frac=0.45, min_h_frac=0.15)
+    if not anchors:
+        cands_ans = _find_anchors(gray)
+        anchors = _select_corner_anchors(cands_ans, w, h,
+                                         min_w_frac=0.45, min_h_frac=0.15)
+
+    dbg_anchors = len(cands_ans)
     dbg_rows_dist = []
 
     if not anchors:
@@ -257,16 +273,174 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
             "confidences": [0.0] * questions_count,
             "code": "?????",
             "code_confs": [0.0] * 5,
-            "squares_found": dbg_anchors,
+            "squares_found": dbg_anchors_total,
             "answer_rows": 0,
             "code_rows": 0,
             "dbg_fills": [],
-            "dbg_rows_dist": ["no_anchors"],
+            "dbg_rows_dist": ["no_anchors", f"cands={dbg_anchors}"],
             "dbg_code": {},
         }
 
-    tl, tr, bl_a, br = anchors
-    grid_x0 = tl[0] + tl[2] // 2
+    # tl,tr,bl,br = ЦЕНТРЫ якорей ответов
+    a_tl, a_tr, a_bl, a_br = anchors
+    P_tl = (a_tl[0], a_tl[1]); P_tr = (a_tr[0], a_tr[1])
+    P_bl = (a_bl[0], a_bl[1]); P_br = (a_br[0], a_br[1])
+
+    # ── 2. ЭТАЛОННЫЙ ШАБЛОН клеток (u,v) → проекция на якоря ──────────────────
+    rel_cells, rel_sq = build_answer_template(questions_count, options_count)
+    # размер квадрата в пикселях (по ширине якорей)
+    anchors_px_w = math.hypot(P_tr[0] - P_tl[0], P_tr[1] - P_tl[1])
+    sq_px = max(10, int(rel_sq * anchors_px_w))
+
+    # Собираем пиксельные центры клеток по вопросам
+    cells_by_q = {}
+    for (qi, oi, u, v) in rel_cells:
+        px, py = _project(u, v, P_tl, P_tr, P_bl, P_br)
+        cells_by_q.setdefault(qi, []).append((oi, px, py))
+
+    # Порог тёмных пикселей: по фону зоны ответов
+    gx0 = min(P_tl[0], P_bl[0]); gx1 = max(P_tr[0], P_br[0])
+    gy0 = min(P_tl[1], P_tr[1]); gy1 = max(P_bl[1], P_br[1])
+    gx0 = max(0, gx0); gy0 = max(0, gy0)
+    gx1 = min(w, gx1); gy1 = min(h, gy1)
+    zone_pixels = gray[gy0:gy1, gx0:gx1] if (gx1 > gx0 and gy1 > gy0) else gray
+    bg_median = float(np.median(zone_pixels)) if zone_pixels.size else 200.0
+    thr_value = max(60, min(140, int(bg_median * 0.55)))
+
+    # ── 3. ЧИТАЕМ ОТВЕТЫ по шаблону ──────────────────────────────────────────
+    answers, confidences, dbg_fills = [], [], []
+    for qi in range(questions_count):
+        row = sorted(cells_by_q.get(qi, []), key=lambda c: c[0])
+        fills = [_darkness(gray, px, py, sq_px, sq_px, thr_value)
+                 for (_, px, py) in row]
+        if not fills:
+            answers.append(""); confidences.append(0.0); continue
+        idx = int(np.argmax(fills))
+        max_f = fills[idx]
+        sorted_f = sorted(fills, reverse=True)
+        second_f = sorted_f[1] if len(sorted_f) > 1 else 0.0
+        gap = max_f - second_f
+        norm_gap = gap / max(max_f, 0.01)
+        chosen = opts[idx] if idx < len(opts) else "?"
+        if qi < 5:
+            dbg_fills.append({"row": qi,
+                              "fills": [round(f, 4) for f in fills],
+                              "max": round(max_f, 4), "gap": round(gap, 4),
+                              "norm_gap": round(norm_gap, 4),
+                              "xy": [(px, py) for (_, px, py) in row],
+                              "thr": thr_value, "chosen": chosen})
+        is_marked = max_f > 0.07 and (gap > 0.03 or norm_gap > 0.18)
+        if is_marked:
+            answers.append(chosen)
+            confidences.append(round(min(0.99, norm_gap * 0.7 + gap * 2 + 0.2), 2))
+        else:
+            answers.append(""); confidences.append(0.0)
+
+    while len(answers) < questions_count:
+        answers.append(""); confidences.append(0.0)
+
+    dbg_corners = {"tl": P_tl, "tr": P_tr, "bl": P_bl, "br": P_br}
+    dbg_rows_dist = ["template_grid", questions_count,
+                     f"sq_px={sq_px}", f"anchors_px_w={int(anchors_px_w)}",
+                     f"thr={thr_value}", f"corners={dbg_corners}"]
+
+    # ── 4. КОД УЧЕНИКА по шаблону ────────────────────────────────────────────
+    code, code_confs, dbg_code = _read_code_template(
+        gray, h, w, P_bl, P_br, questions_count, options_count)
+
+    return {
+        "answers":       answers[:questions_count],
+        "confidences":   confidences[:questions_count],
+        "code":          code,
+        "code_confs":    code_confs,
+        "squares_found": dbg_anchors_total,
+        "answer_rows":   questions_count,
+        "code_rows":     len(code),
+        "dbg_fills":     dbg_fills,
+        "dbg_rows_dist": dbg_rows_dist,
+        "dbg_code":      dbg_code,
+    }
+
+
+def _read_code_template(gray, h, w, ans_bl, ans_br, n_q, n_opts):
+    """Читает код ученика по эталонному шаблону, калибруясь по 4 якорям зоны кода."""
+    dbg_code: dict = {}
+    # Зона поиска якорей кода — ниже нижних якорей ответов
+    base_y = max(ans_bl[1], ans_br[1])
+    code_zone_y0 = min(h - 2, base_y + int((h - base_y) * 0.02))
+    code_zone_y1 = h - 1
+    dbg_code["code_zone"] = [code_zone_y0, code_zone_y1]
+
+    cands = _find_anchors(gray[code_zone_y0:code_zone_y1, :])
+    cands = [(cx, cy + code_zone_y0, cw, ch, sd) for cx, cy, cw, ch, sd in cands]
+    dbg_code["code_anchors_found"] = len(cands)
+    zone_h = code_zone_y1 - code_zone_y0
+    code_anchors = _select_corner_anchors(cands, w, zone_h,
+                                          min_w_frac=0.45, min_h_frac=0.04)
+    if not code_anchors:
+        dbg_code["error"] = "no_code_anchors"
+        return "?????", [0.0] * 5, dbg_code
+
+    c_tl, c_tr, c_bl, c_br = code_anchors
+    Ptl = (c_tl[0], c_tl[1]); Ptr = (c_tr[0], c_tr[1])
+    Pbl = (c_bl[0], c_bl[1]); Pbr = (c_br[0], c_br[1])
+    dbg_code["corners"] = {"tl": Ptl, "tr": Ptr, "bl": Pbl, "br": Pbr}
+
+    rel_circ, rel_r = build_code_template(n_q, n_opts)
+    aw = math.hypot(Ptr[0] - Ptl[0], Ptr[1] - Ptl[1])
+    r_px = max(4, int(rel_r * aw))
+    dbg_code["r_px"] = r_px
+
+    # Проецируем кружки
+    grid = {}  # row -> [(digit, px, py)]
+    for (row, digit, u, v) in rel_circ:
+        px, py = _project(u, v, Ptl, Ptr, Pbl, Pbr)
+        grid.setdefault(row, []).append((digit, px, py))
+
+    code = ""
+    code_confs = []
+    rows_minbright = []
+    rows_pick = []
+    for row in range(5):
+        cells = sorted(grid.get(row, []), key=lambda c: c[0])
+        vals = []
+        for (digit, px, py) in cells:
+            x1 = max(0, px - r_px); y1 = max(0, py - r_px)
+            x2 = min(w, px + r_px); y2 = min(h, py + r_px)
+            if x2 <= x1 or y2 <= y1:
+                vals.append(255.0); continue
+            roi = gray[y1:y2, x1:x2]
+            roi_blur = cv2.blur(roi, (max(2, r_px // 2), max(2, r_px // 2)))
+            vals.append(float(np.min(roi_blur)))
+        if not vals:
+            code += "?"; code_confs.append(0.0)
+            rows_minbright.append(-1); rows_pick.append("?"); continue
+        min_v = min(vals); max_v = max(vals)
+        d_vals = [max(0.0, (max_v - v) / max(max_v - min_v, 1.0)) for v in vals]
+        best_i = int(np.argmax(d_vals))
+        sorted_d = sorted(d_vals, reverse=True)
+        gap_c = sorted_d[0] - (sorted_d[1] if len(sorted_d) > 1 else 0.0)
+        darkness_abs = max_v - vals[best_i]
+        picked = "?"
+        if vals[best_i] < 120 and darkness_abs > 22 and gap_c > 0.28:
+            picked = str(best_i)
+            code += picked
+            code_confs.append(round(min(0.99, gap_c * 0.8 + 0.2), 2))
+        else:
+            code += "?"; code_confs.append(0.0)
+        rows_minbright.append(round(min_v, 1))
+        rows_pick.append(picked)
+    dbg_code["rows_minbright"] = rows_minbright
+    dbg_code["rows_pick"] = rows_pick
+    code = (code + "?????")[:5]
+    code_confs = (code_confs + [0.0] * 5)[:5]
+    return code, code_confs, dbg_code
+
+
+def _DEAD_CODE_REMOVED():
+    return
+    tl = tr = bl_a = br = None
+    grid_x0 = 0
     grid_x1 = tr[0] - tr[2] // 2
     grid_y0 = tl[1]
     grid_y1 = bl_a[1]

@@ -1,5 +1,4 @@
 import Icon from "@/components/ui/icon";
-import { useNavigate } from "react-router-dom";
 
 interface LandingHeaderProps {
   onLogin: () => void;
@@ -18,7 +17,6 @@ export default function LandingHeader({
   onMenuToggle,
   onScrollTo,
 }: LandingHeaderProps) {
-  const navigate = useNavigate();
   return (
     <header className="sticky top-0 z-50 bg-white/95 backdrop-blur border-b border-border">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
@@ -38,14 +36,6 @@ export default function LandingHeader({
 
         {/* Кнопки */}
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => navigate("/sjou")}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-sm text-white transition-opacity hover:opacity-90"
-            style={{ background: "linear-gradient(135deg,#2563eb,#4f46e5)" }}
-          >
-            <Icon name="GraduationCap" size={14} />
-            СЖОУ
-          </button>
           {onOuLogin && (
             <button
               onClick={onOuLogin}
@@ -90,9 +80,6 @@ export default function LandingHeader({
               {label}
             </button>
           ))}
-          <button onClick={() => navigate("/sjou")} className="block w-full text-left text-sm py-2 font-bold text-blue-600">
-            СЖОУ — журнал и дневник
-          </button>
           <button onClick={onLogin} className="block w-full text-left text-sm py-2 font-semibold text-primary">
             Войти в систему
           </button>

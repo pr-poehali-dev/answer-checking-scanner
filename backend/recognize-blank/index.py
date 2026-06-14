@@ -3,7 +3,7 @@
 POST / — { image: base64, questionsCount?: 20, optionsCount?: 4, answerKey?: "АБВГ..." }
 -> { studentCode, answers[], confidence[], analysis }
 """
-# v44b: TEMPLATE-based grid — calibrate built-in template by 4 anchors
+# v45: TEMPLATE-based grid + verbose anchor-detection diagnostics
 import json, base64, math
 import numpy as np
 import cv2
@@ -70,37 +70,42 @@ def _cluster_rows(items, tol):
 
 
 # ── Поиск якорей (залитые чёрные квадраты) ───────────────────────────────────
-def _find_anchors(gray):
+def _find_anchors(gray, debug=None):
     h, w = gray.shape
-    min_s = int(min(h, w) * 0.008)
-    max_s = int(min(h, w) * 0.090)
+    min_s = int(min(h, w) * 0.006)
+    max_s = int(min(h, w) * 0.10)
     seen = set()
     candidates = []
     k = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
     thresh_list = []
     _, t1 = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     thresh_list.append(cv2.morphologyEx(t1, cv2.MORPH_CLOSE, k, iterations=2))
-    for thr in [60, 80, 100, 130]:
+    for thr in [50, 70, 90, 110, 140]:
         _, tf = cv2.threshold(gray, thr, 255, cv2.THRESH_BINARY_INV)
         thresh_list.append(cv2.morphologyEx(tf, cv2.MORPH_CLOSE, k, iterations=1))
     bl = cv2.GaussianBlur(gray, (3, 3), 0)
-    for bs, C in [(25, 8), (35, 10)]:
+    for bs, C in [(25, 8), (35, 10), (51, 12)]:
         ta = cv2.adaptiveThreshold(bl, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                    cv2.THRESH_BINARY_INV, bs, C)
         thresh_list.append(cv2.morphologyEx(ta, cv2.MORPH_CLOSE, k, iterations=2))
+    dark_sizes = []
     for bw in thresh_list:
         cnts, _ = cv2.findContours(bw, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         for cnt in cnts:
             x, y, cw, ch = cv2.boundingRect(cnt)
             side = (cw + ch) / 2
+            mean_b = float(np.mean(gray[y:y+ch, x:x+cw]))
+            # Сбор статистики по всем тёмным пятнам (для отладки)
+            if debug is not None and mean_b < 120 and side > min_s:
+                dark_sizes.append(int(side))
             if not (min_s < side < max_s):
                 continue
             if not (0.40 < cw / max(ch, 1) < 2.5):
                 continue
             fill = cv2.contourArea(cnt) / max(cw * ch, 1)
-            if fill < 0.45:
+            if fill < 0.40:
                 continue
-            if float(np.mean(gray[y:y+ch, x:x+cw])) > 150:
+            if mean_b > 160:
                 continue
             cx, cy_ = x + cw // 2, y + ch // 2
             key = (cx // 8, cy_ // 8)
@@ -108,6 +113,14 @@ def _find_anchors(gray):
                 continue
             seen.add(key)
             candidates.append((cx, cy_, cw, ch, side))
+    if debug is not None:
+        debug["min_s"] = min_s
+        debug["max_s"] = max_s
+        debug["dark_blobs"] = len(dark_sizes)
+        debug["dark_sizes_sample"] = sorted(dark_sizes, reverse=True)[:20]
+        debug["found"] = len(candidates)
+        debug["anchor_xy"] = [(c[0], c[1], int(c[4])) for c in candidates[:12]]
+    return candidates
     return candidates
 
 
@@ -252,17 +265,17 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
     h, w = gray.shape
     opts = RU_OPTS[:options_count]
 
-    dbg_anchors_total = len(_find_anchors(gray))
+    dbg_find = {"img_hw": [h, w]}
 
-    # ── 1. ЯКОРЯ ОТВЕТОВ — 4 крупных квадрата в верхних ~75% листа ────────────
+    # ── 1. ЯКОРЯ ОТВЕТОВ — 4 крупных квадрата в верхних ~78% листа ────────────
     ans_zone_h = int(h * 0.78)
-    cands_ans = _find_anchors(gray[:ans_zone_h, :])
+    cands_ans = _find_anchors(gray[:ans_zone_h, :], debug=dbg_find)
     anchors = _select_corner_anchors(cands_ans, w, ans_zone_h,
                                      min_w_frac=0.45, min_h_frac=0.15)
     if not anchors:
-        cands_ans = _find_anchors(gray)
+        cands_ans = _find_anchors(gray, debug=dbg_find)
         anchors = _select_corner_anchors(cands_ans, w, h,
-                                         min_w_frac=0.45, min_h_frac=0.15)
+                                         min_w_frac=0.40, min_h_frac=0.12)
 
     dbg_anchors = len(cands_ans)
     dbg_rows_dist = []
@@ -273,11 +286,11 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
             "confidences": [0.0] * questions_count,
             "code": "?????",
             "code_confs": [0.0] * 5,
-            "squares_found": dbg_anchors_total,
+            "squares_found": dbg_anchors,
             "answer_rows": 0,
             "code_rows": 0,
             "dbg_fills": [],
-            "dbg_rows_dist": ["no_anchors", f"cands={dbg_anchors}"],
+            "dbg_rows_dist": ["no_anchors", f"cands={dbg_anchors}", dbg_find],
             "dbg_code": {},
         }
 
@@ -342,7 +355,8 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
     dbg_corners = {"tl": P_tl, "tr": P_tr, "bl": P_bl, "br": P_br}
     dbg_rows_dist = ["template_grid", questions_count,
                      f"sq_px={sq_px}", f"anchors_px_w={int(anchors_px_w)}",
-                     f"thr={thr_value}", f"corners={dbg_corners}"]
+                     f"thr={thr_value}", f"corners={dbg_corners}",
+                     f"find={dbg_find}"]
 
     # ── 4. КОД УЧЕНИКА по шаблону ────────────────────────────────────────────
     code, code_confs, dbg_code = _read_code_template(

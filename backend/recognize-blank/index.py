@@ -3,7 +3,7 @@
 POST / — { image: base64, questionsCount?: 20, optionsCount?: 4, answerKey?: "АБВГ..." }
 -> { studentCode, answers[], confidence[], analysis }
 """
-# v45b: fix undefined dbg_anchors_total in success return
+# v46: rectangle-constrained anchor selection (reject filled cells & frame)
 import json, base64, math
 import numpy as np
 import cv2
@@ -72,8 +72,8 @@ def _cluster_rows(items, tol):
 # ── Поиск якорей (залитые чёрные квадраты) ───────────────────────────────────
 def _find_anchors(gray, debug=None):
     h, w = gray.shape
-    min_s = int(min(h, w) * 0.006)
-    max_s = int(min(h, w) * 0.10)
+    min_s = int(min(h, w) * 0.018)   # реперы ~45px при ширине ~1025 → ~18px+
+    max_s = int(min(h, w) * 0.08)
     seen = set()
     candidates = []
     k = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
@@ -125,44 +125,66 @@ def _find_anchors(gray, debug=None):
 
 
 def _select_corner_anchors(cands, img_w, img_h, x_off=0, y_off=0,
-                            min_w_frac=0.45, min_h_frac=0.15):
+                            min_w_frac=0.45, min_h_frac=0.10):
     """
-    Выбираем 4 угловых репера ИЗ ЗОНЫ. Реперы — чёрные квадраты у левого/правого
-    краёв. Закрашенные клетки-ответы тоже чёрные, поэтому берём только кандидатов
-    у самых краёв зоны (по X) и максимально разнесённых по Y.
-    Координаты cands — абсолютные; x_off/y_off — левый/верхний край зоны поиска.
-    Возвращает (tl, tr, bl, br) в абсолютных координатах.
+    Выбираем 4 угловых репера, образующих ПРЯМОУГОЛЬНИК у краёв листа.
+    Реперы: левая пара имеет ~одинаковый X (самый малый среди группы), правая
+    пара — ~одинаковый X (самый большой). Верхняя пара ~одинаковый Y, нижняя —
+    одинаковый Y. Это отличает реперы от закрашенных клеток (они внутри сетки).
+    Координаты cands — абсолютные. Возвращает (tl, tr, bl, br).
     """
-    if len(cands) < 2:
+    if len(cands) < 4:
         return None
 
-    # Якоря крупные — отсекаем мелкий мусор по размеру
+    # Реперы примерно одного размера. Берём доминирующий размер (медиана) и
+    # оставляем кандидатов близких к нему — отсекаем и мелкий мусор, и крупную рамку.
     sides = sorted([c[4] for c in cands])
-    big_thr = sides[len(sides) // 2] if len(sides) >= 4 else 0
-    pool = [c for c in cands if c[4] >= big_thr * 0.7] or cands
+    med_side = sides[len(sides) // 2]
+    pool = [c for c in cands if 0.55 * med_side <= c[4] <= 1.9 * med_side]
+    if len(pool) < 4:
+        pool = list(cands)
 
-    # Локальный X относительно зоны
-    xs = [c[0] - x_off for c in pool]
-    zone_w = max(img_w, 1)
-    # Левая группа: X в левой трети зоны; правая: в правой трети
-    left = [c for c in pool if (c[0] - x_off) < zone_w * 0.33]
-    right = [c for c in pool if (c[0] - x_off) > zone_w * 0.67]
-    if not left or not right:
-        # запасной вариант: половина по медиане X
-        mx = float(np.median([c[0] for c in pool]))
-        left = [c for c in pool if c[0] <= mx]
-        right = [c for c in pool if c[0] > mx]
-    if not left or not right:
+    xs = sorted([c[0] for c in pool])
+    ys = sorted([c[1] for c in pool])
+    x_lo, x_hi = xs[0], xs[-1]
+    y_lo, y_hi = ys[0], ys[-1]
+    x_span = max(x_hi - x_lo, 1)
+    y_span = max(y_hi - y_lo, 1)
+
+    # Левые/правые: рядом с крайними X (в пределах 18% от размаха)
+    xtol = x_span * 0.18
+    ytol = y_span * 0.18
+    left = [c for c in pool if c[0] <= x_lo + xtol]
+    right = [c for c in pool if c[0] >= x_hi - xtol]
+    top = [c for c in pool if c[1] <= y_lo + ytol]
+    bot = [c for c in pool if c[1] >= y_hi - ytol]
+
+    def _pick(group_a, group_b):
+        """Пересечение двух групп → ближайший к нужному углу."""
+        inter = [c for c in group_a if c in group_b]
+        return inter
+
+    tl_c = _pick(left, top)
+    tr_c = _pick(right, top)
+    bl_c = _pick(left, bot)
+    br_c = _pick(right, bot)
+    if not (tl_c and tr_c and bl_c and br_c):
         return None
 
-    lt = min(left, key=lambda c: c[1])
-    lb = max(left, key=lambda c: c[1])
-    rt = min(right, key=lambda c: c[1])
-    rb = max(right, key=lambda c: c[1])
+    # В каждом углу берём самый крайний к этому углу
+    lt = min(tl_c, key=lambda c: c[0] + c[1])
+    rt = min(tr_c, key=lambda c: (img_w - c[0]) + c[1])
+    lb = min(bl_c, key=lambda c: c[0] + (img_h - c[1]))
+    rb = min(br_c, key=lambda c: (img_w - c[0]) + (img_h - c[1]))
 
     gw = abs(rt[0] - lt[0])
     gh = max(abs(lb[1] - lt[1]), abs(rb[1] - rt[1]))
     if gw < img_w * min_w_frac or gh < img_h * min_h_frac:
+        return None
+    # Проверка прямоугольности: левые X близки, правые X близки
+    if abs(lt[0] - lb[0]) > x_span * 0.30 or abs(rt[0] - rb[0]) > x_span * 0.30:
+        return None
+    if abs(lt[1] - rt[1]) > y_span * 0.30 or abs(lb[1] - rb[1]) > y_span * 0.30:
         return None
     return lt, rt, lb, rb
 

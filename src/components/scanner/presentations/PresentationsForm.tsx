@@ -6,6 +6,8 @@ import { yadisk, ROOT_FOLDER } from "@/lib/yadisk";
 
 const PRESENTATIONS_FOLDER = `${ROOT_FOLDER}/Презентации`;
 const SLIDE_OPTIONS = [5, 7, 8, 10, 12, 14];
+// Примерные оттенки для мини-превью индивидуальной палитры (генерируется на сервере)
+const DESIGN_SWATCHES = ["#1E1B4B", "#7C3AED", "#EC4899", "#F59E0B", "#06B6D4"];
 const AUDIENCE_PRESETS = [
   "Ученики 5–6 классов",
   "Ученики 7–8 классов",
@@ -262,6 +264,20 @@ export function PresentationsForm() {
               <p className={`text-[11px] leading-snug ${customDesign ? "text-white/85" : "text-muted-foreground"}`}>
                 ИИ создаст уникальное современное оформление под вашу тему — стильные цвета и вёрстку
               </p>
+              <div className="flex items-center gap-1.5 mt-2">
+                {DESIGN_SWATCHES.map((c, i) => (
+                  <span
+                    key={i}
+                    className={`w-4 h-4 rounded-full transition-all ${
+                      customDesign ? "ring-1 ring-white/60 scale-100" : "opacity-40 scale-90"
+                    }`}
+                    style={{ backgroundColor: c }}
+                  />
+                ))}
+                <span className={`text-[10px] ml-1 ${customDesign ? "text-white/70" : "text-muted-foreground"}`}>
+                  пример палитры
+                </span>
+              </div>
             </div>
             <div className={`w-11 h-6 rounded-full flex-shrink-0 relative transition-all ${
               customDesign ? "bg-white/30" : "bg-muted"

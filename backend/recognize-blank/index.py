@@ -3,7 +3,7 @@
 POST / — { image: base64, questionsCount?: 20, optionsCount?: 4, answerKey?: "АБВГ..." }
 -> { studentCode, answers[], confidence[], analysis }
 """
-# v45: TEMPLATE-based grid + verbose anchor-detection diagnostics
+# v45b: fix undefined dbg_anchors_total in success return
 import json, base64, math
 import numpy as np
 import cv2
@@ -367,7 +367,7 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
         "confidences":   confidences[:questions_count],
         "code":          code,
         "code_confs":    code_confs,
-        "squares_found": dbg_anchors_total,
+        "squares_found": len(cands_ans),
         "answer_rows":   questions_count,
         "code_rows":     len(code),
         "dbg_fills":     dbg_fills,

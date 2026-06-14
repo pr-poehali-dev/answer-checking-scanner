@@ -56,6 +56,7 @@ export function PresentationsForm() {
   const [description, setDescription] = useState(synopsisDesc);
   const [audience, setAudience]       = useState(AUDIENCE_PRESETS[3]);
   const [slidesCount, setSlidesCount] = useState(8);
+  const [customDesign, setCustomDesign] = useState(false);
   const [busy, setBusy]               = useState(false);
   const [stage, setStage]             = useState("");
   const [elapsed, setElapsed]         = useState(0);
@@ -100,7 +101,7 @@ export function PresentationsForm() {
 
     try {
       const result = await presentationApi.generate(
-        { topic: topic.trim(), description: description.trim(), audience, slidesCount,
+        { topic: topic.trim(), description: description.trim(), audience, slidesCount, customDesign,
           teacherName: teacher.name, teacherSchool: teacher.school, login: teacher.login },
         (s) => setStage(s),
       );
@@ -233,6 +234,44 @@ export function PresentationsForm() {
             </p>
           </div>
         </div>
+
+        {/* Индивидуальный дизайн */}
+        <button
+          type="button"
+          onClick={() => setCustomDesign(v => !v)}
+          disabled={busy}
+          className={`w-full text-left rounded-xl border p-4 transition-all disabled:opacity-50 ${
+            customDesign
+              ? "border-transparent shadow-md"
+              : "border-border hover:border-primary/40 bg-white"
+          }`}
+          style={customDesign ? {
+            background: "linear-gradient(135deg, #6D28D9, #DB2777 55%, #F59E0B)",
+          } : undefined}
+        >
+          <div className="flex items-center gap-3">
+            <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${
+              customDesign ? "bg-white/20" : "bg-primary/10"
+            }`}>
+              <Icon name="Sparkles" size={18} className={customDesign ? "text-white" : "text-primary"} fallback="Wand2" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className={`text-sm font-bold ${customDesign ? "text-white" : "text-foreground"}`}>
+                Индивидуальный дизайн
+              </p>
+              <p className={`text-[11px] leading-snug ${customDesign ? "text-white/85" : "text-muted-foreground"}`}>
+                ИИ создаст уникальное современное оформление под вашу тему — стильные цвета и вёрстку
+              </p>
+            </div>
+            <div className={`w-11 h-6 rounded-full flex-shrink-0 relative transition-all ${
+              customDesign ? "bg-white/30" : "bg-muted"
+            }`}>
+              <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${
+                customDesign ? "left-[22px]" : "left-0.5"
+              }`} />
+            </div>
+          </div>
+        </button>
 
         {/* Подпись + Я.Диск */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

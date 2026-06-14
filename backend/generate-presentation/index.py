@@ -223,6 +223,81 @@ def pick_theme(topic: str) -> dict:
     return random.choice(THEMES)
 
 
+# ─── ИНДИВИДУАЛЬНЫЙ ДИЗАЙН ──────────────────────────────────────────────────
+import colorsys
+
+_CUSTOM_LAYOUTS = ["left_header", "split_diagonal", "top_banner", "sidebar_dark"]
+
+
+def _hsl(h: float, s: float, l: float) -> "RGBColor":
+    """h,s,l в диапазоне 0..1 → RGBColor."""
+    r, g, b = colorsys.hls_to_rgb(h % 1.0, max(0.0, min(1.0, l)), max(0.0, min(1.0, s)))
+    return RGBColor(int(r * 255), int(g * 255), int(b * 255))
+
+
+def make_custom_theme(seed_text: str = "") -> dict:
+    """
+    Генерирует уникальную современную дизайн-тему: глубокий тёмный заголовок,
+    яркий насыщенный акцент и гармоничный второй акцент (схема split-complementary).
+    Каждый вызов даёт стильную, но непохожую палитру.
+    """
+    rnd = random.Random((seed_text + str(random.random())).encode("utf-8"))
+
+    base_h = rnd.random()                       # основной тон
+    acc2_h = (base_h + rnd.choice([0.5, 0.45, 0.55, 0.33, 0.66])) % 1.0  # доп. акцент
+    acc3_h = (base_h + rnd.choice([0.08, -0.08, 0.12])) % 1.0
+
+    title_bg = _hsl(base_h, rnd.uniform(0.55, 0.8), rnd.uniform(0.10, 0.16))   # глубокий тёмный
+    accent2  = _hsl(acc2_h, rnd.uniform(0.7, 0.92), rnd.uniform(0.50, 0.60))   # яркий неон-акцент
+    accent3  = _hsl(acc3_h, rnd.uniform(0.6, 0.85), rnd.uniform(0.55, 0.68))
+    bg       = _hsl(base_h, rnd.uniform(0.18, 0.35), rnd.uniform(0.96, 0.985)) # очень светлый фон
+    card_bg  = _hsl(base_h, rnd.uniform(0.25, 0.45), rnd.uniform(0.90, 0.95))
+    title_sub= _hsl(base_h, rnd.uniform(0.35, 0.6), rnd.uniform(0.78, 0.86))
+    text     = _hsl(base_h, rnd.uniform(0.3, 0.5), rnd.uniform(0.08, 0.13))
+    muted    = _hsl(base_h, rnd.uniform(0.2, 0.35), rnd.uniform(0.40, 0.50))
+
+    return {
+        "name":      "custom",
+        "bg":        bg,
+        "title_bg":  title_bg,
+        "accent":    title_bg,
+        "accent2":   accent2,
+        "accent3":   accent3,
+        "text":      text,
+        "muted":     muted,
+        "white":     RGBColor(0xFF, 0xFF, 0xFF),
+        "title_sub": title_sub,
+        "stripe":    accent2,
+        "card_bg":   card_bg,
+        "label":     "ИНДИВИДУАЛЬНЫЙ ДИЗАЙН",
+        "layout":    rnd.choice(_CUSTOM_LAYOUTS),
+    }
+
+
+_THEME_COLOR_KEYS = ["bg", "title_bg", "accent", "accent2", "accent3",
+                     "text", "muted", "white", "title_sub", "stripe", "card_bg"]
+
+
+def theme_to_payload(theme: dict) -> dict:
+    """Сериализует тему в JSON (цвета → hex-строки) для передачи outline→build."""
+    out = {"name": theme["name"], "label": theme["label"], "layout": theme["layout"]}
+    for k in _THEME_COLOR_KEYS:
+        c = theme[k]
+        out[k] = "%02X%02X%02X" % (c[0], c[1], c[2])
+    return out
+
+
+def theme_from_payload(payload: dict) -> dict:
+    """Восстанавливает тему из JSON-payload (hex-строки → RGBColor)."""
+    theme = {"name": payload.get("name", "custom"),
+             "label": payload.get("label", "ИНДИВИДУАЛЬНЫЙ ДИЗАЙН"),
+             "layout": payload.get("layout", "top_banner")}
+    for k in _THEME_COLOR_KEYS:
+        hexv = payload.get(k, "FFFFFF")
+        theme[k] = RGBColor(int(hexv[0:2], 16), int(hexv[2:4], 16), int(hexv[4:6], 16))
+    return theme
+
+
 def _resp(status: int, body: dict) -> dict:
     return {
         "statusCode": status,
@@ -1165,6 +1240,7 @@ def handler(event: dict, context) -> dict:
         topic = (body.get("topic") or "").strip()
         description = (body.get("description") or "").strip()
         audience = (body.get("audience") or "").strip()
+        custom_design = bool(body.get("customDesign"))
 
         try:
             slides_count = int(body.get("slidesCount") or 8)
@@ -1207,10 +1283,11 @@ def handler(event: dict, context) -> dict:
 
         _, _, spent_rub, balance_rub = spend_ai_tokens(login, max(tokens_used, 1))
 
-        theme = pick_theme(topic)
+        theme = make_custom_theme(topic) if custom_design else pick_theme(topic)
         return _resp(200, {
             "outline": outline,
             "theme_name": theme["name"],
+            "theme_payload": theme_to_payload(theme) if custom_design else None,
             "topic": topic,
             "spent_rub": spent_rub,
             "balance_rub": balance_rub,
@@ -1223,12 +1300,16 @@ def handler(event: dict, context) -> dict:
         teacher_school = (body.get("teacherSchool") or "").strip()
         outline = body.get("outline")
         theme_name = (body.get("theme_name") or "").strip()
+        theme_payload = body.get("theme_payload")
 
         if not topic or not outline:
             return _resp(400, {"error": "Укажите topic и outline"})
 
-        # Восстанавливаем тему
-        theme = next((t for t in THEMES if t["name"] == theme_name), None) or pick_theme(topic)
+        # Восстанавливаем тему: индивидуальная палитра → из payload, иначе по имени
+        if theme_payload:
+            theme = theme_from_payload(theme_payload)
+        else:
+            theme = next((t for t in THEMES if t["name"] == theme_name), None) or pick_theme(topic)
 
         # Скачиваем до 3 фото на слайд параллельно
         images = {}
@@ -1274,6 +1355,7 @@ def handler(event: dict, context) -> dict:
     audience = (body.get("audience") or "").strip()
     teacher_name = (body.get("teacherName") or "").strip()
     teacher_school = (body.get("teacherSchool") or "").strip()
+    custom_design = bool(body.get("customDesign"))
 
     try:
         slides_count = int(body.get("slidesCount") or 8)
@@ -1303,7 +1385,7 @@ def handler(event: dict, context) -> dict:
         except Exception:
             pass
 
-    theme = pick_theme(topic)
+    theme = make_custom_theme(topic) if custom_design else pick_theme(topic)
 
     try:
         outline, tokens_used = generate_outline(topic, description, slides_count, audience)

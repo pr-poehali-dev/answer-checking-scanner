@@ -528,6 +528,7 @@ export const presentationApi = {
       teacherName: string;
       teacherSchool: string;
       login?: string;
+      customDesign?: boolean;
     },
     onStage?: (stage: string) => void,
   ): Promise<PresentationResponse> => {
@@ -540,11 +541,12 @@ export const presentationApi = {
       teacherName: params.teacherName,
       teacherSchool: params.teacherSchool,
       login: params.login ?? "",
+      customDesign: params.customDesign ?? false,
     };
 
     // ── Шаг 1: получаем структуру от GigaChat (до 85 сек) ────────────────
     onStage?.("ИИ генерирует структуру презентации…");
-    let outlineData: { outline: object; theme_name: string; topic: string; spent_rub?: number; balance_rub?: number };
+    let outlineData: { outline: object; theme_name: string; theme_payload?: object | null; topic: string; spent_rub?: number; balance_rub?: number };
     try {
       const res1 = await fetchWithTimeout(
         `${PRESENTATION_URL}?action=outline`,
@@ -579,6 +581,7 @@ export const presentationApi = {
           teacherSchool: params.teacherSchool,
           outline: outlineData.outline,
           theme_name: outlineData.theme_name,
+          theme_payload: outlineData.theme_payload ?? null,
         },
         30_000, // 30 сек — фото + сборка PPTX
       );

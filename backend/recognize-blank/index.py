@@ -3,7 +3,7 @@
 POST / — { image: base64, questionsCount?: 20, optionsCount?: 4, answerKey?: "АБВГ..." }
 -> { studentCode, answers[], confidence[], analysis }
 """
-# v46: rectangle-constrained anchor selection (reject filled cells & frame)
+# v47: margin-based anchor selection + solid-square filter + x/y range debug
 import json, base64, math
 import numpy as np
 import cv2
@@ -72,14 +72,14 @@ def _cluster_rows(items, tol):
 # ── Поиск якорей (залитые чёрные квадраты) ───────────────────────────────────
 def _find_anchors(gray, debug=None):
     h, w = gray.shape
-    min_s = int(min(h, w) * 0.018)   # реперы ~45px при ширине ~1025 → ~18px+
-    max_s = int(min(h, w) * 0.08)
+    min_s = int(min(h, w) * 0.014)   # реперы 3.5–4.5 мм ≈ 18–23px при ширине ~1025
+    max_s = int(min(h, w) * 0.075)
     seen = set()
     candidates = []
     k = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
     thresh_list = []
     _, t1 = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-    thresh_list.append(cv2.morphologyEx(t1, cv2.MORPH_CLOSE, k, iterations=2))
+    thresh_list.append(cv2.morphologyEx(t1, cv2.MORPH_CLOSE, k, iterations=1))
     for thr in [50, 70, 90, 110, 140]:
         _, tf = cv2.threshold(gray, thr, 255, cv2.THRESH_BINARY_INV)
         thresh_list.append(cv2.morphologyEx(tf, cv2.MORPH_CLOSE, k, iterations=1))
@@ -87,7 +87,7 @@ def _find_anchors(gray, debug=None):
     for bs, C in [(25, 8), (35, 10), (51, 12)]:
         ta = cv2.adaptiveThreshold(bl, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                    cv2.THRESH_BINARY_INV, bs, C)
-        thresh_list.append(cv2.morphologyEx(ta, cv2.MORPH_CLOSE, k, iterations=2))
+        thresh_list.append(cv2.morphologyEx(ta, cv2.MORPH_CLOSE, k, iterations=1))
     dark_sizes = []
     for bw in thresh_list:
         cnts, _ = cv2.findContours(bw, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -100,12 +100,12 @@ def _find_anchors(gray, debug=None):
                 dark_sizes.append(int(side))
             if not (min_s < side < max_s):
                 continue
-            if not (0.40 < cw / max(ch, 1) < 2.5):
+            if not (0.55 < cw / max(ch, 1) < 1.8):  # реперы ~квадратные
                 continue
             fill = cv2.contourArea(cnt) / max(cw * ch, 1)
-            if fill < 0.40:
+            if fill < 0.55:  # реперы — СПЛОШНЫЕ квадраты (высокая заливка)
                 continue
-            if mean_b > 160:
+            if mean_b > 150:
                 continue
             cx, cy_ = x + cw // 2, y + ch // 2
             key = (cx // 8, cy_ // 8)
@@ -119,72 +119,48 @@ def _find_anchors(gray, debug=None):
         debug["dark_blobs"] = len(dark_sizes)
         debug["dark_sizes_sample"] = sorted(dark_sizes, reverse=True)[:20]
         debug["found"] = len(candidates)
-        debug["anchor_xy"] = [(c[0], c[1], int(c[4])) for c in candidates[:12]]
-    return candidates
+        if candidates:
+            debug["x_range"] = [min(c[0] for c in candidates), max(c[0] for c in candidates)]
+            debug["y_range"] = [min(c[1] for c in candidates), max(c[1] for c in candidates)]
+        debug["anchor_xy"] = [(c[0], c[1], int(c[4])) for c in candidates[:16]]
     return candidates
 
 
 def _select_corner_anchors(cands, img_w, img_h, x_off=0, y_off=0,
                             min_w_frac=0.45, min_h_frac=0.10):
     """
-    Выбираем 4 угловых репера, образующих ПРЯМОУГОЛЬНИК у краёв листа.
-    Реперы: левая пара имеет ~одинаковый X (самый малый среди группы), правая
-    пара — ~одинаковый X (самый большой). Верхняя пара ~одинаковый Y, нижняя —
-    одинаковый Y. Это отличает реперы от закрашенных клеток (они внутри сетки).
-    Координаты cands — абсолютные. Возвращает (tl, tr, bl, br).
+    Выбираем 4 угловых репера у краёв листа. Реперы стоят в ЛЕВОМ и ПРАВОМ полях
+    (≈2 мм от края), тогда как все клетки ответов — внутри сетки. Поэтому реперы
+    отличаются крайним по X положением. Берём кандидатов с минимальным и
+    максимальным X (левая/правая колонки полей), затем в каждой колонке —
+    верхний и нижний. Возвращает (tl, tr, bl, br) по их ЦЕНТРАМ.
     """
     if len(cands) < 4:
         return None
 
-    # Реперы примерно одного размера. Берём доминирующий размер (медиана) и
-    # оставляем кандидатов близких к нему — отсекаем и мелкий мусор, и крупную рамку.
-    sides = sorted([c[4] for c in cands])
-    med_side = sides[len(sides) // 2]
-    pool = [c for c in cands if 0.55 * med_side <= c[4] <= 1.9 * med_side]
-    if len(pool) < 4:
-        pool = list(cands)
-
-    xs = sorted([c[0] for c in pool])
-    ys = sorted([c[1] for c in pool])
+    xs = sorted(c[0] for c in cands)
     x_lo, x_hi = xs[0], xs[-1]
-    y_lo, y_hi = ys[0], ys[-1]
     x_span = max(x_hi - x_lo, 1)
-    y_span = max(y_hi - y_lo, 1)
+    if x_span < img_w * min_w_frac:
+        return None  # все кандидаты в одной зоне — реперов по краям нет
 
-    # Левые/правые: рядом с крайними X (в пределах 18% от размаха)
-    xtol = x_span * 0.18
-    ytol = y_span * 0.18
-    left = [c for c in pool if c[0] <= x_lo + xtol]
-    right = [c for c in pool if c[0] >= x_hi - xtol]
-    top = [c for c in pool if c[1] <= y_lo + ytol]
-    bot = [c for c in pool if c[1] >= y_hi - ytol]
-
-    def _pick(group_a, group_b):
-        """Пересечение двух групп → ближайший к нужному углу."""
-        inter = [c for c in group_a if c in group_b]
-        return inter
-
-    tl_c = _pick(left, top)
-    tr_c = _pick(right, top)
-    bl_c = _pick(left, bot)
-    br_c = _pick(right, bot)
-    if not (tl_c and tr_c and bl_c and br_c):
+    # Левая/правая «колонки полей»: кандидаты в пределах 22% размаха от краёв.
+    xtol = max(x_span * 0.22, img_w * 0.06)
+    left = sorted((c for c in cands if c[0] <= x_lo + xtol), key=lambda c: c[1])
+    right = sorted((c for c in cands if c[0] >= x_hi - xtol), key=lambda c: c[1])
+    if len(left) < 2 or len(right) < 2:
         return None
 
-    # В каждом углу берём самый крайний к этому углу
-    lt = min(tl_c, key=lambda c: c[0] + c[1])
-    rt = min(tr_c, key=lambda c: (img_w - c[0]) + c[1])
-    lb = min(bl_c, key=lambda c: c[0] + (img_h - c[1]))
-    rb = min(br_c, key=lambda c: (img_w - c[0]) + (img_h - c[1]))
+    # В каждой колонке: верхний (мин Y) и нижний (макс Y).
+    lt, lb = left[0], left[-1]
+    rt, rb = right[0], right[-1]
 
-    gw = abs(rt[0] - lt[0])
+    # Высота рамки достаточная?
     gh = max(abs(lb[1] - lt[1]), abs(rb[1] - rt[1]))
-    if gw < img_w * min_w_frac or gh < img_h * min_h_frac:
+    if gh < img_h * min_h_frac:
         return None
-    # Проверка прямоугольности: левые X близки, правые X близки
-    if abs(lt[0] - lb[0]) > x_span * 0.30 or abs(rt[0] - rb[0]) > x_span * 0.30:
-        return None
-    if abs(lt[1] - rt[1]) > y_span * 0.30 or abs(lb[1] - rb[1]) > y_span * 0.30:
+    # Верх должен быть заметно выше низа (защита от вырожденного случая).
+    if (lt[1] >= lb[1] - 5) or (rt[1] >= rb[1] - 5):
         return None
     return lt, rt, lb, rb
 

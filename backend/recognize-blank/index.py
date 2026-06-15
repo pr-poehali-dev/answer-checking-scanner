@@ -3,7 +3,7 @@
 POST / — { image: base64, questionsCount?: 20, optionsCount?: 4, answerKey?: "АБВГ..." }
 -> { studentCode, answers[], confidence[], analysis }
 """
-# v47: margin-based anchor selection + solid-square filter + x/y range debug
+# v48: new light blank (circles, no frames) — bigger anchors 5.5/4.5mm, margin selection
 import json, base64, math
 import numpy as np
 import cv2
@@ -72,8 +72,8 @@ def _cluster_rows(items, tol):
 # ── Поиск якорей (залитые чёрные квадраты) ───────────────────────────────────
 def _find_anchors(gray, debug=None):
     h, w = gray.shape
-    min_s = int(min(h, w) * 0.014)   # реперы 3.5–4.5 мм ≈ 18–23px при ширине ~1025
-    max_s = int(min(h, w) * 0.075)
+    min_s = int(min(h, w) * 0.015)   # реперы 4.5–5.5 мм ≈ 23–28px при ширине ~1025
+    max_s = int(min(h, w) * 0.085)
     seen = set()
     candidates = []
     k = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))

@@ -62,18 +62,13 @@ def HL(c, x1, y, x2, lw=0.4, color=C_LINE):
 def VL(c, x, y1, y2, lw=0.3, color=C_LINE):
     c.setStrokeColor(color); c.setLineWidth(lw); c.line(x, y1, x, y2)
 
-def CR(c, cx, cy, r, stroke=C_BLUE, fill=white, lw=0.5):
-    """Кружок (для кода ученика)."""
+def CR(c, cx, cy, r, stroke=C_BLUE, fill=white, lw=0.6):
+    """Кружок (для ответов и кода ученика)."""
     c.setStrokeColor(stroke); c.setFillColor(fill)
     c.setLineWidth(lw); c.circle(cx, cy, r, stroke=1, fill=1)
 
-def SQ(c, cx, cy, side, stroke=C_BLUE, fill=white, lw=0.6):
-    """Квадрат с закруглёнными углами (для ответов)."""
-    c.setStrokeColor(stroke); c.setFillColor(fill); c.setLineWidth(lw)
-    c.roundRect(cx - side/2, cy - side/2, side, side, side*0.15, stroke=1, fill=1)
-
 def ANCHOR(c, cx, cy, side):
-    """Жирный чёрный квадрат-якорь для OCR-навигации."""
+    """Жирный чёрный квадрат-репер для OCR-навигации (сплошная заливка)."""
     c.setFillColor(black); c.setStrokeColor(black); c.setLineWidth(0)
     c.rect(cx - side/2, cy - side/2, side, side, stroke=0, fill=1)
 
@@ -93,23 +88,19 @@ def draw_blank(c, x0, y0, bw, bh, cfg):
 
     P = S(4 * mm)
 
-    # ── Рамка ────────────────────────────────────────────────────────────────
-    c.setStrokeColor(C_BLUE); c.setLineWidth(0.7)
-    c.rect(x0, y0, bw, bh, stroke=1, fill=0)
+    # Светлый, БЕЗ тёмных рамок. Геометрия (высоты блоков) сохранена, чтобы
+    # шаблон распознавания совпадал. Цвета — только тонкие линии и текст.
     cur_y = y0 + bh
 
-    # ── Шапка ────────────────────────────────────────────────────────────────
+    # ── Шапка (только текст) ──────────────────────────────────────────────────
     HDR = S(6.5 * mm)
-    c.setFillColor(C_DARK)
-    c.rect(x0, cur_y - HDR, bw, HDR, stroke=0, fill=1)
-    T(c, x0+bw/2, cur_y-HDR+S(2*mm), "БЛАНК ОТВЕТОВ", BOLD, S(8.5), white, "center")
-    T(c, x0+bw-P, cur_y-HDR+S(2*mm), f"№ {work_id}", REG, S(5.5), C_GRAY, "right")
+    T(c, x0+bw/2, cur_y-HDR+S(2.2*mm), "БЛАНК ОТВЕТОВ", BOLD, S(8.5), C_BLUE, "center")
+    T(c, x0+bw-P, cur_y-HDR+S(2.2*mm), f"№ {work_id}", REG, S(5.5), C_GRAY, "right")
     cur_y -= HDR
+    HL(c, x0+P, cur_y, x0+bw-P, lw=0.5, color=C_LINE)
 
-    # ── Поля ученика ─────────────────────────────────────────────────────────
+    # ── Поля ученика (только линии для записи) ────────────────────────────────
     META = S(10.5 * mm)
-    c.setFillColor(C_LIGHT)
-    c.rect(x0, cur_y-META, bw, META, stroke=0, fill=1)
     fy1 = cur_y - S(3.2*mm)
     fy2 = cur_y - S(7.5*mm)
 
@@ -128,30 +119,28 @@ def draw_blank(c, x0, y0, bw, bh, cfg):
     if date_s:  T(c, x0+bw*0.57+S(11*mm), fy2, date_s, REG, S(6.5), C_DARK)
 
     cur_y -= META
-    HL(c, x0, cur_y, x0+bw, lw=0.5, color=C_BLUE)
+    HL(c, x0+P, cur_y, x0+bw-P, lw=0.5, color=C_LINE)
 
-    # ── Инструкция ───────────────────────────────────────────────────────────
+    # ── Инструкция (только текст) ─────────────────────────────────────────────
     INST = S(5.5 * mm)
-    c.setFillColor(HexColor("#fffbeb"))
-    c.rect(x0, cur_y - INST, bw, INST, stroke=0, fill=1)
-    T(c, x0+P, cur_y - S(2*mm),
-      "Инструкция: поставьте крестик  ✕  в нужном квадрате.  "
-      "Если исправляете — закрасьте неверный квадрат полностью и поставьте ✕ в правильном.",
+    T(c, x0+P, cur_y - S(3.4*mm),
+      "Инструкция: закрасьте нужный кружок полностью.  "
+      "Если исправляете — зачеркните неверный и закрасьте правильный.",
       REG, S(4.8), C_DARK)
     cur_y -= INST
-    HL(c, x0, cur_y, x0+bw, lw=0.5, color=C_BLUE)
+    HL(c, x0+P, cur_y, x0+bw-P, lw=0.5, color=C_LINE)
     cur_y -= S(0.5*mm)
 
-    # ── Сетка вопросов: квадраты с буквой ────────────────────────────────────
+    # ── Сетка вопросов: КРУЖКИ с буквой ──────────────────────────────────────
     n_cols = 1 if n_q <= 15 else (2 if n_q <= 40 else 3)
     n_rows = math.ceil(n_q / n_cols)
     col_w  = (bw - 2*P) / n_cols
     num_w  = S(7.5*mm)
     cell_w = min((col_w - num_w) / n_opts, S(8.5*mm))
-    sq     = min(cell_w * 0.78, S(5.5*mm))
-    fs     = max(S(4), sq * 0.52)
+    sq     = min(cell_w * 0.78, S(5.5*mm))   # диаметр кружка ответа (геом. совместимо)
+    fs     = max(S(4), sq * 0.46)
     row_h  = sq + S(2.0*mm)
-    anc    = S(4.5*mm)   # размер якорного квадрата
+    anc    = S(5.5*mm)   # размер репера — крупнее для надёжной детекции
 
     # Заголовок А Б В Г
     HDR_G = S(4.5*mm)
@@ -160,7 +149,6 @@ def draw_blank(c, x0, y0, bw, bh, cfg):
             ox = x0 + P + ci*col_w + num_w + oi*cell_w + cell_w/2
             T(c, ox, cur_y-HDR_G+S(1.5*mm), lbl, BOLD, S(6.5), C_BLUE, "center")
     cur_y -= HDR_G
-    HL(c, x0+P, cur_y, x0+bw-P, lw=0.35)
     cur_y -= S(0.2*mm)
 
     # Запоминаем Y начала сетки (верх первой строки)
@@ -172,18 +160,12 @@ def draw_blank(c, x0, y0, bw, bh, cfg):
         rx = x0 + P + ci * col_w
         ry = cur_y - ri * row_h - row_h/2
 
-        if ri % 2 == 0:
-            c.setFillColor(C_LIGHT)
-            c.rect(rx, ry-row_h/2, col_w, row_h, stroke=0, fill=1)
-        if ci > 0:
-            VL(c, rx, ry-row_h/2, ry+row_h/2)
-
         T(c, rx+num_w-S(0.8*mm), ry-S(2), f"{qi+1}.", BOLD, S(6.5), C_DARK, "right")
 
         for oi in range(n_opts):
             ox = rx + num_w + oi*cell_w + cell_w/2
-            SQ(c, ox, ry, sq)
-            T(c, ox, ry-sq*0.32, opts[oi], BOLD, fs, C_GRAY, "center")
+            CR(c, ox, ry, sq/2)
+            T(c, ox, ry-sq*0.30, opts[oi], BOLD, fs, C_GRAY, "center")
 
     grid_bottom_y = cur_y - n_rows * row_h
     cur_y = grid_bottom_y - S(0.5*mm)
@@ -200,7 +182,7 @@ def draw_blank(c, x0, y0, bw, bh, cfg):
     ANCHOR(c, ax_l, ay_b, anc)
     ANCHOR(c, ax_r, ay_b, anc)
 
-    HL(c, x0, cur_y, x0+bw, lw=0.5, color=C_BLUE)
+    HL(c, x0+P, cur_y, x0+bw-P, lw=0.4, color=C_LINE)
     cur_y -= S(2*mm)
 
     # ── Код ученика: 5 строк × кружки 0-9 ───────────────────────────────────
@@ -208,7 +190,7 @@ def draw_blank(c, x0, y0, bw, bh, cfg):
     gap_x = cr2*2 + S(0.5*mm)
     gap_y = cr2*2 + S(0.8*mm)
     nw2   = S(5*mm)
-    anc_c = S(3.5*mm)   # размер якоря для кода (чуть меньше)
+    anc_c = S(4.5*mm)   # размер якоря для кода — крупнее для детекции
 
     code_top_y = cur_y - S(1*mm)   # верх зоны кода (отступ от линии)
 

@@ -53,7 +53,7 @@ def _geometry(n_q: int, n_opts: int):
     cell_w = min((col_w - num_w) / n_opts, S(8.5 * MM))
     sq = min(cell_w * 0.78, S(5.5 * MM))
     row_h = sq + S(2.0 * MM)
-    anc = S(4.5 * MM)
+    anc = S(5.5 * MM)   # репер ответов (синхр. с generate-blank)
 
     cur_y -= HDR_G
     cur_y -= S(0.2 * MM)
@@ -138,7 +138,7 @@ def _geometry_code(n_q: int, n_opts: int):
     gap_x = cr2 * 2 + S(0.5 * MM)
     gap_y = cr2 * 2 + S(0.8 * MM)
     nw2 = S(5 * MM)
-    anc_c = S(3.5 * MM)
+    anc_c = S(4.5 * MM)   # репер кода (синхр. с generate-blank)
 
     code_top_y = cur_y - S(1 * MM)
     cur_y -= S(2.8 * MM)

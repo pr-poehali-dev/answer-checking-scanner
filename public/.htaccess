@@ -1,0 +1,13 @@
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # Не трогаем реально существующие файлы и папки (css, js, картинки и т.д.)
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+
+  # Все остальные маршруты (включая /yadisk-callback) отдаём на index.html —
+  # роутингом дальше занимается React (SPA fallback).
+  RewriteRule ^ index.html [L]
+</IfModule>

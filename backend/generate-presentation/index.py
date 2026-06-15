@@ -227,6 +227,7 @@ def pick_theme(topic: str) -> dict:
 import colorsys
 
 _CUSTOM_LAYOUTS = ["left_header", "split_diagonal", "top_banner", "sidebar_dark"]
+_CUSTOM_GRAPHICS = ["blobs", "corners", "diagonal", "dots", "arcs", "grid"]
 
 
 def _hsl(h: float, s: float, l: float) -> "RGBColor":
@@ -243,7 +244,10 @@ def make_custom_theme(seed_text: str = "") -> dict:
     """
     rnd = random.Random((seed_text + str(random.random())).encode("utf-8"))
 
-    base_h = rnd.random()                       # основной тон
+    # Базовый тон «под тему»: завязан на текст темы, но с лёгкой вариацией —
+    # биология тяготеет к зелёному, история к тёплому и т.д., но не одинаково.
+    topic_hash = sum(ord(c) for c in seed_text) if seed_text else rnd.randint(0, 360)
+    base_h = ((topic_hash % 360) / 360.0 + rnd.uniform(-0.06, 0.06)) % 1.0
     acc2_h = (base_h + rnd.choice([0.5, 0.45, 0.55, 0.33, 0.66])) % 1.0  # доп. акцент
     acc3_h = (base_h + rnd.choice([0.08, -0.08, 0.12])) % 1.0
 
@@ -271,6 +275,7 @@ def make_custom_theme(seed_text: str = "") -> dict:
         "card_bg":   card_bg,
         "label":     "ИНДИВИДУАЛЬНЫЙ ДИЗАЙН",
         "layout":    rnd.choice(_CUSTOM_LAYOUTS),
+        "graphic":   rnd.choice(_CUSTOM_GRAPHICS),
     }
 
 
@@ -280,7 +285,8 @@ _THEME_COLOR_KEYS = ["bg", "title_bg", "accent", "accent2", "accent3",
 
 def theme_to_payload(theme: dict) -> dict:
     """Сериализует тему в JSON (цвета → hex-строки) для передачи outline→build."""
-    out = {"name": theme["name"], "label": theme["label"], "layout": theme["layout"]}
+    out = {"name": theme["name"], "label": theme["label"], "layout": theme["layout"],
+           "graphic": theme.get("graphic", "")}
     for k in _THEME_COLOR_KEYS:
         # RGBColor — подкласс str, str(color) даёт 6-символьный hex (напр. '1A2B3C')
         out[k] = str(theme[k])
@@ -291,7 +297,8 @@ def theme_from_payload(payload: dict) -> dict:
     """Восстанавливает тему из JSON-payload (hex-строки → RGBColor)."""
     theme = {"name": payload.get("name", "custom"),
              "label": payload.get("label", "ИНДИВИДУАЛЬНЫЙ ДИЗАЙН"),
-             "layout": payload.get("layout", "top_banner")}
+             "layout": payload.get("layout", "top_banner"),
+             "graphic": payload.get("graphic", "")}
     for k in _THEME_COLOR_KEYS:
         hexv = str(payload.get(k, "FFFFFF")).lstrip("#") or "FFFFFF"
         theme[k] = RGBColor.from_string(hexv)
@@ -642,6 +649,68 @@ def _add_rect(slide, x, y, w, h, rgb: RGBColor):
     return shape
 
 
+def _add_oval(slide, x, y, w, h, rgb: RGBColor):
+    shape = slide.shapes.add_shape(MSO_SHAPE.OVAL, x, y, w, h)
+    _set_solid_fill(shape, rgb)
+    return shape
+
+
+def _mix(a: RGBColor, b: RGBColor, t: float) -> RGBColor:
+    """Смешивает два цвета: t=0 → a, t=1 → b."""
+    t = max(0.0, min(1.0, t))
+    ar, ag, ab = a[0], a[1], a[2]
+    br, bg, bb = b[0], b[1], b[2]
+    return RGBColor(int(ar + (br - ar) * t),
+                    int(ag + (bg - ag) * t),
+                    int(ab + (bb - ab) * t))
+
+
+def _decorate(slide, theme: dict, on_dark: bool):
+    """
+    Современные графические акценты под индивидуальный дизайн. Рисуются поверх
+    фона, но под основным контентом. Стиль берётся из theme['graphic'].
+    on_dark — фон тёмный (титул) или светлый (контент): подбираем мягкие оттенки.
+    """
+    kind = theme.get("graphic")
+    if not kind:
+        return
+    base = theme["title_bg"] if on_dark else theme["bg"]
+    a2 = theme["accent2"]
+    a3 = theme.get("accent3", a2)
+    # Мягкие версии акцентов «растворяем» в фоне — деликатная графика
+    soft2 = _mix(a2, base, 0.78 if not on_dark else 0.55)
+    soft3 = _mix(a3, base, 0.82 if not on_dark else 0.6)
+    glow = _mix(a2, base, 0.5)
+
+    if kind == "blobs":
+        _add_oval(slide, SLIDE_W - Inches(3.2), -Inches(2.0), Inches(5.0), Inches(5.0), soft2)
+        _add_oval(slide, -Inches(1.6), SLIDE_H - Inches(2.4), Inches(4.2), Inches(4.2), soft3)
+    elif kind == "corners":
+        _add_oval(slide, SLIDE_W - Inches(2.0), -Inches(2.0), Inches(4.0), Inches(4.0), soft2)
+        _add_rect(slide, -Inches(1.2), SLIDE_H - Inches(1.2), Inches(3.0), Inches(3.0), soft3)
+    elif kind == "diagonal":
+        band = slide.shapes.add_shape(MSO_SHAPE.PARALLELOGRAM,
+                                      SLIDE_W - Inches(5.0), -Inches(1.0),
+                                      Inches(7.0), SLIDE_H + Inches(2.0))
+        _set_solid_fill(band, soft2)
+        band.rotation = 12
+    elif kind == "dots":
+        r = Inches(0.16)
+        for gx in range(6):
+            for gy in range(4):
+                _add_oval(slide,
+                          SLIDE_W - Inches(2.6) + Inches(0.42) * gx,
+                          Inches(0.5) + Inches(0.42) * gy,
+                          r, r, glow if (gx + gy) % 3 == 0 else soft2)
+    elif kind == "arcs":
+        _add_oval(slide, SLIDE_W - Inches(2.4), Inches(1.2), Inches(4.5), Inches(4.5), soft2)
+        _add_oval(slide, SLIDE_W - Inches(1.4), Inches(2.2), Inches(2.5), Inches(2.5), base)
+    elif kind == "grid":
+        for i in range(5):
+            _add_rect(slide, SLIDE_W - Inches(2.8) + Inches(0.55) * i,
+                      Inches(0.4), Inches(0.06), SLIDE_H - Inches(0.8), soft2)
+
+
 def _add_text(slide, x, y, w, h, text: str, *, size: int = 18, bold: bool = False,
               color: RGBColor = None, align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP,
               font: str = "Calibri", italic: bool = False):
@@ -849,6 +918,7 @@ def build_pptx(topic: str, subtitle: str, contents: list, slides_data: list,
     # ── 1. Титульный слайд ────────────────────────────────────────────────
     slide = prs.slides.add_slide(blank)
     _add_rect(slide, 0, 0, SLIDE_W, SLIDE_H, theme["title_bg"])
+    _decorate(slide, theme, on_dark=True)
 
     if layout == "sidebar_dark":
         # Вертикальный акцент справа
@@ -971,6 +1041,7 @@ def build_pptx(topic: str, subtitle: str, contents: list, slides_data: list,
     for idx, s in enumerate(slides_data, start=1):
         slide = prs.slides.add_slide(blank)
         _add_rect(slide, 0, 0, SLIDE_W, SLIDE_H, theme["bg"])
+        _decorate(slide, theme, on_dark=False)
         _slide_header(slide, s["title"], idx, total_content, teacher_name, theme)
 
         slide_imgs = images.get(idx) or []  # list[bytes], до 3 штук

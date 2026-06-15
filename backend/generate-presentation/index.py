@@ -667,21 +667,17 @@ def _mix(a: RGBColor, b: RGBColor, t: float) -> RGBColor:
 # Палитра примитивов, из которых процедурно собирается уникальная композиция.
 # Загружаем защищённо через getattr — состав enum может отличаться по версиям
 # python-pptx, поэтому берём только реально доступные фигуры.
+# Только простые геометрии, которые надёжно сериализуются во всех версиях
+# python-pptx (без preset-guides, требующих доп. параметров).
 _DECOR_PRIM_NAMES = {
     "oval":          "OVAL",
     "rect":          "RECTANGLE",
     "round_rect":    "ROUNDED_RECTANGLE",
     "parallelogram": "PARALLELOGRAM",
-    "chevron":       "CHEVRON",
-    "donut":         "DONUT",
     "diamond":       "DIAMOND",
-    "pie":           "PIE",
-    "arc":           "BLOCK_ARC",
     "hexagon":       "HEXAGON",
-    "pentagon":      "REGULAR_PENTAGON",
     "trapezoid":     "TRAPEZOID",
-    "heptagon":      "HEPTAGON",
-    "octagon":       "OCTAGON",
+    "pentagon":      "REGULAR_PENTAGON",
 }
 _DECOR_PRIMS = {}
 for _k, _name in _DECOR_PRIM_NAMES.items():
@@ -767,13 +763,16 @@ def _decorate(slide, theme: dict, on_dark: bool):
             continue
 
     if recipe.get("line"):
-        col = _mix(theme["accent2"], base, 0.4 if on_dark else 0.5)
-        ln = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE,
-                                    int(SLIDE_W * 0.62), int(SLIDE_H * 0.1),
-                                    Emu(12000), int(SLIDE_H * 0.8))
-        _set_solid_fill(ln, col)
-        if recipe.get("line_rot"):
-            ln.rotation = recipe["line_rot"]
+        try:
+            col = _mix(theme["accent2"], base, 0.4 if on_dark else 0.5)
+            ln = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE,
+                                        int(SLIDE_W * 0.62), int(SLIDE_H * 0.1),
+                                        Emu(12000), int(SLIDE_H * 0.8))
+            _set_solid_fill(ln, col)
+            if recipe.get("line_rot"):
+                ln.rotation = recipe["line_rot"]
+        except Exception:
+            pass
 
 
 def _add_text(slide, x, y, w, h, text: str, *, size: int = 18, bold: bool = False,

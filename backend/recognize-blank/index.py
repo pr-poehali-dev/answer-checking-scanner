@@ -3,7 +3,7 @@
 POST / — { image: base64, questionsCount?: 20, optionsCount?: 4, answerKey?: "АБВГ..." }
 -> { studentCode, answers[], confidence[], analysis }
 """
-# v48: new light blank (circles, no frames) — bigger anchors 5.5/4.5mm, margin selection
+# v49: Y-paired right anchors (reject code-zone anchors) + wider answer/code gap
 import json, base64, math
 import numpy as np
 import cv2
@@ -151,15 +151,22 @@ def _select_corner_anchors(cands, img_w, img_h, x_off=0, y_off=0,
     if len(left) < 2 or len(right) < 2:
         return None
 
-    # В каждой колонке: верхний (мин Y) и нижний (макс Y).
+    # Левая колонка задаёт верх/низ рамки: самый верхний и самый нижний слева.
     lt, lb = left[0], left[-1]
-    rt, rb = right[0], right[-1]
-
-    # Высота рамки достаточная?
-    gh = max(abs(lb[1] - lt[1]), abs(rb[1] - rt[1]))
-    if gh < img_h * min_h_frac:
+    gh_left = lb[1] - lt[1]
+    if gh_left < img_h * min_h_frac:
         return None
-    # Верх должен быть заметно выше низа (защита от вырожденного случая).
+
+    # В ПРАВОЙ колонке берём реперы, ПАРНЫЕ по Y к левым (а не самые крайние) —
+    # иначе захватываются реперы соседней зоны (кода), стоящие в том же поле.
+    ytol = max(gh_left * 0.14, 12)
+    rt = min(right, key=lambda c: abs(c[1] - lt[1]))
+    rb = min(right, key=lambda c: abs(c[1] - lb[1]))
+    if abs(rt[1] - lt[1]) > ytol or abs(rb[1] - lb[1]) > ytol:
+        return None
+    if rt is rb:
+        return None
+    # Верх должен быть заметно выше низа.
     if (lt[1] >= lb[1] - 5) or (rt[1] >= rb[1] - 5):
         return None
     return lt, rt, lb, rb

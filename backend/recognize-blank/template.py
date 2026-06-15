@@ -130,8 +130,9 @@ def _geometry_code(n_q: int, n_opts: int):
     cur_y = bh - HDR - META - INST - S(0.5 * MM) - HDR_G - S(0.2 * MM)
     grid_bottom_y = cur_y - n_rows * row_h
     cur_y = grid_bottom_y - S(0.5 * MM)
-    # HL линия после сетки
-    cur_y -= S(2 * MM)
+    # Зазор + HL линия после сетки (синхр. с generate-blank)
+    cur_y -= S(6 * MM)
+    cur_y -= S(3 * MM)
 
     # Зона кода
     cr2 = S(1.5 * MM)

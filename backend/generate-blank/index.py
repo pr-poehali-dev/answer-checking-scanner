@@ -182,8 +182,9 @@ def draw_blank(c, x0, y0, bw, bh, cfg):
     ANCHOR(c, ax_l, ay_b, anc)
     ANCHOR(c, ax_r, ay_b, anc)
 
+    cur_y -= S(6*mm)   # увеличенный зазор: реперы зоны кода не сливаются с ответами
     HL(c, x0+P, cur_y, x0+bw-P, lw=0.4, color=C_LINE)
-    cur_y -= S(2*mm)
+    cur_y -= S(3*mm)
 
     # ── Код ученика: 5 строк × кружки 0-9 ───────────────────────────────────
     cr2   = S(1.5*mm)

@@ -46,26 +46,39 @@ function BlankPreview({ config }: { config: BlankConfig }) {
   const CODE_H    = CODE_HDR + CODE_ROWS * CGAP_Y + 4;
 
   const FOOT_H = 16;
+  const CODE_GAP = 14;   // увеличенный зазор между ответами и кодом (как в PDF)
   const svgW   = PAD * 2 + COL_W * nCols;
-  const svgH   = HDR_H + META_H + HDR_G + nRows * ROW_H + CODE_H + FOOT_H + 6;
+  const svgH   = HDR_H + META_H + HDR_G + nRows * ROW_H + CODE_GAP + CODE_H + FOOT_H + 6;
 
   const gridTop = HDR_H + META_H + HDR_G;
-  const codeTop = gridTop + nRows * ROW_H + 4;
+  const gridBottom = gridTop + nRows * ROW_H;
+  const codeTop = gridBottom + CODE_GAP;
+
+  // Реперы (чёрные квадраты) — как на печатном бланке
+  const AS = 6;          // размер репера ответов
+  const ACS = 5;         // размер репера кода
+  const axL = PAD * 0.5;
+  const axR = svgW - PAD * 0.5;
+  const ayT = gridTop + 1;
+  const ayB = gridBottom - 1;
+
+  const Anchor = ({ x, y, s }: { x: number; y: number; s: number }) => (
+    <rect x={x - s / 2} y={y - s / 2} width={s} height={s} fill="#111" />
+  );
 
   return (
     <svg viewBox={`0 0 ${svgW} ${svgH}`}
-      className="w-full border border-gray-300 rounded bg-white shadow"
+      className="w-full border border-gray-200 rounded bg-white shadow-sm"
       style={{ fontFamily: "Arial, sans-serif" }}
     >
-      <rect x={0} y={0} width={svgW} height={svgH} fill="white" stroke="#1e3a5f" strokeWidth={0.8} />
+      <rect x={0} y={0} width={svgW} height={svgH} fill="white" />
 
-      {/* Шапка */}
-      <rect x={0} y={0} width={svgW} height={HDR_H} fill="#1a1a2e" />
-      <text x={svgW/2} y={HDR_H*0.62} textAnchor="middle" fill="white" fontSize={9} fontWeight="bold">БЛАНК ОТВЕТОВ</text>
-      <text x={svgW - PAD} y={HDR_H*0.62} textAnchor="end" fill="#8898aa" fontSize={6.5}>№ {config.workId}</text>
+      {/* Шапка — только текст, без тёмной плашки */}
+      <text x={svgW/2} y={HDR_H*0.6} textAnchor="middle" fill="#1e3a5f" fontSize={9} fontWeight="bold">БЛАНК ОТВЕТОВ</text>
+      <text x={svgW - PAD} y={HDR_H*0.6} textAnchor="end" fill="#8898aa" fontSize={6.5}>№ {config.workId}</text>
+      <line x1={PAD} y1={HDR_H-2} x2={svgW-PAD} y2={HDR_H-2} stroke="#c8d6e5" strokeWidth={0.5}/>
 
-      {/* Поля ученика */}
-      <rect x={0} y={HDR_H} width={svgW} height={META_H} fill="#f0f4f8" />
+      {/* Поля ученика — только линии */}
       <text x={PAD} y={HDR_H + 13} fill="#1a1a2e" fontSize={7} fontWeight="bold">ФИО:</text>
       <line x1={PAD+22} y1={HDR_H+13} x2={svgW*0.61} y2={HDR_H+13} stroke="#c8d6e5" strokeWidth={0.6}/>
       <text x={svgW*0.63} y={HDR_H+13} fill="#1a1a2e" fontSize={7} fontWeight="bold">Класс:</text>
@@ -74,7 +87,7 @@ function BlankPreview({ config }: { config: BlankConfig }) {
       <line x1={PAD+40} y1={HDR_H+26} x2={svgW*0.52} y2={HDR_H+26} stroke="#c8d6e5" strokeWidth={0.6}/>
       <text x={svgW*0.54} y={HDR_H+26} fill="#1a1a2e" fontSize={7} fontWeight="bold">Дата:</text>
       <line x1={svgW*0.54+24} y1={HDR_H+26} x2={svgW-PAD} y2={HDR_H+26} stroke="#c8d6e5" strokeWidth={0.6}/>
-      <line x1={0} y1={HDR_H+META_H} x2={svgW} y2={HDR_H+META_H} stroke="#1e3a5f" strokeWidth={0.5}/>
+      <line x1={PAD} y1={HDR_H+META_H} x2={svgW-PAD} y2={HDR_H+META_H} stroke="#c8d6e5" strokeWidth={0.5}/>
 
       {/* Заголовки А Б В Г */}
       {Array.from({length: nCols}).map((_, ci) =>
@@ -86,19 +99,16 @@ function BlankPreview({ config }: { config: BlankConfig }) {
           >{lbl}</text>
         ))
       )}
-      <line x1={PAD} y1={gridTop} x2={svgW-PAD} y2={gridTop} stroke="#c8d6e5" strokeWidth={0.4}/>
 
-      {/* Вопросы — вертикальный порядок: 1-й столбец сверху вниз, затем 2-й */}
+      {/* Вопросы — кружки, без зебры и вертикальных линий */}
       {Array.from({length: questionsCount}).map((_, qi) => {
-        const ci = Math.floor(qi / nRows);   // столбец
-        const ri = qi % nRows;               // строка внутри столбца
+        const ci = Math.floor(qi / nRows);
+        const ri = qi % nRows;
         const rx = PAD + ci * COL_W;
         const ry = gridTop + ri * ROW_H;
         const my = ry + ROW_H / 2;
         return (
           <g key={qi}>
-            {ri % 2 === 0 && <rect x={rx} y={ry} width={COL_W} height={ROW_H} fill="#f0f4f8"/>}
-            {ci > 0 && <line x1={rx} y1={ry} x2={rx} y2={ry+ROW_H} stroke="#c8d6e5" strokeWidth={0.3}/>}
             <text x={rx+NUM_W-2} y={my+2.5} textAnchor="end" fill="#1a1a2e" fontSize={7} fontWeight="bold">{qi+1}.</text>
             {opts.map((lbl, oi) => {
               const cx = rx + NUM_W + oi*CELL_W + CELL_W/2;
@@ -113,12 +123,13 @@ function BlankPreview({ config }: { config: BlankConfig }) {
         );
       })}
 
-      {/* Разделитель */}
-      <line x1={0} y1={codeTop-2} x2={svgW} y2={codeTop-2} stroke="#1e3a5f" strokeWidth={0.5}/>
+      {/* Реперы зоны ответов */}
+      <Anchor x={axL} y={ayT} s={AS}/>
+      <Anchor x={axR} y={ayT} s={AS}/>
+      <Anchor x={axL} y={ayB} s={AS}/>
+      <Anchor x={axR} y={ayB} s={AS}/>
 
-      {/* КОД УЧЕНИКА: заголовок + 0-9 + 5 строк кружков */}
-      <text x={PAD} y={codeTop+10} fill="#1a1a2e" fontSize={6.5} fontWeight="bold">КОД УЧЕНИКА</text>
-      {/* Заголовок цифр 0-9 */}
+      {/* КОД УЧЕНИКА */}
       {Array.from({length: CODE_COLS}).map((_, col) => (
         <text key={`cd${col}`}
           x={PAD + NUM_W2 + col*CGAP_X + CR2}
@@ -126,7 +137,6 @@ function BlankPreview({ config }: { config: BlankConfig }) {
           textAnchor="middle" fill="#1e3a5f" fontSize={5.5} fontWeight="bold"
         >{col}</text>
       ))}
-      {/* Кружки: 5 строк × 10 цифр */}
       {Array.from({length: CODE_ROWS}).map((_, row) =>
         Array.from({length: CODE_COLS}).map((_, col) => {
           const cx = PAD + NUM_W2 + col*CGAP_X + CR2;
@@ -139,10 +149,16 @@ function BlankPreview({ config }: { config: BlankConfig }) {
           );
         })
       )}
+      <text x={PAD} y={codeTop+CODE_HDR+CODE_ROWS*CGAP_Y+12} fill="#1a1a2e" fontSize={6.5} fontWeight="bold">КОД УЧЕНИКА</text>
+
+      {/* Реперы зоны кода */}
+      <Anchor x={axL} y={codeTop + CODE_HDR - 4} s={ACS}/>
+      <Anchor x={axR} y={codeTop + CODE_HDR - 4} s={ACS}/>
+      <Anchor x={axL} y={codeTop + CODE_HDR + CODE_ROWS*CGAP_Y + 2} s={ACS}/>
+      <Anchor x={axR} y={codeTop + CODE_HDR + CODE_ROWS*CGAP_Y + 2} s={ACS}/>
 
       {/* Нижняя строка */}
-      <line x1={0} y1={codeTop+CODE_H} x2={svgW} y2={codeTop+CODE_H} stroke="#c8d6e5" strokeWidth={0.3}/>
-      <text x={PAD} y={codeTop+CODE_H+11} fill="#8898aa" fontSize={5.5}>
+      <text x={PAD} y={svgH-4} fill="#8898aa" fontSize={5.5}>
         Вопросов: {questionsCount}  |  Варианты: {opts.join(", ")}  |  Заполнять чёрной ручкой
       </text>
     </svg>

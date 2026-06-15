@@ -282,8 +282,8 @@ def theme_to_payload(theme: dict) -> dict:
     """Сериализует тему в JSON (цвета → hex-строки) для передачи outline→build."""
     out = {"name": theme["name"], "label": theme["label"], "layout": theme["layout"]}
     for k in _THEME_COLOR_KEYS:
-        c = theme[k]
-        out[k] = "%02X%02X%02X" % (c[0], c[1], c[2])
+        # RGBColor — подкласс str, str(color) даёт 6-символьный hex (напр. '1A2B3C')
+        out[k] = str(theme[k])
     return out
 
 
@@ -293,8 +293,8 @@ def theme_from_payload(payload: dict) -> dict:
              "label": payload.get("label", "ИНДИВИДУАЛЬНЫЙ ДИЗАЙН"),
              "layout": payload.get("layout", "top_banner")}
     for k in _THEME_COLOR_KEYS:
-        hexv = payload.get(k, "FFFFFF")
-        theme[k] = RGBColor(int(hexv[0:2], 16), int(hexv[2:4], 16), int(hexv[4:6], 16))
+        hexv = str(payload.get(k, "FFFFFF")).lstrip("#") or "FFFFFF"
+        theme[k] = RGBColor.from_string(hexv)
     return theme
 
 

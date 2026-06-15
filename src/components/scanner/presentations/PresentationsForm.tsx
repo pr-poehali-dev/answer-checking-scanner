@@ -65,6 +65,10 @@ export function PresentationsForm() {
   const [progress, setProgress]       = useState(0);
   const [error, setError]             = useState<string | null>(null);
   const [success, setSuccess]         = useState<string | null>(null);
+  const [redesigning, setRedesigning] = useState(false);
+  const [lastDesign, setLastDesign]   = useState<
+    { topic: string; rawOutline: object; variant: number; teacherName: string; teacherSchool: string } | null
+  >(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Прогреваем GigaChat-токен при открытии вкладки — экономим 15-20 сек на генерации
@@ -138,6 +142,16 @@ export function PresentationsForm() {
       appStore.addPresentation(item);
       downloadBase64(result.pptx_b64, result.filename);
 
+      // Сохраняем структуру для быстрой пересборки дизайна (только индивидуальный)
+      if (customDesign && result.rawOutline) {
+        setLastDesign({
+          topic: topic.trim(), rawOutline: result.rawOutline, variant: 1,
+          teacherName: teacher.name, teacherSchool: teacher.school,
+        });
+      } else {
+        setLastDesign(null);
+      }
+
       const spentStr = (result.spent_rub ?? 0) > 0 ? ` · Списано: ${result.spent_rub!.toFixed(2)} ₽` : '';
       setSuccess(uploadedToYadisk
         ? `Готово! Презентация сохранена на Я.Диск и скачана.${spentStr}`
@@ -151,6 +165,50 @@ export function PresentationsForm() {
     } finally {
       setBusy(false);
       setStage("");
+    }
+  };
+
+  const regenerateDesign = async () => {
+    if (!lastDesign || !teacher) return;
+    setError(null);
+    setSuccess(null);
+    setRedesigning(true);
+    try {
+      const result = await presentationApi.redesign({
+        topic: lastDesign.topic,
+        teacherName: lastDesign.teacherName,
+        teacherSchool: lastDesign.teacherSchool,
+        rawOutline: lastDesign.rawOutline,
+        designVariant: lastDesign.variant,
+      });
+
+      let yadiskPath: string | null = null;
+      let uploadedToYadisk = false;
+      if (yadiskConnected && teacher.yadiskToken) {
+        try {
+          await yadisk.ensureFolder(teacher.yadiskToken, PRESENTATIONS_FOLDER);
+          const date = new Date().toISOString().slice(0, 10);
+          yadiskPath = `${PRESENTATIONS_FOLDER}/${date} ${result.filename}`;
+          await yadisk.uploadBinary(teacher.yadiskToken, yadiskPath, result.pptx_b64, true);
+          uploadedToYadisk = true;
+        } catch (e) {
+          console.error("Yadisk upload failed", e);
+        }
+      }
+
+      appStore.addPresentation({
+        id: String(Date.now()), topic: lastDesign.topic, description: "",
+        audience, slidesCount, filename: result.filename, size: result.size,
+        yadiskPath, uploadedToYadisk, createdAt: new Date().toISOString(),
+        outline: result.outline,
+      });
+      downloadBase64(result.pptx_b64, result.filename);
+      setLastDesign({ ...lastDesign, variant: lastDesign.variant + 1 });
+      setSuccess("Готов новый вариант дизайна — файл скачан.");
+    } catch (e) {
+      setError((e as Error).message || "Не удалось обновить дизайн");
+    } finally {
+      setRedesigning(false);
     }
   };
 
@@ -385,6 +443,25 @@ export function PresentationsForm() {
           <Icon name={busy ? "Loader2" : "Wand2"} size={16} className={busy ? "animate-spin" : ""} fallback="Sparkles" />
           {busy ? "Генерация идёт…" : "Создать презентацию"}
         </button>
+
+        {/* Сгенерировать заново дизайн (только после индивидуального дизайна) */}
+        {lastDesign && !busy && (
+          <button
+            onClick={regenerateDesign}
+            disabled={redesigning}
+            className="w-full inline-flex items-center justify-center gap-2.5 px-4 py-3 text-sm font-bold rounded-xl border-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{ borderColor: "#7C3AED", color: "#6D28D9", background: "white" }}
+          >
+            <Icon name={redesigning ? "Loader2" : "RefreshCw"} size={16}
+              className={redesigning ? "animate-spin" : ""} fallback="Sparkles" />
+            {redesigning ? "Создаём новый дизайн…" : "Сгенерировать заново дизайн"}
+          </button>
+        )}
+        {lastDesign && !busy && (
+          <p className="text-[10px] text-muted-foreground text-center -mt-3">
+            Тот же материал — новое уникальное оформление. Без повторного списания.
+          </p>
+        )}
       </div>
     </div>
   );

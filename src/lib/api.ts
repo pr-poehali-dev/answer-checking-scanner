@@ -495,6 +495,8 @@ export interface PresentationResponse {
   outline: PresentationOutline;
   spent_rub?: number;
   balance_rub?: number;
+  /** Полная структура (с фактами/запросами фото) — для повторной сборки дизайна */
+  rawOutline?: object;
 }
 
 async function fetchWithTimeout(url: string, body: object, timeoutMs: number): Promise<Response> {
@@ -590,6 +592,7 @@ export const presentationApi = {
       const pptxResult = d2 as PresentationResponse;
       pptxResult.spent_rub = outlineData.spent_rub;
       pptxResult.balance_rub = outlineData.balance_rub;
+      pptxResult.rawOutline = outlineData.outline;
       return pptxResult;
     } catch (e) {
       const err = e as Error;
@@ -598,6 +601,36 @@ export const presentationApi = {
       }
       throw err;
     }
+  },
+
+  /**
+   * Пересобирает презентацию с НОВЫМ индивидуальным дизайном, используя уже
+   * готовую структуру (без повторного обращения к ИИ — быстро и без списания токенов).
+   */
+  redesign: async (params: {
+    topic: string;
+    teacherName: string;
+    teacherSchool: string;
+    rawOutline: object;
+    designVariant: number;
+  }): Promise<PresentationResponse> => {
+    const res = await fetchWithTimeout(
+      `${PRESENTATION_URL}?action=build`,
+      {
+        topic: params.topic,
+        teacherName: params.teacherName,
+        teacherSchool: params.teacherSchool,
+        outline: params.rawOutline,
+        regenDesign: true,
+        designVariant: params.designVariant,
+      },
+      30_000,
+    );
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(d.error || `Ошибка обновления дизайна (${res.status})`);
+    const result = d as PresentationResponse;
+    result.rawOutline = params.rawOutline;
+    return result;
   },
 };
 

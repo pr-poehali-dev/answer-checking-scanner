@@ -227,7 +227,6 @@ def pick_theme(topic: str) -> dict:
 import colorsys
 
 _CUSTOM_LAYOUTS = ["left_header", "split_diagonal", "top_banner", "sidebar_dark"]
-_CUSTOM_GRAPHICS = ["blobs", "corners", "diagonal", "dots", "arcs", "grid"]
 
 
 def _hsl(h: float, s: float, l: float) -> "RGBColor":
@@ -236,13 +235,13 @@ def _hsl(h: float, s: float, l: float) -> "RGBColor":
     return RGBColor(int(r * 255), int(g * 255), int(b * 255))
 
 
-def make_custom_theme(seed_text: str = "") -> dict:
+def make_custom_theme(seed_text: str = "", variant: int = 0) -> dict:
     """
-    Генерирует уникальную современную дизайн-тему: глубокий тёмный заголовок,
-    яркий насыщенный акцент и гармоничный второй акцент (схема split-complementary).
-    Каждый вызов даёт стильную, но непохожую палитру.
+    Генерирует уникальную современную дизайн-тему НА ЛЕТУ: палитра, вёрстка и
+    графическая композиция собираются процедурно во время запроса (не из готовых
+    шаблонов). variant позволяет получить другой вариант для той же темы.
     """
-    rnd = random.Random((seed_text + str(random.random())).encode("utf-8"))
+    rnd = random.Random((seed_text + "|" + str(variant) + "|" + str(random.random())).encode("utf-8"))
 
     # Базовый тон «под тему»: завязан на текст темы, но с лёгкой вариацией —
     # биология тяготеет к зелёному, история к тёплому и т.д., но не одинаково.
@@ -275,7 +274,7 @@ def make_custom_theme(seed_text: str = "") -> dict:
         "card_bg":   card_bg,
         "label":     "ИНДИВИДУАЛЬНЫЙ ДИЗАЙН",
         "layout":    rnd.choice(_CUSTOM_LAYOUTS),
-        "graphic":   rnd.choice(_CUSTOM_GRAPHICS),
+        "decor":     generate_decor_recipe(rnd),
     }
 
 
@@ -286,7 +285,7 @@ _THEME_COLOR_KEYS = ["bg", "title_bg", "accent", "accent2", "accent3",
 def theme_to_payload(theme: dict) -> dict:
     """Сериализует тему в JSON (цвета → hex-строки) для передачи outline→build."""
     out = {"name": theme["name"], "label": theme["label"], "layout": theme["layout"],
-           "graphic": theme.get("graphic", "")}
+           "decor": theme.get("decor") or {}}
     for k in _THEME_COLOR_KEYS:
         # RGBColor — подкласс str, str(color) даёт 6-символьный hex (напр. '1A2B3C')
         out[k] = str(theme[k])
@@ -298,7 +297,7 @@ def theme_from_payload(payload: dict) -> dict:
     theme = {"name": payload.get("name", "custom"),
              "label": payload.get("label", "ИНДИВИДУАЛЬНЫЙ ДИЗАЙН"),
              "layout": payload.get("layout", "top_banner"),
-             "graphic": payload.get("graphic", "")}
+             "decor": payload.get("decor") or {}}
     for k in _THEME_COLOR_KEYS:
         hexv = str(payload.get(k, "FFFFFF")).lstrip("#") or "FFFFFF"
         theme[k] = RGBColor.from_string(hexv)
@@ -665,50 +664,116 @@ def _mix(a: RGBColor, b: RGBColor, t: float) -> RGBColor:
                     int(ab + (bb - ab) * t))
 
 
+# Палитра примитивов, из которых процедурно собирается уникальная композиция.
+# Загружаем защищённо через getattr — состав enum может отличаться по версиям
+# python-pptx, поэтому берём только реально доступные фигуры.
+_DECOR_PRIM_NAMES = {
+    "oval":          "OVAL",
+    "rect":          "RECTANGLE",
+    "round_rect":    "ROUNDED_RECTANGLE",
+    "parallelogram": "PARALLELOGRAM",
+    "chevron":       "CHEVRON",
+    "donut":         "DONUT",
+    "diamond":       "DIAMOND",
+    "pie":           "PIE",
+    "arc":           "BLOCK_ARC",
+    "hexagon":       "HEXAGON",
+    "pentagon":      "REGULAR_PENTAGON",
+    "trapezoid":     "TRAPEZOID",
+    "heptagon":      "HEPTAGON",
+    "octagon":       "OCTAGON",
+}
+_DECOR_PRIMS = {}
+for _k, _name in _DECOR_PRIM_NAMES.items():
+    _shape = getattr(MSO_SHAPE, _name, None)
+    if _shape is not None:
+        _DECOR_PRIMS[_k] = _shape
+# Гарантируем базовые фигуры
+if not _DECOR_PRIMS:
+    _DECOR_PRIMS = {"oval": MSO_SHAPE.OVAL, "rect": MSO_SHAPE.RECTANGLE}
+
+
+def generate_decor_recipe(rnd: "random.Random") -> dict:
+    """
+    Процедурно генерирует УНИКАЛЬНУЮ графическую композицию во время запроса.
+    Возвращает «рецепт» — список инструкций рисования в долях от размера слайда
+    (0..1), цвета как роль+степень растворения. Каждый вызов даёт новый дизайн.
+    """
+    prims = list(_DECOR_PRIMS.keys())
+    n = rnd.randint(3, 7)
+    # Композиционная «зона тяготения» — графика концентрируется в случайном углу/крае
+    anchors = ["tr", "tl", "br", "bl", "right", "left", "scatter"]
+    anchor = rnd.choice(anchors)
+    shapes = []
+    for _ in range(n):
+        prim = rnd.choice(prims)
+        size = rnd.uniform(0.08, 0.55)        # доля от меньшей стороны
+        # положение центра в зависимости от зоны тяготения
+        if anchor == "tr":   cx, cy = rnd.uniform(0.6, 1.05), rnd.uniform(-0.05, 0.45)
+        elif anchor == "tl": cx, cy = rnd.uniform(-0.05, 0.4), rnd.uniform(-0.05, 0.45)
+        elif anchor == "br": cx, cy = rnd.uniform(0.6, 1.05), rnd.uniform(0.55, 1.05)
+        elif anchor == "bl": cx, cy = rnd.uniform(-0.05, 0.4), rnd.uniform(0.55, 1.05)
+        elif anchor == "right": cx, cy = rnd.uniform(0.7, 1.1), rnd.uniform(-0.1, 1.1)
+        elif anchor == "left":  cx, cy = rnd.uniform(-0.1, 0.3), rnd.uniform(-0.1, 1.1)
+        else:                cx, cy = rnd.uniform(-0.05, 1.05), rnd.uniform(-0.05, 1.05)
+        shapes.append({
+            "p": prim,
+            "cx": round(cx, 4), "cy": round(cy, 4),
+            "w": round(size, 4),
+            "h": round(size * rnd.uniform(0.55, 1.6), 4),
+            "rot": rnd.choice([0, 0, 15, 30, 45, -20, 60, 120]),
+            "role": rnd.choice(["a2", "a2", "a3", "glow"]),
+            "fade": round(rnd.uniform(0.5, 0.9), 3),  # насколько растворить в фоне
+        })
+    # Иногда добавляем тонкий «контур»-линию для современного штриха
+    line = rnd.random() < 0.5
+    return {"shapes": shapes, "anchor": anchor, "line": line,
+            "line_rot": rnd.choice([0, 12, -12, 90])}
+
+
 def _decorate(slide, theme: dict, on_dark: bool):
     """
-    Современные графические акценты под индивидуальный дизайн. Рисуются поверх
-    фона, но под основным контентом. Стиль берётся из theme['graphic'].
-    on_dark — фон тёмный (титул) или светлый (контент): подбираем мягкие оттенки.
+    Рисует процедурно сгенерированную композицию из theme['decor'] (рецепт).
+    on_dark — тёмный фон (титул) или светлый (контент): подбираем мягкость.
     """
-    kind = theme.get("graphic")
-    if not kind:
+    recipe = theme.get("decor")
+    if not recipe or not recipe.get("shapes"):
         return
     base = theme["title_bg"] if on_dark else theme["bg"]
-    a2 = theme["accent2"]
-    a3 = theme.get("accent3", a2)
-    # Мягкие версии акцентов «растворяем» в фоне — деликатная графика
-    soft2 = _mix(a2, base, 0.78 if not on_dark else 0.55)
-    soft3 = _mix(a3, base, 0.82 if not on_dark else 0.6)
-    glow = _mix(a2, base, 0.5)
+    roles = {
+        "a2":   theme["accent2"],
+        "a3":   theme.get("accent3", theme["accent2"]),
+        "glow": theme.get("stripe", theme["accent2"]),
+    }
+    side = min(int(SLIDE_W), int(SLIDE_H))
 
-    if kind == "blobs":
-        _add_oval(slide, SLIDE_W - Inches(3.2), -Inches(2.0), Inches(5.0), Inches(5.0), soft2)
-        _add_oval(slide, -Inches(1.6), SLIDE_H - Inches(2.4), Inches(4.2), Inches(4.2), soft3)
-    elif kind == "corners":
-        _add_oval(slide, SLIDE_W - Inches(2.0), -Inches(2.0), Inches(4.0), Inches(4.0), soft2)
-        _add_rect(slide, -Inches(1.2), SLIDE_H - Inches(1.2), Inches(3.0), Inches(3.0), soft3)
-    elif kind == "diagonal":
-        band = slide.shapes.add_shape(MSO_SHAPE.PARALLELOGRAM,
-                                      SLIDE_W - Inches(5.0), -Inches(1.0),
-                                      Inches(7.0), SLIDE_H + Inches(2.0))
-        _set_solid_fill(band, soft2)
-        band.rotation = 12
-    elif kind == "dots":
-        r = Inches(0.16)
-        for gx in range(6):
-            for gy in range(4):
-                _add_oval(slide,
-                          SLIDE_W - Inches(2.6) + Inches(0.42) * gx,
-                          Inches(0.5) + Inches(0.42) * gy,
-                          r, r, glow if (gx + gy) % 3 == 0 else soft2)
-    elif kind == "arcs":
-        _add_oval(slide, SLIDE_W - Inches(2.4), Inches(1.2), Inches(4.5), Inches(4.5), soft2)
-        _add_oval(slide, SLIDE_W - Inches(1.4), Inches(2.2), Inches(2.5), Inches(2.5), base)
-    elif kind == "grid":
-        for i in range(5):
-            _add_rect(slide, SLIDE_W - Inches(2.8) + Inches(0.55) * i,
-                      Inches(0.4), Inches(0.06), SLIDE_H - Inches(0.8), soft2)
+    for sp in recipe["shapes"]:
+        prim = _DECOR_PRIMS.get(sp.get("p"), MSO_SHAPE.OVAL)
+        w = int(sp["w"] * side)
+        h = int(sp["h"] * side)
+        x = int(sp["cx"] * int(SLIDE_W) - w / 2)
+        y = int(sp["cy"] * int(SLIDE_H) - h / 2)
+        col = roles.get(sp.get("role"), theme["accent2"])
+        # На светлом фоне растворяем сильнее, чтобы графика не перебивала текст
+        fade = sp.get("fade", 0.7)
+        fade = min(0.92, fade + (0.12 if not on_dark else 0.0))
+        soft = _mix(col, base, fade)
+        try:
+            shape = slide.shapes.add_shape(prim, x, y, max(w, 1), max(h, 1))
+            _set_solid_fill(shape, soft)
+            if sp.get("rot"):
+                shape.rotation = sp["rot"]
+        except Exception:
+            continue
+
+    if recipe.get("line"):
+        col = _mix(theme["accent2"], base, 0.4 if on_dark else 0.5)
+        ln = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE,
+                                    int(SLIDE_W * 0.62), int(SLIDE_H * 0.1),
+                                    Emu(12000), int(SLIDE_H * 0.8))
+        _set_solid_fill(ln, col)
+        if recipe.get("line_rot"):
+            ln.rotation = recipe["line_rot"]
 
 
 def _add_text(slide, x, y, w, h, text: str, *, size: int = 18, bold: bool = False,
@@ -1312,6 +1377,10 @@ def handler(event: dict, context) -> dict:
         description = (body.get("description") or "").strip()
         audience = (body.get("audience") or "").strip()
         custom_design = bool(body.get("customDesign"))
+        try:
+            design_variant = int(body.get("designVariant") or 0)
+        except (TypeError, ValueError):
+            design_variant = 0
 
         try:
             slides_count = int(body.get("slidesCount") or 8)
@@ -1354,7 +1423,7 @@ def handler(event: dict, context) -> dict:
 
         _, _, spent_rub, balance_rub = spend_ai_tokens(login, max(tokens_used, 1))
 
-        theme = make_custom_theme(topic) if custom_design else pick_theme(topic)
+        theme = make_custom_theme(topic, design_variant) if custom_design else pick_theme(topic)
         return _resp(200, {
             "outline": outline,
             "theme_name": theme["name"],
@@ -1372,12 +1441,20 @@ def handler(event: dict, context) -> dict:
         outline = body.get("outline")
         theme_name = (body.get("theme_name") or "").strip()
         theme_payload = body.get("theme_payload")
+        regen_design = bool(body.get("regenDesign"))
+        try:
+            design_variant = int(body.get("designVariant") or 0)
+        except (TypeError, ValueError):
+            design_variant = 0
 
         if not topic or not outline:
             return _resp(400, {"error": "Укажите topic и outline"})
 
-        # Восстанавливаем тему: индивидуальная палитра → из payload, иначе по имени
-        if theme_payload:
+        # Восстанавливаем тему: при «обновить дизайн» генерируем новый индивидуальный
+        # на лету, иначе из payload, иначе по имени.
+        if regen_design:
+            theme = make_custom_theme(topic, design_variant)
+        elif theme_payload:
             theme = theme_from_payload(theme_payload)
         else:
             theme = next((t for t in THEMES if t["name"] == theme_name), None) or pick_theme(topic)

@@ -7,7 +7,7 @@ const PRESENTATION_URL = "https://functions.poehali.dev/9aa03e93-715c-41fd-91f4-
 const TEST_URL = "https://functions.poehali.dev/80f9c6ec-e492-47b6-881a-633a41d7e4f4";
 const SUBSCRIPTION_URL = "https://functions.poehali.dev/0dc83bdb-3da2-4cb9-b9d9-f0b48cfb25da";
 
-export type UserRole = "admin" | "teacher" | "tester";
+export type UserRole = "admin" | "teacher" | "tester" | "student";
 export type SubscriptionStatus = "none" | "active" | "expired" | "trial";
 
 export interface SubscriptionInfo {
@@ -73,10 +73,20 @@ export const authApi = {
       body: JSON.stringify({ login, password }),
     }),
 
-  signup: (payload: { first_name: string; last_name: string; email: string; password: string; school?: string }) =>
+  signup: (payload: { first_name: string; last_name: string; email: string; password: string; school?: string; role?: "teacher" | "student"; study_group?: string }) =>
     request<AuthUser & { id: number; success: boolean }>("signup", {
       method: "POST",
       body: JSON.stringify(payload),
+    }),
+
+  getLkVisibility: () =>
+    request<{ hidden: { teacher: string[]; student: string[] } }>("lk-visibility", { method: "GET" }),
+
+  setLkVisibility: (token: string, role: "teacher" | "student", hidden: string[]) =>
+    request<{ success: boolean; role: string; hidden: string[] }>("lk-visibility", {
+      method: "POST",
+      token,
+      body: JSON.stringify({ role, hidden }),
     }),
 
   me: (login: string) =>

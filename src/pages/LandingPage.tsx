@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { subscriptionApi, type SubscriptionPlan } from "@/lib/api";
 import LandingHeader from "@/components/landing/LandingHeader";
 import LandingHero from "@/components/landing/LandingHero";
+import LandingAudiences from "@/components/landing/LandingAudiences";
 import LandingContent from "@/components/landing/LandingContent";
 import LandingFooter from "@/components/landing/LandingFooter";
 
@@ -44,6 +45,7 @@ export default function LandingPage({ onLogin, onRegister, onTrial, onOuLogin }:
         onRegister={onRegister}
         onTrial={onTrial}
       />
+      <LandingAudiences onRegister={onRegister} />
       <LandingContent
         onLogin={onLogin}
         onRegister={onRegister}

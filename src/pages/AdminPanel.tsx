@@ -10,8 +10,9 @@ import AdminResetPasswordModal from "@/pages/admin/AdminResetPasswordModal";
 import AdminMaintenancePanel from "@/pages/admin/AdminMaintenancePanel";
 import AdminTokensModal from "@/pages/admin/AdminTokensModal";
 import AdminSupportPanel from "@/pages/admin/AdminSupportPanel";
+import AdminLkViewPanel from "@/pages/admin/AdminLkViewPanel";
 
-type Tab = "users" | "maintenance" | "support";
+type Tab = "users" | "maintenance" | "support" | "lkview";
 
 const PANEL_ROLE_LABELS: Record<string, string> = {
   head:        "Глава Правления",
@@ -213,6 +214,7 @@ export default function AdminPanel({ onOpenLK }: AdminPanelProps = {}) {
   const TABS: { id: Tab; label: string; icon: string; headOnly?: boolean }[] = [
     { id: "support",     label: "Тех. поддержка",  icon: "Headphones" },
     { id: "users",       label: "Пользователи",    icon: "Users",      headOnly: false },
+    { id: "lkview",      label: "Вид ЛК",           icon: "LayoutDashboard", headOnly: true },
     { id: "maintenance", label: "Тех. работы",      icon: "Construction", headOnly: true },
   ].filter(t => !t.headOnly || isHead);
 
@@ -371,6 +373,11 @@ export default function AdminPanel({ onOpenLK }: AdminPanelProps = {}) {
         {/* ── Вкладка: Тех. поддержка ── */}
         {tab === "support" && (
           <AdminSupportPanel login={login} token={token} panelRole={panelRole} />
+        )}
+
+        {/* ── Вкладка: Вид ЛК ── */}
+        {tab === "lkview" && (
+          <AdminLkViewPanel />
         )}
 
         {/* ── Вкладка: Тех. работы ── */}

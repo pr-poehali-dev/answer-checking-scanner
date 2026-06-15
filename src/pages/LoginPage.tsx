@@ -4,7 +4,7 @@ import { appStore } from "@/store/appStore";
 import CompanyFooter from "@/components/CompanyFooter";
 
 interface LoginPageProps {
-  onLogin: (role: "admin" | "teacher") => void;
+  onLogin: (role: "admin" | "teacher" | "tester" | "student") => void;
   initialMode?: "login" | "signup";
   onBack?: () => void;
 }
@@ -43,9 +43,11 @@ export default function LoginPage({ onLogin, initialMode = "login", onBack }: Lo
   const [showPass, setShowPass] = useState(false);
 
   // signup
+  const [signupRole, setSignupRole] = useState<"teacher" | "student">("teacher");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
+  const [studyGroup, setStudyGroup] = useState("");
   const [signupPass, setSignupPass] = useState("");
   const [showSignupPass, setShowSignupPass] = useState(false);
 
@@ -81,6 +83,8 @@ export default function LoginPage({ onLogin, initialMode = "login", onBack }: Lo
       last_name: lastName.trim(),
       email: email.trim(),
       password: signupPass,
+      role: signupRole,
+      study_group: signupRole === "student" ? studyGroup.trim() : undefined,
     });
     setLoading(false);
     if (res.ok) onLogin(res.role);
@@ -140,7 +144,7 @@ export default function LoginPage({ onLogin, initialMode = "login", onBack }: Lo
         <div className="border border-border rounded-sm bg-white shadow-sm">
           <div className="px-6 py-4 border-b border-border bg-muted">
             <p className="text-sm font-semibold text-center">
-              {mode === "login" ? "Вход для учителя" : "Регистрация в системе САОУ"}
+              {mode === "login" ? "Вход в систему САОУ" : "Регистрация в системе САОУ"}
             </p>
           </div>
 
@@ -204,6 +208,33 @@ export default function LoginPage({ onLogin, initialMode = "login", onBack }: Lo
             </form>
           ) : (
             <form onSubmit={handleSignupSubmit} className="p-6 space-y-3">
+              {/* Выбор роли */}
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1.5">Кто вы?</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSignupRole("teacher")}
+                    className={`flex items-center gap-2 px-3 py-2.5 rounded-sm border text-sm font-medium transition-colors ${
+                      signupRole === "teacher" ? "border-primary bg-primary/5 text-foreground" : "border-border text-muted-foreground hover:border-primary/40"
+                    }`}
+                  >
+                    <Icon name="GraduationCap" size={16} className={signupRole === "teacher" ? "text-primary" : ""} />
+                    Учитель
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSignupRole("student")}
+                    className={`flex items-center gap-2 px-3 py-2.5 rounded-sm border text-sm font-medium transition-colors ${
+                      signupRole === "student" ? "border-primary bg-primary/5 text-foreground" : "border-border text-muted-foreground hover:border-primary/40"
+                    }`}
+                  >
+                    <Icon name="Backpack" size={16} className={signupRole === "student" ? "text-primary" : ""} fallback="User" />
+                    Ученик / студент
+                  </button>
+                </div>
+              </div>
+
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="text-xs text-muted-foreground block mb-1.5">Имя</label>
@@ -241,6 +272,22 @@ export default function LoginPage({ onLogin, initialMode = "login", onBack }: Lo
                   />
                 </div>
               </div>
+
+              {signupRole === "student" && (
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1.5">Класс / группа <span className="opacity-60">(необязательно)</span></label>
+                  <div className="relative">
+                    <Icon name="Users" size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                    <input
+                      type="text"
+                      value={studyGroup}
+                      onChange={e => setStudyGroup(e.target.value)}
+                      placeholder="11А или ИС-21"
+                      className="w-full pl-9 pr-3 py-2.5 border border-border rounded-sm text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                    />
+                  </div>
+                </div>
+              )}
 
               {/* Логин (автогенерация) */}
               <div className="p-3 border border-dashed border-border rounded-sm bg-muted/30 flex items-center gap-2">

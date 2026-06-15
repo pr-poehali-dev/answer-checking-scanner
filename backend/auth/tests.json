@@ -72,6 +72,19 @@
       "method": "GET",
       "path": "/?action=get-tokens-balance",
       "expectedStatus": 400
+    },
+    {
+      "name": "GET lk-visibility returns 200",
+      "method": "GET",
+      "path": "/?action=lk-visibility",
+      "expectedStatus": 200
+    },
+    {
+      "name": "POST lk-visibility without admin token returns 403",
+      "method": "POST",
+      "path": "/?action=lk-visibility",
+      "body": { "role": "student", "hidden": ["upload"] },
+      "expectedStatus": 403
     }
   ]
 }

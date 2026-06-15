@@ -28,6 +28,17 @@ export const NAV_ITEMS: { id: Section; label: string; icon: string }[] = [
   { id: "settings", label: "Настройки", icon: "Settings" },
 ];
 
+// Разделы личного кабинета ученика/студента (учебные инструменты)
+export const STUDENT_NAV_ITEMS: { id: Section; label: string; icon: string }[] = [
+  { id: "chat", label: "Чат с ИИ", icon: "MessageSquare" },
+  { id: "tests", label: "Тренировочные тесты", icon: "FileText" },
+  { id: "synopsis", label: "Конспекты", icon: "BookOpen" },
+  { id: "exams", label: "ОГЭ / ЕГЭ", icon: "GraduationCap" },
+  { id: "fipiExams", label: "Варианты ФИПИ", icon: "ScrollText" },
+  { id: "support", label: "Тех. поддержка", icon: "Headphones" },
+  { id: "settings", label: "Настройки", icon: "Settings" },
+];
+
 export const MOCK_STUDENTS = [
   { id: 1, name: "Алексеева Марина В.", answers: 32, correct: 28, raw: 28, scaled: 75, grade: "4", status: "ok" },
   { id: 2, name: "Борисов Дмитрий К.", answers: 32, correct: 24, raw: 24, scaled: 61, grade: "4", status: "ok" },

@@ -17,6 +17,7 @@ import TokensModal from "@/components/TokensModal";
 import { authApi } from "@/lib/api";
 import LoginPage from "@/pages/LoginPage";
 import LandingPage from "@/pages/LandingPage";
+import StudentCabinet from "@/pages/StudentCabinet";
 import AdminPanel from "@/pages/AdminPanel";
 import InstitutionRegisterPage from "@/pages/InstitutionRegisterPage";
 import InstitutionLoginPage from "@/pages/InstitutionLoginPage";
@@ -94,11 +95,11 @@ export default function Index() {
   const [adminShowLK, setAdminShowLK]   = useState(false);
   const [hasPanelRole, setHasPanelRole] = useState(false);
   const [panelRoleChecked, setPanelRoleChecked] = useState(false); // проверка завершена
-  const { teacher, yadiskConnected, maintenanceSections } = useAppStore();
+  const { teacher, yadiskConnected, maintenanceSections, hiddenSections } = useAppStore();
   const ActiveSection = SECTION_COMPONENTS[active];
 
   useEffect(() => {
-    if (!teacher || teacher.role !== "teacher") return;
+    if (!teacher || (teacher.role !== "teacher" && teacher.role !== "student")) return;
     appStore.refreshSubscription();
     const t = setInterval(() => appStore.refreshSubscription(), 5 * 60 * 1000);
     return () => clearInterval(t);
@@ -111,9 +112,10 @@ export default function Index() {
       .catch(() => setHasInstitution(false));
   }, [teacher?.login]);
 
-  // Загружаем список разделов на ТО при старте
+  // Загружаем список разделов на ТО и видимость разделов ЛК при старте
   useEffect(() => {
     appStore.loadMaintenance();
+    appStore.loadLkVisibility();
   }, []);
 
   useEffect(() => {
@@ -214,6 +216,11 @@ export default function Index() {
     );
   }
 
+  // Ученик/студент — отдельный личный кабинет
+  if (teacher.role === "student") {
+    return <StudentCabinet />;
+  }
+
   // Ждём завершения проверки панельной роли (чтобы не мигал ЛК перед ПУ)
   if (!panelRoleChecked) {
     return (
@@ -289,7 +296,11 @@ export default function Index() {
         {/* Nav */}
         <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
           <p className="section-header px-3 mb-3" style={{ color: "hsl(var(--sidebar-foreground))", opacity: 0.45 }}>Разделы</p>
-          {NAV_ITEMS.map((item) => {
+          {NAV_ITEMS.filter((item) => {
+            // Админ/тестер видят всё; обычный учитель — без скрытых админом разделов
+            if (isTester || isAdminInLK) return true;
+            return !hiddenSections.teacher.includes(item.id);
+          }).map((item) => {
             const inMaintenance = maintenanceSections.includes(item.id) && !isTester;
             return (
               <div

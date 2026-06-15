@@ -177,6 +177,10 @@ def handler(event: dict, context) -> dict:
         email = (body.get("email") or "").strip().lower()
         password = (body.get("password") or "").strip()
         school = (body.get("school") or "АОУСПТ").strip()
+        study_group = (body.get("study_group") or "").strip()[:64]
+        # Роль самостоятельной регистрации: только учитель или ученик
+        req_role = (body.get("role") or "teacher").strip().lower()
+        role = "student" if req_role == "student" else "teacher"
 
         if not first_name or not last_name:
             return _resp(400, {"error": "Укажите имя и фамилию"})
@@ -199,13 +203,13 @@ def handler(event: dict, context) -> dict:
                 return _resp(409, {"error": "Этот email уже зарегистрирован"})
 
             login = generate_login(first_name, last_name, cur)
-            token = f"teacher:{hash_password(login + password + 'salt')}"
+            token = f"{role}:{hash_password(login + password + 'salt')}"
             token_hash = hash_password(token)
             cur.execute(
                 f"""INSERT INTO {SCHEMA}.users
-                    (login, password_hash, full_name, first_name, last_name, email, school, role, created_by, subscription_status, auth_token_hash)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, 'teacher', 'self', 'none', %s) RETURNING id""",
-                (login, hash_password(password), full_name, first_name, last_name, email, school, token_hash)
+                    (login, password_hash, full_name, first_name, last_name, email, school, role, created_by, subscription_status, auth_token_hash, study_group)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'self', 'none', %s, %s) RETURNING id""",
+                (login, hash_password(password), full_name, first_name, last_name, email, school, role, token_hash, study_group or None)
             )
             conn.commit()
             user_id = cur.fetchone()[0]
@@ -213,12 +217,13 @@ def handler(event: dict, context) -> dict:
                 "success": True,
                 "id": user_id,
                 "login": login,
-                "role": "teacher",
+                "role": role,
                 "full_name": full_name,
                 "first_name": first_name,
                 "last_name": last_name,
                 "email": email,
                 "school": school,
+                "study_group": study_group,
                 "token": token,
                 "subscription_status": "none",
                 "subscription_active": False,
@@ -282,7 +287,8 @@ def handler(event: dict, context) -> dict:
 
             # Обновляем last_seen_at, статус подписки и сохраняем token_hash
             now_ts = datetime.utcnow()
-            token = f"teacher:{hash_password(login + password + 'salt')}"
+            token_prefix = role if role in ("teacher", "student", "tester") else "teacher"
+            token = f"{token_prefix}:{hash_password(login + password + 'salt')}"
             token_hash = hash_password(token)
             if sub_status == 'active' and sub['subscription_status'] == 'expired':
                 cur.execute(
@@ -752,8 +758,8 @@ def handler(event: dict, context) -> dict:
         role = (body.get("role") or "").strip()
         if not login or not role:
             return _resp(400, {"error": "Укажите login и role"})
-        if role not in ("teacher", "tester"):
-            return _resp(400, {"error": "Роль должна быть teacher или tester"})
+        if role not in ("teacher", "tester", "student"):
+            return _resp(400, {"error": "Роль должна быть teacher, tester или student"})
         if login == "admin":
             return _resp(400, {"error": "Нельзя изменить роль администратора"})
 
@@ -806,6 +812,55 @@ def handler(event: dict, context) -> dict:
             )
             conn.commit()
             return _resp(200, {"success": True, "sections": sections})
+        finally:
+            conn.close()
+
+    # ── GET lk-visibility — видимость разделов ЛК по ролям ──────────────────
+    # Возвращает {hidden: {teacher: [...sections], student: [...sections]}}
+    if method == "GET" and route in ("lk-visibility", "lk_visibility"):
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"SELECT role, section FROM {SCHEMA}.lk_section_visibility WHERE visible = FALSE"
+            )
+            hidden = {"teacher": [], "student": []}
+            for r, sect in cur.fetchall():
+                hidden.setdefault(r, []).append(sect)
+            return _resp(200, {"hidden": hidden})
+        finally:
+            conn.close()
+
+    # ── POST lk-visibility (admin) — задать скрытые разделы по роли ──────────
+    # body: {role: 'teacher'|'student', hidden: [...sections]}
+    if method == "POST" and route in ("lk-visibility", "lk_visibility"):
+        if not check_admin_token(headers):
+            return _resp(403, {"error": "Нет доступа"})
+        role = (body.get("role") or "").strip().lower()
+        hidden = body.get("hidden", [])
+        if role not in ("teacher", "student"):
+            return _resp(400, {"error": "role должен быть teacher или student"})
+        if not isinstance(hidden, list):
+            return _resp(400, {"error": "hidden должен быть массивом"})
+        hidden = [str(s)[:32] for s in hidden]
+
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            # Сбрасываем прежние скрытия этой роли и пишем новые
+            cur.execute(
+                f"DELETE FROM {SCHEMA}.lk_section_visibility WHERE role = %s",
+                (role,)
+            )
+            for sect in hidden:
+                cur.execute(
+                    f"""INSERT INTO {SCHEMA}.lk_section_visibility (role, section, visible, updated_at)
+                        VALUES (%s, %s, FALSE, NOW())
+                        ON CONFLICT (role, section) DO UPDATE SET visible = FALSE, updated_at = NOW()""",
+                    (role, sect)
+                )
+            conn.commit()
+            return _resp(200, {"success": True, "role": role, "hidden": hidden})
         finally:
             conn.close()
 

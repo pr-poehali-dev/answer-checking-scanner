@@ -77,7 +77,7 @@ function _scheduleAutoSave() {
   }, 2500);
 }
 
-export type UserRole = "admin" | "teacher" | "tester";
+export type UserRole = "admin" | "teacher" | "tester" | "student";
 
 export type SubscriptionStatus = "none" | "active" | "expired" | "trial";
 
@@ -214,6 +214,7 @@ export type AppState = {
   yadiskSyncing: boolean;
   yadiskLastSync: string | null;
   maintenanceSections: string[];
+  hiddenSections: { teacher: string[]; student: string[] };
 };
 
 // Начальное состояние — восстанавливаем сессию из localStorage
@@ -232,6 +233,7 @@ let state: AppState = {
   yadiskSyncing: false,
   yadiskLastSync: null,
   maintenanceSections: [],
+  hiddenSections: { teacher: [], student: [] },
 };
 
 type Listener = () => void;
@@ -278,7 +280,7 @@ export const appStore = {
       saveSession(newTeacher);
       state = { ...state, teacher: newTeacher };
       notify();
-      if (user.role === "teacher") {
+      if (user.role === "teacher" || user.role === "student") {
         // Сбрасываем Я.Диск-состояние от предыдущего пользователя (защита от смешения аккаунтов)
         state = {
           ...state,
@@ -300,7 +302,7 @@ export const appStore = {
     }
   },
 
-  signup: async (payload: { first_name: string; last_name: string; email: string; password: string }): Promise<
+  signup: async (payload: { first_name: string; last_name: string; email: string; password: string; role?: "teacher" | "student"; study_group?: string }): Promise<
     { ok: true; role: UserRole; login: string } | { ok: false; error: string }
   > => {
     try {
@@ -687,6 +689,34 @@ export const appStore = {
     try {
       await authApi.setMaintenance(token, sections);
       state = { ...state, maintenanceSections: sections };
+      notify();
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: (e as Error).message };
+    }
+  },
+
+  /** Загружает скрытые админом разделы ЛК по ролям. */
+  loadLkVisibility: async () => {
+    try {
+      const { hidden } = await authApi.getLkVisibility();
+      state = {
+        ...state,
+        hiddenSections: {
+          teacher: hidden.teacher || [],
+          student: hidden.student || [],
+        },
+      };
+      notify();
+    } catch { /* ignore */ }
+  },
+
+  /** Сохраняет скрытые разделы для роли (только admin). */
+  setLkVisibility: async (role: "teacher" | "student", hidden: string[]): Promise<{ ok: boolean; error?: string }> => {
+    const token = state.teacher?.authToken || "";
+    try {
+      await authApi.setLkVisibility(token, role, hidden);
+      state = { ...state, hiddenSections: { ...state.hiddenSections, [role]: hidden } };
       notify();
       return { ok: true };
     } catch (e) {

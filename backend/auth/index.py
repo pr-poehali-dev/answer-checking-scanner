@@ -810,7 +810,8 @@ def handler(event: dict, context) -> dict:
             conn.close()
 
     # ── POST spend-tokens — списание баланса в копейках за ИИ-генерацию ───────
-    # amount = количество токенов YandexGPT; списываем amount * 0.2 копейки (2 руб/1000 токенов)
+    # amount = количество токенов YandexGPT; базовая ставка 0.2 коп/токен (2 руб/1000),
+    # к потреблению добавляется наценка +40%.
     if method == "POST" and route in ("spend-tokens", "spend_tokens"):
         login = (body.get("login") or "").strip()
         try:
@@ -822,8 +823,9 @@ def handler(event: dict, context) -> dict:
         if amount <= 0:
             return _resp(400, {"error": "Укажите amount > 0"})
 
-        # 2 руб / 1000 токенов = 0.2 коп/токен → в копейках (минимум 1 копейка)
-        kopecks_to_spend = max(round(amount * 0.2), 1)
+        # Базовая стоимость: 0.2 коп/токен. Наценка +40% сверху на потребление ИИ.
+        AI_MARKUP = 1.40
+        kopecks_to_spend = max(round(amount * 0.2 * AI_MARKUP), 1)
 
         conn = get_conn()
         try:

@@ -73,6 +73,7 @@ const SECTION_COMPONENTS: Record<Section, React.FC> = {
   support: SupportSection,
   settings: SettingsSection,
   collective: CollectiveSection,
+  myResults: ResultsSection,
 };
 
 // Разделы для нижней мобильной панели (самые частые)

@@ -6,6 +6,7 @@ const RECOGNIZE_URL = "https://functions.poehali.dev/de6ae337-82d7-4cc2-ae90-3cf
 const PRESENTATION_URL = "https://functions.poehali.dev/9aa03e93-715c-41fd-91f4-6d4e79487ed9";
 const TEST_URL = "https://functions.poehali.dev/80f9c6ec-e492-47b6-881a-633a41d7e4f4";
 const SUBSCRIPTION_URL = "https://functions.poehali.dev/0dc83bdb-3da2-4cb9-b9d9-f0b48cfb25da";
+const STUDENT_LINK_URL = "https://functions.poehali.dev/23f6c20d-f0bd-4bfb-84fe-75c97564d076";
 
 export type UserRole = "admin" | "teacher" | "tester" | "student";
 export type SubscriptionStatus = "none" | "active" | "expired" | "trial";
@@ -199,6 +200,57 @@ export const authApi = {
       .then(r => r.json())
       .then(d => d as { logs: { action: string; tokens: number; amount_rub: number; balance_rub_after: number; created_at: string }[] });
   },
+};
+
+// ── Student Link API (привязка учеников по коду и их результаты) ───────────────
+
+export interface StudentResultRow {
+  workId: string;
+  workTitle: string | null;
+  subject: string | null;
+  workDate: string | null;
+  correctCount: number;
+  totalCount: number;
+  score: number;
+  grade: string | null;
+  scannedAt: string | null;
+}
+
+async function slRequest<T>(action: string, method: string, login: string, body?: object): Promise<T> {
+  const isGet = method === "GET";
+  const url = isGet
+    ? `${STUDENT_LINK_URL}?action=${action}&login=${encodeURIComponent(login)}`
+    : `${STUDENT_LINK_URL}?action=${action}`;
+  const res = await fetch(url, {
+    method,
+    headers: { "Content-Type": "application/json", "X-User-Login": login },
+    ...(isGet ? {} : { body: JSON.stringify({ login, ...(body || {}) }) }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Ошибка ${res.status}`);
+  return data as T;
+}
+
+export const studentLinkApi = {
+  // Учитель: регистрирует коды учеников в БД
+  registerCodes: (teacherLogin: string, students: { bindCode: string; studentCode: string; fullName: string; classLabel: string }[]) =>
+    slRequest<{ success: boolean; saved: number }>("register-codes", "POST", teacherLogin, { students }),
+
+  // Учитель: синхронизирует результаты
+  syncResults: (teacherLogin: string, results: object[]) =>
+    slRequest<{ success: boolean; saved: number }>("sync-results", "POST", teacherLogin, { results }),
+
+  // Ученик: привязка по 8-символьному коду
+  bind: (studentLogin: string, bindCode: string) =>
+    slRequest<{ success: boolean; full_name: string; class_label: string | null }>("bind", "POST", studentLogin, { bindCode }),
+
+  // Ученик: текущая привязка
+  myBinding: (studentLogin: string) =>
+    slRequest<{ bound: boolean; bind_code?: string; full_name?: string; class_label?: string | null; teacher_login?: string }>("my-binding", "GET", studentLogin),
+
+  // Ученик: свои результаты
+  myResults: (studentLogin: string) =>
+    slRequest<{ bound: boolean; results: StudentResultRow[] }>("my-results", "GET", studentLogin),
 };
 
 // ── Institution API ───────────────────────────────────────────────────────────

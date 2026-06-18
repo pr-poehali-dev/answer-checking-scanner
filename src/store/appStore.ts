@@ -103,7 +103,8 @@ export interface Teacher {
 }
 
 export interface Student {
-  code: string; // 5-значный код
+  code: string; // 5-значный код (для бланков / OCR)
+  bindCode?: string; // 8-символьный код привязки ученика к своему ЛК
   name: string;
   classNum: number; // 1-11
   classLetter: string; // А,Б,В...
@@ -425,6 +426,7 @@ export const appStore = {
     state = { ...state, students: [...state.students, student] };
     notify();
     _scheduleAutoSave();
+    appStore.syncStudentCodesToDb();
   },
 
   updateStudent: (code: string, updated: Partial<Student>) => {
@@ -434,6 +436,7 @@ export const appStore = {
     };
     notify();
     _scheduleAutoSave();
+    appStore.syncStudentCodesToDb();
   },
 
   removeStudent: (code: string) => {
@@ -443,9 +446,23 @@ export const appStore = {
   },
 
   setStudents: (students: Student[]) => {
-    state = { ...state, students };
+    // Бэкфилл кода привязки для учеников без него
+    const used = new Set(students.map(s => s.bindCode).filter(Boolean) as string[]);
+    const ALPHA = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    const withBind = students.map(s => {
+      if (s.bindCode) return s;
+      let bc: string;
+      do {
+        bc = "";
+        for (let i = 0; i < 8; i++) bc += ALPHA[Math.floor(Math.random() * ALPHA.length)];
+      } while (used.has(bc));
+      used.add(bc);
+      return { ...s, bindCode: bc };
+    });
+    state = { ...state, students: withBind };
     notify();
     _scheduleAutoSave();
+    appStore.syncStudentCodesToDb();
   },
 
   generateStudentCode: (): string => {
@@ -453,6 +470,18 @@ export const appStore = {
     let code: string;
     do {
       code = String(Math.floor(10000 + Math.random() * 90000));
+    } while (used.has(code));
+    return code;
+  },
+
+  // 8-символьный код привязки (буквы+цифры, без похожих символов 0/O/1/I)
+  generateBindCode: (): string => {
+    const ALPHA = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    const used = new Set(state.students.map(s => s.bindCode).filter(Boolean));
+    let code: string;
+    do {
+      code = "";
+      for (let i = 0; i < 8; i++) code += ALPHA[Math.floor(Math.random() * ALPHA.length)];
     } while (used.has(code));
     return code;
   },
@@ -480,6 +509,7 @@ export const appStore = {
     state = { ...state, results: [...filtered, result] };
     notify();
     _scheduleAutoSave();
+    appStore.syncResultsToDb();
   },
 
   addPresentation: (item: PresentationItem) => {
@@ -623,6 +653,22 @@ export const appStore = {
         if (Array.isArray(parsed.results)) results = parsed.results;
       } catch { /* файла нет — ок */ }
 
+      // Бэкфилл кода привязки (8 симв.) для учеников без него
+      {
+        const used = new Set(students.map(s => s.bindCode).filter(Boolean) as string[]);
+        const ALPHA = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+        students = students.map(s => {
+          if (s.bindCode) return s;
+          let bc: string;
+          do {
+            bc = "";
+            for (let i = 0; i < 8; i++) bc += ALPHA[Math.floor(Math.random() * ALPHA.length)];
+          } while (used.has(bc));
+          used.add(bc);
+          return { ...s, bindCode: bc };
+        });
+      }
+
       state = {
         ...state,
         students,
@@ -634,6 +680,9 @@ export const appStore = {
       notify();
       // Включаем автосохранение только после первой загрузки
       _autoSaveEnabled = true;
+      // Синхронизируем коды и результаты в общую БД (для доступа учеников)
+      appStore.syncStudentCodesToDb();
+      appStore.syncResultsToDb();
       return { ok: true, studentsCount: students.length, worksCount: works.length };
     } catch (e) {
       state = { ...state, yadiskSyncing: false };
@@ -694,6 +743,52 @@ export const appStore = {
     } catch (e) {
       return { ok: false, error: (e as Error).message };
     }
+  },
+
+  /** Учитель: синхронизирует коды учеников в общую БД (для привязки учеников). */
+  syncStudentCodesToDb: async (): Promise<void> => {
+    const t = state.teacher;
+    if (!t || (t.role !== "teacher" && t.role !== "tester")) return;
+    const payload = state.students
+      .filter(s => s.bindCode && s.code && s.name)
+      .map(s => ({
+        bindCode: s.bindCode as string,
+        studentCode: s.code,
+        fullName: s.name,
+        classLabel: `${s.classNum}${s.classLetter}`,
+      }));
+    if (!payload.length) return;
+    try {
+      const { studentLinkApi } = await import("@/lib/api");
+      await studentLinkApi.registerCodes(t.login, payload);
+    } catch { /* ignore */ }
+  },
+
+  /** Учитель: синхронизирует результаты в общую БД (чтобы ученики видели свои). */
+  syncResultsToDb: async (): Promise<void> => {
+    const t = state.teacher;
+    if (!t || (t.role !== "teacher" && t.role !== "tester")) return;
+    if (!state.results.length) return;
+    const worksById = new Map(state.works.map(w => [w.id, w]));
+    const payload = state.results.map(r => {
+      const w = worksById.get(r.workId);
+      return {
+        studentCode: r.studentCode,
+        workId: r.workId,
+        workTitle: w ? `${w.type}: ${w.subject}` : "",
+        subject: w?.subject || "",
+        workDate: w?.date || "",
+        correctCount: r.correctCount,
+        totalCount: r.totalCount,
+        score: r.score,
+        grade: r.grade,
+        scannedAt: r.scannedAt,
+      };
+    });
+    try {
+      const { studentLinkApi } = await import("@/lib/api");
+      await studentLinkApi.syncResults(t.login, payload);
+    } catch { /* ignore */ }
   },
 
   /** Загружает скрытые админом разделы ЛК по ролям. */

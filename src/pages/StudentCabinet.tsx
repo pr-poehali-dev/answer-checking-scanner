@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import Icon from "@/components/ui/icon";
 import { Section, STUDENT_NAV_ITEMS, SECTION_TITLES } from "@/components/scanner/types";
-import { SettingsSection } from "@/components/scanner/SectionsB";
+import { StudentSettingsSection } from "@/components/scanner/StudentSettingsSection";
+import { StudentResultsSection } from "@/components/scanner/StudentResultsSection";
 import { TestsSection } from "@/components/scanner/TestsSection";
 import { SynopsisSection } from "@/components/scanner/SynopsisSection";
 import { ExamsSection } from "@/components/scanner/ExamsSection";
@@ -15,18 +16,19 @@ import CompanyFooter from "@/components/CompanyFooter";
 import { useAppStore, appStore } from "@/store/appStore";
 
 const SECTION_COMPONENTS: Partial<Record<Section, React.FC>> = {
+  myResults: StudentResultsSection,
   tests: TestsSection,
   synopsis: SynopsisSection,
   exams: ExamsSection,
   fipiExams: FipiExamsSection,
   chat: ChatSection,
   support: SupportSection,
-  settings: SettingsSection,
+  settings: StudentSettingsSection,
 };
 
 export default function StudentCabinet() {
   const { teacher, yadiskConnected, hiddenSections } = useAppStore();
-  const [active, setActive] = useState<Section>("chat");
+  const [active, setActive] = useState<Section>("myResults");
   const [sidebarOpen, setSidebar] = useState(false);
   const [showTokensModal, setShowTokensModal] = useState(false);
 
@@ -37,6 +39,16 @@ export default function StudentCabinet() {
     const t = setInterval(() => appStore.refreshSubscription(), 5 * 60 * 1000);
     return () => clearInterval(t);
   }, [teacher?.login]);
+
+  // Навигация между разделами из дочерних компонентов
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const section = (e as CustomEvent).detail as Section;
+      if (section) { setActive(section); setSidebar(false); }
+    };
+    window.addEventListener("student-navigate", handler);
+    return () => window.removeEventListener("student-navigate", handler);
+  }, []);
 
   // Видимые разделы = базовый набор минус скрытые админом
   const navItems = useMemo(() => {

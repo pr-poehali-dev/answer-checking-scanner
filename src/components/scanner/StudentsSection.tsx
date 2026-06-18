@@ -19,11 +19,20 @@ function StudentForm({ initial, onSave, onCancel }: StudentFormProps) {
   const [name, setName] = useState(initial?.name ?? "");
   const [classNum, setClassNum] = useState(initial?.classNum ?? 1);
   const [classLetter, setClassLetter] = useState(initial?.classLetter ?? "А");
-  const code = initial?.code ?? appStore.generateStudentCode();
+  const [code] = useState(initial?.code ?? appStore.generateStudentCode());
+  const [bindCode] = useState(initial?.bindCode ?? appStore.generateBindCode());
+  const [copied, setCopied] = useState(false);
+
+  const copyBind = () => {
+    navigator.clipboard?.writeText(bindCode).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }).catch(() => {});
+  };
 
   const handleSave = () => {
     if (!name.trim()) return;
-    onSave({ code, name: name.trim(), classNum, classLetter });
+    onSave({ code, bindCode, name: name.trim(), classNum, classLetter });
   };
 
   return (
@@ -71,6 +80,30 @@ function StudentForm({ initial, onSave, onCancel }: StudentFormProps) {
             ))}
           </div>
           <p className="text-xs text-muted-foreground mt-1">Код генерируется автоматически и уникален</p>
+        </div>
+        <div className="col-span-2">
+          <label className="text-xs text-muted-foreground block mb-1">Код привязки (8 символов)</label>
+          <div className="flex items-center gap-2">
+            <div className="flex gap-1 flex-wrap">
+              {bindCode.split("").map((ch, i) => (
+                <div key={i} className="w-8 h-9 border-2 rounded-sm flex items-center justify-center font-bold mono text-base"
+                  style={{ borderColor: "hsl(142 60% 35%)", color: "hsl(142 60% 30%)" }}>
+                  {ch}
+                </div>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={copyBind}
+              className="inline-flex items-center gap-1.5 px-3 py-2 border border-border text-xs rounded-sm hover:bg-muted transition-colors"
+            >
+              <Icon name={copied ? "Check" : "Copy"} size={13} className={copied ? "text-green-600" : ""} />
+              {copied ? "Скопировано" : "Копировать"}
+            </button>
+          </div>
+          <p className="text-xs text-muted-foreground mt-1">
+            Передайте этот код ученику — он введёт его в настройках своего кабинета, чтобы видеть свои результаты.
+          </p>
         </div>
       </div>
       <div className="flex gap-2 pt-1">

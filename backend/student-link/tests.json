@@ -1,0 +1,42 @@
+{
+  "tests": [
+    {
+      "name": "OPTIONS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    },
+    {
+      "name": "Unknown action returns 404",
+      "method": "GET",
+      "path": "/?action=nope",
+      "expectedStatus": 404
+    },
+    {
+      "name": "bind without login returns 400",
+      "method": "POST",
+      "path": "/?action=bind",
+      "body": { "bindCode": "A7K2M9QX" },
+      "expectedStatus": 400
+    },
+    {
+      "name": "my-results without login returns 400",
+      "method": "GET",
+      "path": "/?action=my-results",
+      "expectedStatus": 400
+    },
+    {
+      "name": "my-binding without login returns 400",
+      "method": "GET",
+      "path": "/?action=my-binding",
+      "expectedStatus": 400
+    },
+    {
+      "name": "register-codes without teacher returns 400",
+      "method": "POST",
+      "path": "/?action=register-codes",
+      "body": { "students": [] },
+      "expectedStatus": 400
+    }
+  ]
+}

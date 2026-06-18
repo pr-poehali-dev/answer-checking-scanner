@@ -11,7 +11,8 @@ export type Section =
   | "chat"
   | "settings"
   | "collective"
-  | "support";
+  | "support"
+  | "myResults";
 
 export const NAV_ITEMS: { id: Section; label: string; icon: string }[] = [
   { id: "works", label: "Работы", icon: "ClipboardList" },
@@ -30,6 +31,7 @@ export const NAV_ITEMS: { id: Section; label: string; icon: string }[] = [
 
 // Разделы личного кабинета ученика/студента (учебные инструменты)
 export const STUDENT_NAV_ITEMS: { id: Section; label: string; icon: string }[] = [
+  { id: "myResults", label: "Мои результаты", icon: "BarChart2" },
   { id: "chat", label: "Чат с ИИ", icon: "MessageSquare" },
   { id: "tests", label: "Тренировочные тесты", icon: "FileText" },
   { id: "synopsis", label: "Конспекты", icon: "BookOpen" },
@@ -64,6 +66,7 @@ export const SECTION_TITLES: Record<Section, string> = {
   support: "Техническая поддержка",
   settings: "Настройки",
   collective: "Коллектив",
+  myResults: "Мои результаты",
 };
 
 export const WORK_TYPES = ["Проверочная работа", "Контрольная работа"] as const;

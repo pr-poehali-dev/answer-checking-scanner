@@ -3,11 +3,11 @@
 POST / — { image: base64, questionsCount?: 20, optionsCount?: 4, answerKey?: "АБВГ..." }
 -> { studentCode, answers[], confidence[], analysis }
 """
-# v49: Y-paired right anchors (reject code-zone anchors) + wider answer/code gap
+# v50: student identification via QR code (cv2.QRCodeDetector) instead of code circles
 import json, base64, math
 import numpy as np
 import cv2
-from template import build_answer_template, build_code_template
+from template import build_answer_template
 
 
 def _project(u, v, tl, tr, bl, br):
@@ -264,6 +264,60 @@ def _find_circles(gray, zone_y0, zone_y1):
             for x, y, r in circles[0]]
 
 
+# ── Чтение QR-кода ученика ────────────────────────────────────────────────────
+def _parse_qr_payload(txt: str) -> str:
+    """Из 'SAOU:<workId>:<code>' достаём 5-значный код. Иначе — цифры из строки."""
+    if not txt:
+        return ""
+    txt = txt.strip()
+    if txt.upper().startswith("SAOU:"):
+        parts = txt.split(":")
+        if len(parts) >= 3:
+            return parts[-1].strip()
+    # Фолбэк: если в строке только цифры — это и есть код
+    digits = "".join(ch for ch in txt if ch.isdigit())
+    if 4 <= len(digits) <= 8:
+        return digits
+    return txt[:16]
+
+
+def _read_qr_code(img, gray):
+    """Декодирует QR-код ученика. Пробует несколько вариантов изображения."""
+    dbg = {"tried": [], "raw": ""}
+    detector = cv2.QRCodeDetector()
+
+    variants = [("gray", gray)]
+    # Увеличенный контраст
+    try:
+        _, th = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        variants.append(("otsu", th))
+    except Exception:
+        pass
+    # Цветное (иногда детектору проще)
+    variants.append(("color", img))
+    # Увеличенное изображение
+    try:
+        big = cv2.resize(gray, None, fx=1.6, fy=1.6, interpolation=cv2.INTER_CUBIC)
+        variants.append(("x1.6", big))
+    except Exception:
+        pass
+
+    for name, im in variants:
+        dbg["tried"].append(name)
+        try:
+            data, pts, _ = detector.detectAndDecode(im)
+        except Exception:
+            data = ""
+        if data:
+            dbg["raw"] = data
+            dbg["matched_variant"] = name
+            code = _parse_qr_payload(data)
+            if code:
+                return code, dbg
+
+    return "", dbg
+
+
 # ── Главная функция ───────────────────────────────────────────────────────────
 def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict:
     img, gray = _load(image_b64)
@@ -363,9 +417,9 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
                      f"thr={thr_value}", f"corners={dbg_corners}",
                      f"find={dbg_find}"]
 
-    # ── 4. КОД УЧЕНИКА по шаблону ────────────────────────────────────────────
-    code, code_confs, dbg_code = _read_code_template(
-        gray, h, w, P_bl, P_br, questions_count, options_count)
+    # ── 4. ИДЕНТИФИКАЦИЯ УЧЕНИКА по QR-коду ──────────────────────────────────
+    code, dbg_code = _read_qr_code(img, gray)
+    code_confs = [0.0] * 5
 
     return {
         "answers":       answers[:questions_count],
@@ -379,81 +433,6 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
         "dbg_rows_dist": dbg_rows_dist,
         "dbg_code":      dbg_code,
     }
-
-
-def _read_code_template(gray, h, w, ans_bl, ans_br, n_q, n_opts):
-    """Читает код ученика по эталонному шаблону, калибруясь по 4 якорям зоны кода."""
-    dbg_code: dict = {}
-    # Зона поиска якорей кода — ниже нижних якорей ответов
-    base_y = max(ans_bl[1], ans_br[1])
-    code_zone_y0 = min(h - 2, base_y + int((h - base_y) * 0.02))
-    code_zone_y1 = h - 1
-    dbg_code["code_zone"] = [code_zone_y0, code_zone_y1]
-
-    cands = _find_anchors(gray[code_zone_y0:code_zone_y1, :])
-    cands = [(cx, cy + code_zone_y0, cw, ch, sd) for cx, cy, cw, ch, sd in cands]
-    dbg_code["code_anchors_found"] = len(cands)
-    zone_h = code_zone_y1 - code_zone_y0
-    code_anchors = _select_corner_anchors(cands, w, zone_h,
-                                          min_w_frac=0.45, min_h_frac=0.04)
-    if not code_anchors:
-        dbg_code["error"] = "no_code_anchors"
-        return "?????", [0.0] * 5, dbg_code
-
-    c_tl, c_tr, c_bl, c_br = code_anchors
-    Ptl = (c_tl[0], c_tl[1]); Ptr = (c_tr[0], c_tr[1])
-    Pbl = (c_bl[0], c_bl[1]); Pbr = (c_br[0], c_br[1])
-    dbg_code["corners"] = {"tl": Ptl, "tr": Ptr, "bl": Pbl, "br": Pbr}
-
-    rel_circ, rel_r = build_code_template(n_q, n_opts)
-    aw = math.hypot(Ptr[0] - Ptl[0], Ptr[1] - Ptl[1])
-    r_px = max(4, int(rel_r * aw))
-    dbg_code["r_px"] = r_px
-
-    # Проецируем кружки
-    grid = {}  # row -> [(digit, px, py)]
-    for (row, digit, u, v) in rel_circ:
-        px, py = _project(u, v, Ptl, Ptr, Pbl, Pbr)
-        grid.setdefault(row, []).append((digit, px, py))
-
-    code = ""
-    code_confs = []
-    rows_minbright = []
-    rows_pick = []
-    for row in range(5):
-        cells = sorted(grid.get(row, []), key=lambda c: c[0])
-        vals = []
-        for (digit, px, py) in cells:
-            x1 = max(0, px - r_px); y1 = max(0, py - r_px)
-            x2 = min(w, px + r_px); y2 = min(h, py + r_px)
-            if x2 <= x1 or y2 <= y1:
-                vals.append(255.0); continue
-            roi = gray[y1:y2, x1:x2]
-            roi_blur = cv2.blur(roi, (max(2, r_px // 2), max(2, r_px // 2)))
-            vals.append(float(np.min(roi_blur)))
-        if not vals:
-            code += "?"; code_confs.append(0.0)
-            rows_minbright.append(-1); rows_pick.append("?"); continue
-        min_v = min(vals); max_v = max(vals)
-        d_vals = [max(0.0, (max_v - v) / max(max_v - min_v, 1.0)) for v in vals]
-        best_i = int(np.argmax(d_vals))
-        sorted_d = sorted(d_vals, reverse=True)
-        gap_c = sorted_d[0] - (sorted_d[1] if len(sorted_d) > 1 else 0.0)
-        darkness_abs = max_v - vals[best_i]
-        picked = "?"
-        if vals[best_i] < 120 and darkness_abs > 22 and gap_c > 0.28:
-            picked = str(best_i)
-            code += picked
-            code_confs.append(round(min(0.99, gap_c * 0.8 + 0.2), 2))
-        else:
-            code += "?"; code_confs.append(0.0)
-        rows_minbright.append(round(min_v, 1))
-        rows_pick.append(picked)
-    dbg_code["rows_minbright"] = rows_minbright
-    dbg_code["rows_pick"] = rows_pick
-    code = (code + "?????")[:5]
-    code_confs = (code_confs + [0.0] * 5)[:5]
-    return code, code_confs, dbg_code
 
 
 def _DEAD_CODE_REMOVED():

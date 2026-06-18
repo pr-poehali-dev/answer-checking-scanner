@@ -23,6 +23,14 @@
       "bodyMatcher": "partial"
     },
     {
+      "name": "Generate personalized blanks with students (QR)",
+      "method": "POST",
+      "path": "/",
+      "body": { "workId": "777777", "workTitle": "Тест", "perPage": 2, "questionsCount": 10, "optionsCount": 4, "students": [{ "code": "12345", "name": "Иванов Иван", "classLabel": "9А" }, { "code": "54321", "name": "Петров Пётр", "classLabel": "9А" }] },
+      "expectedStatus": 200,
+      "bodyMatcher": "partial"
+    },
+    {
       "name": "Wrong method returns 405",
       "method": "GET",
       "path": "/",

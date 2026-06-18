@@ -396,6 +396,12 @@ export const synopsisApi = {
   },
 };
 
+export interface BlankStudent {
+  code: string;       // 5-значный код (зашивается в QR)
+  name: string;       // ФИО (печатается готовым)
+  classLabel?: string;
+}
+
 export interface BlankParams {
   workId: string;
   workTitle: string;
@@ -405,6 +411,7 @@ export interface BlankParams {
   subject?: string;
   classLabel?: string;
   date?: string;
+  students?: BlankStudent[];   // персональные бланки с QR
   /** @deprecated use questionsCount */
   part1Count?: number;
   /** @deprecated use questionsCount */
@@ -430,6 +437,7 @@ export const blankApi = {
       subject:        params.subject        ?? "",
       classLabel:     params.classLabel     ?? "",
       date:           params.date           ?? "",
+      students:       params.students       ?? [],
     };
     const res = await fetch(BLANK_URL, {
       method: "POST",

@@ -1,10 +1,12 @@
 """
 Генерация PDF-бланка ответов.
-Ответы: квадраты с буквой (ставить крестик ✕, закрасить если исправляете).
-Код ученика: 5 строк × кружки 0-9 (закрашивать).
+Ответы: кружки с буквой (закрашивать).
+Идентификация ученика: персональный QR-код (вместо зоны кода 0-9) + реперы вокруг.
 POST / — { workId, workTitle, questionsCount, optionsCount(2-6), perPage(1|2|4),
-           subject?, classLabel?, date? }
+           subject?, classLabel?, date?,
+           students?: [{ code, name, classLabel }] }
 -> { pdf_b64, filename }
+Если students пуст — печатается один пустой бланк без QR.
 """
 import json, base64, io, math, os
 
@@ -14,6 +16,9 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.lib.units import mm
 from reportlab.lib.colors import HexColor, black, white
+from reportlab.graphics.barcode.qr import QrCodeWidget
+from reportlab.graphics.shapes import Drawing
+from reportlab.graphics import renderPDF
 
 CORS = {
     "Access-Control-Allow-Origin": "*",
@@ -73,6 +78,21 @@ def ANCHOR(c, cx, cy, side):
     c.rect(cx - side/2, cy - side/2, side, side, stroke=0, fill=1)
 
 
+QR_PREFIX = "SAOU"
+
+
+def QR(c, cx, cy, size, value):
+    """Рисует QR-код по центру (cx, cy) со стороной size."""
+    qr = QrCodeWidget(value)
+    qr.barLevel = "M"
+    b = qr.getBounds()
+    qw = b[2] - b[0]
+    qh = b[3] - b[1]
+    d = Drawing(size, size, transform=[size / qw, 0, 0, size / qh, 0, 0])
+    d.add(qr)
+    renderPDF.draw(d, c, cx - size / 2, cy - size / 2)
+
+
 def draw_blank(c, x0, y0, bw, bh, cfg):
     n_q     = cfg["n_q"]
     opts    = cfg["opts"]
@@ -83,6 +103,8 @@ def draw_blank(c, x0, y0, bw, bh, cfg):
     cls_lbl = cfg.get("class_label", "")
     date_s  = cfg.get("date", "")
     sc      = cfg.get("scale", 1.0)
+    stu_name = cfg.get("student_name", "")   # ФИО ученика (печатается готовым)
+    stu_code = cfg.get("student_code", "")   # 5-значный код для QR
 
     def S(v): return v * sc
 
@@ -107,6 +129,7 @@ def draw_blank(c, x0, y0, bw, bh, cfg):
     T(c, x0+P, fy1, "ФИО:", BOLD, S(6.5), C_DARK)
     c.setStrokeColor(C_LINE); c.setLineWidth(0.5)
     c.line(x0+P+S(10*mm), fy1-0.3, x0+bw*0.61, fy1-0.3)
+    if stu_name: T(c, x0+P+S(11*mm), fy1, stu_name[:40], BOLD, S(6.5), C_DARK)
     T(c, x0+bw*0.63, fy1, "Класс:", BOLD, S(6.5), C_DARK)
     c.line(x0+bw*0.63+S(12*mm), fy1-0.3, x0+bw-P, fy1-0.3)
     if cls_lbl: T(c, x0+bw*0.63+S(13*mm), fy1, cls_lbl, REG, S(6.5), C_DARK)
@@ -182,52 +205,46 @@ def draw_blank(c, x0, y0, bw, bh, cfg):
     ANCHOR(c, ax_l, ay_b, anc)
     ANCHOR(c, ax_r, ay_b, anc)
 
-    cur_y -= S(6*mm)   # увеличенный зазор: реперы зоны кода не сливаются с ответами
+    cur_y -= S(6*mm)   # зазор: зона идентификации не сливается с ответами
     HL(c, x0+P, cur_y, x0+bw-P, lw=0.4, color=C_LINE)
     cur_y -= S(3*mm)
 
-    # ── Код ученика: 5 строк × кружки 0-9 ───────────────────────────────────
-    cr2   = S(1.5*mm)
-    gap_x = cr2*2 + S(0.5*mm)
-    gap_y = cr2*2 + S(0.8*mm)
-    nw2   = S(5*mm)
-    anc_c = S(4.5*mm)   # размер якоря для кода — крупнее для детекции
+    # ── Идентификация ученика: персональный QR-код + реперы ─────────────────
+    qr_size = S(22*mm)              # сторона QR
+    anc_c   = S(4.0*mm)             # размер репера зоны QR
+    qr_pad  = S(2.0*mm)             # отступ репера от QR
+    qr_top_y = cur_y - S(1*mm)
+    qr_cx    = x0 + P + qr_size/2 + S(2*mm)
+    qr_cy    = qr_top_y - qr_size/2
 
-    code_top_y = cur_y - S(1*mm)   # верх зоны кода (отступ от линии)
+    if stu_code:
+        QR(c, qr_cx, qr_cy, qr_size, f"{QR_PREFIX}:{work_id}:{stu_code}")
+    else:
+        # Пустой бланк без ученика — рамка-плейсхолдер
+        c.setStrokeColor(C_LINE); c.setLineWidth(0.6)
+        c.rect(qr_cx - qr_size/2, qr_cy - qr_size/2, qr_size, qr_size, stroke=1, fill=0)
+        T(c, qr_cx, qr_cy, "QR ученика", REG, S(4.5), C_GRAY, "center")
 
-    # Заголовок 0-9 (над кружками)
-    for di in range(10):
-        T(c, x0+P+nw2+di*gap_x+cr2, cur_y, str(di), BOLD, S(4.5), C_BLUE, "center")
-    cur_y -= S(2.8*mm)
+    # 4 репера вокруг QR (для надёжного поиска зоны)
+    qa_l = qr_cx - qr_size/2 - qr_pad - anc_c/2
+    qa_r = qr_cx + qr_size/2 + qr_pad + anc_c/2
+    qa_t = qr_cy + qr_size/2 + qr_pad + anc_c/2
+    qa_b = qr_cy - qr_size/2 - qr_pad - anc_c/2
+    ANCHOR(c, qa_l, qa_t, anc_c)
+    ANCHOR(c, qa_r, qa_t, anc_c)
+    ANCHOR(c, qa_l, qa_b, anc_c)
+    ANCHOR(c, qa_r, qa_b, anc_c)
 
-    # 5 строк кружков
-    for row in range(5):
-        ry = cur_y - row*gap_y - cr2
-        T(c, x0+P+nw2-S(0.8*mm), ry-cr2*0.35, str(row+1), BOLD, S(4.5), C_GRAY, "right")
-        for col in range(10):
-            cx = x0+P+nw2+col*gap_x+cr2
-            CR(c, cx, ry, cr2, lw=0.6)
-            T(c, cx, ry-cr2*0.4, str(col), BOLD, S(4), C_GRAY, "center")
+    # Подпись справа от QR
+    tx = qr_cx + qr_size/2 + qr_pad + anc_c + S(4*mm)
+    T(c, tx, qr_cy + S(4*mm), "ИДЕНТИФИКАЦИЯ УЧЕНИКА", BOLD, S(5.5), C_DARK)
+    if stu_name:
+        T(c, tx, qr_cy - S(1*mm), stu_name[:36], BOLD, S(6), C_BLUE)
+    T(c, tx, qr_cy - S(6*mm),
+      "QR-код определяет ученика автоматически. Не сгибайте и не закрашивайте.",
+      REG, S(4.3), C_GRAY)
 
-    cur_y -= 5*gap_y + S(1.5*mm)
-    code_bottom_y = cur_y   # низ зоны кода
-
-    # Якоря кода — в левом и правом поле, выровнены по высоте зоны кружков
-    code_ax_l = x0 + P / 2
-    code_ax_r = x0 + bw - P / 2
-    code_ay_t = code_top_y - anc_c / 2
-    code_ay_b = code_bottom_y + anc_c / 2
-    ANCHOR(c, code_ax_l, code_ay_t, anc_c)
-    ANCHOR(c, code_ax_r, code_ay_t, anc_c)
-    ANCHOR(c, code_ax_l, code_ay_b, anc_c)
-    ANCHOR(c, code_ax_r, code_ay_b, anc_c)
-
-    # Подпись "КОД УЧЕНИКА" — под кружками
-    cur_y -= S(1*mm)
-    T(c, x0+P, cur_y, "КОД УЧЕНИКА", BOLD, S(5.5), C_DARK)
-    T(c, x0+P+nw2+10*gap_x+S(1*mm), cur_y,
-      "(закрасьте нужную цифру в каждой строке)", REG, S(4.5), C_GRAY)
-    cur_y -= S(3*mm)
+    cur_y = qa_b - S(3*mm)   # низ зоны QR
 
     # ── Подпись ──────────────────────────────────────────────────────────────
     HL(c, x0, cur_y, x0+bw, lw=0.3, color=C_LINE)
@@ -238,18 +255,15 @@ def draw_blank(c, x0, y0, bw, bh, cfg):
     T(c, x0+bw-P, cur_y, title, REG, S(4.5), C_GRAY, "right")
 
 
-def render_pdf(cfg: dict, per_page: int) -> bytes:
-    buf = io.BytesIO()
+def _page_layouts(per_page: int):
     pw, ph = A4
-    c = canvas.Canvas(buf, pagesize=A4)
     M   = 6 * mm
     GAP = 5 * mm
-
     if per_page == 1:
-        layouts = [(M, M, pw-2*M, ph-2*M, 1.0)]
+        return [(M, M, pw-2*M, ph-2*M, 1.0)]
     elif per_page == 2:
         bh = (ph - 2*M - GAP) / 2
-        layouts = [
+        return [
             (M, M+bh+GAP, pw-2*M, bh, 1.0),
             (M, M,        pw-2*M, bh, 1.0),
         ]
@@ -257,16 +271,18 @@ def render_pdf(cfg: dict, per_page: int) -> bytes:
         bw2 = (pw - 2*M - GAP) / 2
         bh2 = (ph - 2*M - GAP) / 2
         sc  = 0.78
-        layouts = [
+        return [
             (M,         M+bh2+GAP, bw2, bh2, sc),
             (M+bw2+GAP, M+bh2+GAP, bw2, bh2, sc),
             (M,         M,         bw2, bh2, sc),
             (M+bw2+GAP, M,         bw2, bh2, sc),
         ]
 
-    for (x, y, bw, bh, sc) in layouts:
-        draw_blank(c, x, y, bw, bh, dict(cfg, scale=sc))
 
+def _page_cut_lines(c, per_page: int):
+    pw, ph = A4
+    M = 6 * mm
+    GAP = 5 * mm
     c.setStrokeColor(C_GRAY); c.setLineWidth(0.3); c.setDash(3, 5)
     if per_page == 2:
         my = M + (ph-2*M-GAP)/2 + GAP/2
@@ -276,6 +292,33 @@ def render_pdf(cfg: dict, per_page: int) -> bytes:
         c.line(2*mm, ph/2, pw-2*mm, ph/2)
     c.setDash()
 
+
+def render_pdf(cfg: dict, per_page: int, students: list) -> bytes:
+    """Если students пуст — один пустой бланк. Иначе — по бланку на ученика,
+    раскладывая по per_page слотам на страницу."""
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    layouts = _page_layouts(per_page)
+    slots = len(layouts)
+
+    # Список "заданий": каждый — данные ученика (или пустой бланк)
+    items = students if students else [None]
+
+    for i, stu in enumerate(items):
+        slot = i % slots
+        if i > 0 and slot == 0:
+            _page_cut_lines(c, per_page)
+            c.showPage()
+        x, y, bw, bh, sc = layouts[slot]
+        scfg = dict(cfg, scale=sc)
+        if stu:
+            scfg["student_name"] = stu.get("name", "")
+            scfg["student_code"] = stu.get("code", "")
+            if stu.get("classLabel"):
+                scfg["class_label"] = stu.get("classLabel")
+        draw_blank(c, x, y, bw, bh, scfg)
+
+    _page_cut_lines(c, per_page)
     c.showPage(); c.save()
     return buf.getvalue()
 
@@ -314,17 +357,30 @@ def handler(event: dict, context) -> dict:
     cls_lbl  = str(body.get("classLabel", ""))[:10]
     date_s   = str(body.get("date",       ""))[:12]
 
+    # Список учеников: каждый получит персональный бланк с ФИО + QR
+    raw_students = body.get("students") or []
+    students = []
+    if isinstance(raw_students, list):
+        for s in raw_students[:200]:
+            code = str(s.get("code", "")).strip()[:16]
+            name = str(s.get("name", "")).strip()[:60]
+            clbl = str(s.get("classLabel", "")).strip()[:10]
+            if code and name:
+                students.append({"code": code, "name": name, "classLabel": clbl})
+
     opts = RU_OPTS[:n_opts]
     cfg  = {
         "n_q": n_q, "opts": opts, "work_id": work_id, "title": title,
         "subject": subject, "class_label": cls_lbl, "date": date_s,
     }
 
-    pdf_bytes = render_pdf(cfg, per_page)
+    pdf_bytes = render_pdf(cfg, per_page, students)
+    suffix = f"_{len(students)}st" if students else ""
     return _resp(200, {
         "pdf_b64":        base64.b64encode(pdf_bytes).decode(),
-        "filename":       f"blank_{work_id}_{n_q}q.pdf",
+        "filename":       f"blank_{work_id}_{n_q}q{suffix}.pdf",
         "questionsCount": n_q,
         "optionsCount":   n_opts,
         "options":        opts,
+        "studentsCount":  len(students),
     })

@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Icon from "@/components/ui/icon";
 import { WORK_TYPES, SUBJECTS } from "./types";
 import { blankApi } from "@/lib/api";
+import { useAppStore } from "@/store/appStore";
 
 export interface BlankConfig {
   workId: string;
@@ -35,18 +36,14 @@ function BlankPreview({ config }: { config: BlankConfig }) {
   const R      = Math.min(CELL_W * 0.38, 7);
   const ROW_H  = R * 2 + 5;
 
-  // Код ученика: 5 строк × 10 кружков (компактно)
-  const NUM_W2  = 12;  // ширина под номер разряда
-  const CR2     = 5;   // радиус кружка кода
-  const CGAP_X  = CR2 * 2 + 2;
-  const CGAP_Y  = CR2 * 2 + 3;
-  const CODE_ROWS = 5;
-  const CODE_COLS = 10;
-  const CODE_HDR  = 16; // «КОД УЧЕНИКА» + заголовок 0-9
-  const CODE_H    = CODE_HDR + CODE_ROWS * CGAP_Y + 4;
+  // Идентификация ученика: QR-код с реперами
+  const QR_SIZE = 40;       // сторона QR в превью
+  const QR_PAD  = 4;        // отступ репера от QR
+  const QR_ACS  = 5;        // размер репера зоны QR
+  const CODE_H  = QR_SIZE + 2 * (QR_PAD + QR_ACS) + 6;
 
   const FOOT_H = 16;
-  const CODE_GAP = 14;   // увеличенный зазор между ответами и кодом (как в PDF)
+  const CODE_GAP = 14;   // зазор между ответами и зоной QR
   const svgW   = PAD * 2 + COL_W * nCols;
   const svgH   = HDR_H + META_H + HDR_G + nRows * ROW_H + CODE_GAP + CODE_H + FOOT_H + 6;
 
@@ -54,9 +51,12 @@ function BlankPreview({ config }: { config: BlankConfig }) {
   const gridBottom = gridTop + nRows * ROW_H;
   const codeTop = gridBottom + CODE_GAP;
 
+  // Зона QR
+  const qrCx = PAD + QR_ACS + QR_PAD + QR_SIZE / 2;
+  const qrCy = codeTop + QR_ACS + QR_PAD + QR_SIZE / 2;
+
   // Реперы (чёрные квадраты) — как на печатном бланке
   const AS = 6;          // размер репера ответов
-  const ACS = 5;         // размер репера кода
   const axL = PAD * 0.5;
   const axR = svgW - PAD * 0.5;
   const ayT = gridTop + 1;
@@ -129,33 +129,17 @@ function BlankPreview({ config }: { config: BlankConfig }) {
       <Anchor x={axL} y={ayB} s={AS}/>
       <Anchor x={axR} y={ayB} s={AS}/>
 
-      {/* КОД УЧЕНИКА */}
-      {Array.from({length: CODE_COLS}).map((_, col) => (
-        <text key={`cd${col}`}
-          x={PAD + NUM_W2 + col*CGAP_X + CR2}
-          y={codeTop + CODE_HDR - 3}
-          textAnchor="middle" fill="#1e3a5f" fontSize={5.5} fontWeight="bold"
-        >{col}</text>
-      ))}
-      {Array.from({length: CODE_ROWS}).map((_, row) =>
-        Array.from({length: CODE_COLS}).map((_, col) => {
-          const cx = PAD + NUM_W2 + col*CGAP_X + CR2;
-          const cy = codeTop + CODE_HDR + row*CGAP_Y + CR2;
-          return (
-            <g key={`cc${row}${col}`}>
-              <circle cx={cx} cy={cy} r={CR2} fill="white" stroke="#1e3a5f" strokeWidth={0.6}/>
-              <text x={cx} y={cy+CR2*0.42} textAnchor="middle" fill="#8898aa" fontSize={CR2} fontWeight="bold">{col}</text>
-            </g>
-          );
-        })
-      )}
-      <text x={PAD} y={codeTop+CODE_HDR+CODE_ROWS*CGAP_Y+12} fill="#1a1a2e" fontSize={6.5} fontWeight="bold">КОД УЧЕНИКА</text>
+      {/* Зона идентификации: QR-код ученика (заглушка превью) */}
+      <rect x={qrCx - QR_SIZE/2} y={qrCy - QR_SIZE/2} width={QR_SIZE} height={QR_SIZE} fill="white" stroke="#1e3a5f" strokeWidth={0.6}/>
+      <text x={qrCx} y={qrCy + 2} textAnchor="middle" fill="#8898aa" fontSize={6}>QR ученика</text>
+      <text x={qrCx + QR_SIZE/2 + QR_ACS + 8} y={qrCy - 2} fill="#1a1a2e" fontSize={6.5} fontWeight="bold">ИДЕНТИФИКАЦИЯ УЧЕНИКА</text>
+      <text x={qrCx + QR_SIZE/2 + QR_ACS + 8} y={qrCy + 8} fill="#8898aa" fontSize={5}>QR определяет ученика автоматически</text>
 
-      {/* Реперы зоны кода */}
-      <Anchor x={axL} y={codeTop + CODE_HDR - 4} s={ACS}/>
-      <Anchor x={axR} y={codeTop + CODE_HDR - 4} s={ACS}/>
-      <Anchor x={axL} y={codeTop + CODE_HDR + CODE_ROWS*CGAP_Y + 2} s={ACS}/>
-      <Anchor x={axR} y={codeTop + CODE_HDR + CODE_ROWS*CGAP_Y + 2} s={ACS}/>
+      {/* 4 репера вокруг QR */}
+      <Anchor x={qrCx - QR_SIZE/2 - QR_PAD - QR_ACS/2} y={qrCy - QR_SIZE/2 - QR_PAD - QR_ACS/2} s={QR_ACS}/>
+      <Anchor x={qrCx + QR_SIZE/2 + QR_PAD + QR_ACS/2} y={qrCy - QR_SIZE/2 - QR_PAD - QR_ACS/2} s={QR_ACS}/>
+      <Anchor x={qrCx - QR_SIZE/2 - QR_PAD - QR_ACS/2} y={qrCy + QR_SIZE/2 + QR_PAD + QR_ACS/2} s={QR_ACS}/>
+      <Anchor x={qrCx + QR_SIZE/2 + QR_PAD + QR_ACS/2} y={qrCy + QR_SIZE/2 + QR_PAD + QR_ACS/2} s={QR_ACS}/>
 
       {/* Нижняя строка */}
       <text x={PAD} y={svgH-4} fill="#8898aa" fontSize={5.5}>
@@ -185,6 +169,41 @@ export function BlankGenerator({ workId, workTitle, questionsCount: initQ, onClo
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Выбор учеников для персональных бланков (QR + ФИО)
+  const { students } = useAppStore();
+  const [selectedCodes, setSelectedCodes] = useState<Set<string>>(new Set());
+  const [classFilter, setClassFilter] = useState<string>("all");
+
+  // Доступные классы из списка учеников
+  const classOptions = useMemo(() => {
+    const set = new Set<string>();
+    students.forEach(s => set.add(`${s.classNum}${s.classLetter}`));
+    return Array.from(set).sort();
+  }, [students]);
+
+  const visibleStudents = useMemo(() => {
+    return students
+      .filter(s => classFilter === "all" || `${s.classNum}${s.classLetter}` === classFilter)
+      .sort((a, b) => a.name.localeCompare(b.name, "ru"));
+  }, [students, classFilter]);
+
+  const toggleStudent = (code: string) => {
+    setSelectedCodes(prev => {
+      const next = new Set(prev);
+      if (next.has(code)) next.delete(code); else next.add(code);
+      return next;
+    });
+  };
+
+  const toggleAllVisible = () => {
+    const allSelected = visibleStudents.every(s => selectedCodes.has(s.code));
+    setSelectedCodes(prev => {
+      const next = new Set(prev);
+      visibleStudents.forEach(s => { if (allSelected) next.delete(s.code); else next.add(s.code); });
+      return next;
+    });
+  };
+
   const upd = (k: keyof BlankConfig, v: unknown) =>
     setConfig(c => ({ ...c, [k]: v }));
 
@@ -192,6 +211,12 @@ export function BlankGenerator({ workId, workTitle, questionsCount: initQ, onClo
     setLoading(true);
     setError(null);
     try {
+      const chosen = students.filter(s => selectedCodes.has(s.code));
+      const studentsPayload = chosen.map(s => ({
+        code: s.code,
+        name: s.name,
+        classLabel: `${s.classNum}${s.classLetter}`,
+      }));
       await blankApi.download({
         workId:         config.workId,
         workTitle:      config.workTitle,
@@ -201,6 +226,7 @@ export function BlankGenerator({ workId, workTitle, questionsCount: initQ, onClo
         subject:        config.subject,
         classLabel:     config.classLabel,
         date:           config.date,
+        students:       studentsPayload,
       });
     } catch (e) {
       setError((e as Error).message);
@@ -338,6 +364,63 @@ export function BlankGenerator({ workId, workTitle, questionsCount: initQ, onClo
             </div>
           </section>
 
+          {/* Ученики (персональные бланки с QR) */}
+          <section>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Ученики (QR на бланке)</p>
+              {selectedCodes.size > 0 && (
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">
+                  {selectedCodes.size}
+                </span>
+              )}
+            </div>
+
+            {students.length === 0 ? (
+              <p className="text-xs text-gray-400 bg-white border border-gray-200 rounded-lg p-2.5">
+                Список учеников пуст. Будет напечатан пустой бланк без QR. Добавьте учеников в разделе «Ученики».
+              </p>
+            ) : (
+              <div className="space-y-2">
+                <select
+                  value={classFilter}
+                  onChange={e => setClassFilter(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="all">Все классы</option>
+                  {classOptions.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+
+                <button
+                  onClick={toggleAllVisible}
+                  className="w-full text-xs text-blue-600 hover:text-blue-700 font-medium py-1"
+                >
+                  {visibleStudents.every(s => selectedCodes.has(s.code)) ? "Снять выделение" : "Выбрать всех"}
+                </button>
+
+                <div className="max-h-48 overflow-y-auto border border-gray-200 rounded-lg bg-white divide-y divide-gray-100">
+                  {visibleStudents.map(s => {
+                    const checked = selectedCodes.has(s.code);
+                    return (
+                      <label key={s.code} className="flex items-center gap-2 px-2.5 py-2 cursor-pointer hover:bg-gray-50">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleStudent(s.code)}
+                          className="w-4 h-4 accent-blue-600 flex-shrink-0"
+                        />
+                        <span className="flex-1 text-sm text-gray-800 truncate">{s.name}</span>
+                        <span className="text-[10px] text-gray-400 font-mono">{s.classNum}{s.classLetter}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+                <p className="text-[11px] text-gray-400">
+                  На каждого выбранного — отдельный бланк с его ФИО и персональным QR-кодом.
+                </p>
+              </div>
+            )}
+          </section>
+
           {/* Ошибка */}
           {error && (
             <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg p-2.5 flex gap-2">
@@ -354,7 +437,9 @@ export function BlankGenerator({ workId, workTitle, questionsCount: initQ, onClo
           >
             {loading
               ? <><Icon name="Loader2" size={16} className="animate-spin" /> Генерируем PDF…</>
-              : <><Icon name="Download" size={16} /> Скачать PDF</>
+              : <><Icon name="Download" size={16} />
+                  {selectedCodes.size > 0 ? `Скачать ${selectedCodes.size} бланк(ов)` : "Скачать пустой бланк"}
+                </>
             }
           </button>
 
@@ -363,7 +448,7 @@ export function BlankGenerator({ workId, workTitle, questionsCount: initQ, onClo
             <div className="font-semibold text-blue-700 mb-1">Как заполнять</div>
             <div>● — закрасить кружок выбранного ответа</div>
             <div>✕ — зачеркнуть ошибочный, закрасить верный</div>
-            <div>Код ученика — 5 цифр для автоматической привязки</div>
+            <div>QR-код определяет ученика автоматически</div>
           </div>
         </div>
 

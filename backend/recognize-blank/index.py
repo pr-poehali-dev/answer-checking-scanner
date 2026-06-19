@@ -3,7 +3,8 @@
 POST / — { image: base64, questionsCount?: 20, optionsCount?: 4, answerKey?: "АБВГ..." }
 -> { studentCode, answers[], confidence[], analysis }
 """
-# v50: student identification via QR code (cv2.QRCodeDetector) instead of code circles
+# v51: mask QR zones before answer-anchor detection (QR modules were stealing anchors).
+# Reject small candidates (QR modules) in corner-anchor selection.
 import json, base64, math
 import numpy as np
 import cv2
@@ -137,6 +138,14 @@ def _select_corner_anchors(cands, img_w, img_h, x_off=0, y_off=0,
     """
     if len(cands) < 4:
         return None
+
+    # Отбраковываем мелкие кандидаты (модули QR, шум): настоящие реперы — крупные.
+    # Берём только те, чья сторона ≥ 60% от максимальной среди кандидатов.
+    if len(cands) > 4:
+        max_side = max(c[4] for c in cands)
+        big = [c for c in cands if c[4] >= max_side * 0.6]
+        if len(big) >= 4:
+            cands = big
 
     xs = sorted(c[0] for c in cands)
     x_lo, x_hi = xs[0], xs[-1]
@@ -281,6 +290,39 @@ def _parse_qr_payload(txt: str) -> str:
     return txt[:16]
 
 
+def _detect_qr_boxes(gray):
+    """Находит прямоугольники всех QR-кодов на листе (для маскировки зон).
+    Возвращает список (x0, y0, x1, y1) в пикселях исходного gray."""
+    boxes = []
+    detector = cv2.QRCodeDetector()
+    try:
+        ok, pts = detector.detectMulti(gray)
+    except Exception:
+        ok, pts = False, None
+    if ok and pts is not None:
+        for quad in pts:
+            xs = [p[0] for p in quad]
+            ys = [p[1] for p in quad]
+            boxes.append((int(min(xs)), int(min(ys)), int(max(xs)), int(max(ys))))
+    return boxes
+
+
+def _mask_qr_zones(gray, boxes, margin_frac=0.55):
+    """Закрашивает белым зоны QR + поля вокруг (где стоят реперы QR),
+    чтобы они не путались с реперами зоны ответов."""
+    if not boxes:
+        return gray
+    masked = gray.copy()
+    h, w = gray.shape
+    for (x0, y0, x1, y1) in boxes:
+        mw = int((x1 - x0) * margin_frac)
+        mh = int((y1 - y0) * margin_frac)
+        mx0 = max(0, x0 - mw); my0 = max(0, y0 - mh)
+        mx1 = min(w, x1 + mw); my1 = min(h, y1 + mh)
+        masked[my0:my1, mx0:mx1] = 255
+    return masked
+
+
 def _read_qr_code(img, gray):
     """Декодирует QR-код ученика. Пробует несколько вариантов изображения."""
     dbg = {"tried": [], "raw": ""}
@@ -299,6 +341,19 @@ def _read_qr_code(img, gray):
     try:
         big = cv2.resize(gray, None, fx=1.6, fy=1.6, interpolation=cv2.INTER_CUBIC)
         variants.append(("x1.6", big))
+    except Exception:
+        pass
+
+    # Сначала пробуем мультидетект (несколько QR на странице) и берём первый валидный
+    try:
+        ok, datas, pts, _ = detector.detectAndDecodeMulti(gray)
+        if ok and datas:
+            for d in datas:
+                code = _parse_qr_payload(d)
+                if code:
+                    dbg["raw"] = d
+                    dbg["matched_variant"] = "multi"
+                    return code, dbg
     except Exception:
         pass
 
@@ -326,13 +381,19 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
 
     dbg_find = {"img_hw": [h, w]}
 
-    # ── 1. ЯКОРЯ ОТВЕТОВ — 4 крупных квадрата в верхних ~78% листа ────────────
+    # ── 0. МАСКИРУЕМ зоны QR-кодов: их модули и реперы мешают поиску ──────────
+    # якорей зоны ответов (выглядят как мелкие сплошные квадраты).
+    qr_boxes = _detect_qr_boxes(gray)
+    dbg_find["qr_boxes"] = qr_boxes
+    gray_anc = _mask_qr_zones(gray, qr_boxes)
+
+    # ── 1. ЯКОРЯ ОТВЕТОВ — 4 крупных квадрата (на изображении без QR) ─────────
     ans_zone_h = int(h * 0.78)
-    cands_ans = _find_anchors(gray[:ans_zone_h, :], debug=dbg_find)
+    cands_ans = _find_anchors(gray_anc[:ans_zone_h, :], debug=dbg_find)
     anchors = _select_corner_anchors(cands_ans, w, ans_zone_h,
                                      min_w_frac=0.45, min_h_frac=0.15)
     if not anchors:
-        cands_ans = _find_anchors(gray, debug=dbg_find)
+        cands_ans = _find_anchors(gray_anc, debug=dbg_find)
         anchors = _select_corner_anchors(cands_ans, w, h,
                                          min_w_frac=0.40, min_h_frac=0.12)
 

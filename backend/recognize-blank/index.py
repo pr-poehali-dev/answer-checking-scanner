@@ -8,6 +8,7 @@ POST / — { image: base64, questionsCount?: 20, optionsCount?: 4, answerKey?: "
 # v53: stricter "filled" threshold (reject ~0.2 background noise false positives).
 # v54: auto-detect real answer circles (Hough) and calibrate template X-cols / Y-rows
 # to them — fixes column shift when printed grid differs from template geometry.
+# v54.1: coerce float coords to int in _darkness (slice indices fix).
 import json, base64, math
 import numpy as np
 import cv2
@@ -243,6 +244,8 @@ def _darkness(gray, cx, cy, cw, ch, thr_value: int = 100) -> float:
     целиком, но НЕ задеваем рамку и серую печатную букву-подпись (А/Б/В/Г) у края.
     Порог ФИКСИРОВАННЫЙ — серая буква (~120-150) не считается, только чернила (<thr).
     """
+    cx = int(round(cx)); cy = int(round(cy))
+    cw = int(round(cw)); ch = int(round(ch))
     sz = int(min(cw, ch) * 0.72)
     sz = max(10, sz)
     x1 = max(0, cx - sz // 2)

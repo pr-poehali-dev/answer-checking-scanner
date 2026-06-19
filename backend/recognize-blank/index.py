@@ -3,8 +3,8 @@
 POST / — { image: base64, questionsCount?: 20, optionsCount?: 4, answerKey?: "АБВГ..." }
 -> { studentCode, answers[], confidence[], analysis }
 """
-# v51: mask QR zones before answer-anchor detection (QR modules were stealing anchors).
-# Reject small candidates (QR modules) in corner-anchor selection.
+# v52: robust QR read for phone photos (CLAHE/adaptive/unsharp/upscale variants) +
+# density-based QR-zone masking fallback when decode fails.
 import json, base64, math
 import numpy as np
 import cv2
@@ -290,20 +290,88 @@ def _parse_qr_payload(txt: str) -> str:
     return txt[:16]
 
 
+def _qr_prep_variants(gray):
+    """Набор предобработанных вариантов изображения для устойчивой детекции QR
+    на фото с телефона (тени, низкий контраст, наклон)."""
+    variants = []
+    # CLAHE — выравнивание локального контраста
+    try:
+        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+        variants.append(clahe.apply(gray))
+    except Exception:
+        pass
+    # Адаптивная бинаризация (борется с неравномерным освещением)
+    try:
+        ad = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                   cv2.THRESH_BINARY, 31, 7)
+        variants.append(ad)
+    except Exception:
+        pass
+    # Резкость (unsharp) для смазанных фото
+    try:
+        blur = cv2.GaussianBlur(gray, (0, 0), 3)
+        variants.append(cv2.addWeighted(gray, 1.6, blur, -0.6, 0))
+    except Exception:
+        pass
+    return variants
+
+
 def _detect_qr_boxes(gray):
     """Находит прямоугольники всех QR-кодов на листе (для маскировки зон).
-    Возвращает список (x0, y0, x1, y1) в пикселях исходного gray."""
+    Возвращает список (x0, y0, x1, y1) в пикселях исходного gray.
+    Если детектор не нашёл QR — ищем по морфологии плотный кластор тёмных
+    квадратов (характерный паттерн QR), чтобы всё равно замаскировать зону."""
     boxes = []
     detector = cv2.QRCodeDetector()
+    candidates_img = [gray] + _qr_prep_variants(gray)
+    for im in candidates_img:
+        try:
+            ok, pts = detector.detectMulti(im)
+        except Exception:
+            ok, pts = False, None
+        if ok and pts is not None:
+            for quad in pts:
+                xs = [p[0] for p in quad]
+                ys = [p[1] for p in quad]
+                boxes.append((int(min(xs)), int(min(ys)), int(max(xs)), int(max(ys))))
+        if boxes:
+            return boxes
+
+    # Фолбэк: ищем плотные кластеры мелких тёмных квадратов (модули QR).
+    boxes = _detect_qr_by_density(gray)
+    return boxes
+
+
+def _detect_qr_by_density(gray):
+    """Эвристика: QR — это плотный квадратный блок чёрно-белых модулей.
+    Закрываем модули морфологией в сплошной блок и берём ~квадратные контуры."""
+    h, w = gray.shape
     try:
-        ok, pts = detector.detectMulti(gray)
+        _, bw = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     except Exception:
-        ok, pts = False, None
-    if ok and pts is not None:
-        for quad in pts:
-            xs = [p[0] for p in quad]
-            ys = [p[1] for p in quad]
-            boxes.append((int(min(xs)), int(min(ys)), int(max(xs)), int(max(ys))))
+        return []
+    # Склеиваем близко стоящие модули в сплошной блок
+    ksz = max(8, int(min(h, w) * 0.012))
+    k = cv2.getStructuringElement(cv2.MORPH_RECT, (ksz, ksz))
+    closed = cv2.morphologyEx(bw, cv2.MORPH_CLOSE, k, iterations=2)
+    cnts, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    boxes = []
+    min_side = int(min(h, w) * 0.06)   # QR ≈ 22мм → заметный блок
+    max_side = int(min(h, w) * 0.45)
+    for cnt in cnts:
+        x, y, cw, ch = cv2.boundingRect(cnt)
+        side = (cw + ch) / 2
+        if not (min_side < side < max_side):
+            continue
+        if not (0.7 < cw / max(ch, 1) < 1.4):   # QR ~квадратный
+            continue
+        # Плотность чёрного внутри блока должна быть высокой (модули QR)
+        roi = bw[y:y+ch, x:x+cw]
+        if roi.size == 0:
+            continue
+        density = float(np.mean(roi > 0))
+        if 0.25 < density < 0.85:
+            boxes.append((x, y, x + cw, y + ch))
     return boxes
 
 
@@ -324,50 +392,50 @@ def _mask_qr_zones(gray, boxes, margin_frac=0.55):
 
 
 def _read_qr_code(img, gray):
-    """Декодирует QR-код ученика. Пробует несколько вариантов изображения."""
+    """Декодирует QR-код ученика. Устойчиво к фото с телефона: перебирает
+    предобработанные и увеличенные варианты изображения."""
     dbg = {"tried": [], "raw": ""}
     detector = cv2.QRCodeDetector()
 
-    variants = [("gray", gray)]
-    # Увеличенный контраст
+    # Базовые варианты + предобработка (CLAHE, adaptive, unsharp)
+    variants = [("gray", gray), ("color", img)]
     try:
         _, th = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         variants.append(("otsu", th))
     except Exception:
         pass
-    # Цветное (иногда детектору проще)
-    variants.append(("color", img))
-    # Увеличенное изображение
-    try:
-        big = cv2.resize(gray, None, fx=1.6, fy=1.6, interpolation=cv2.INTER_CUBIC)
-        variants.append(("x1.6", big))
-    except Exception:
-        pass
-
-    # Сначала пробуем мультидетект (несколько QR на странице) и берём первый валидный
-    try:
-        ok, datas, pts, _ = detector.detectAndDecodeMulti(gray)
-        if ok and datas:
-            for d in datas:
-                code = _parse_qr_payload(d)
-                if code:
-                    dbg["raw"] = d
-                    dbg["matched_variant"] = "multi"
-                    return code, dbg
-    except Exception:
-        pass
+    for i, v in enumerate(_qr_prep_variants(gray)):
+        variants.append((f"prep{i}", v))
+    # Увеличенные версии (мелкий QR на фото)
+    for fx in (1.5, 2.0):
+        try:
+            variants.append((f"x{fx}", cv2.resize(gray, None, fx=fx, fy=fx,
+                                                   interpolation=cv2.INTER_CUBIC)))
+        except Exception:
+            pass
 
     for name, im in variants:
         dbg["tried"].append(name)
+        # Мультидетект (несколько бланков на листе)
         try:
-            data, pts, _ = detector.detectAndDecode(im)
+            ok, datas, _, _ = detector.detectAndDecodeMulti(im)
+            if ok and datas:
+                for d in datas:
+                    code = _parse_qr_payload(d)
+                    if code:
+                        dbg["raw"] = d; dbg["matched_variant"] = name + "/multi"
+                        return code, dbg
+        except Exception:
+            pass
+        # Одиночный детект+декод
+        try:
+            data, _, _ = detector.detectAndDecode(im)
         except Exception:
             data = ""
         if data:
-            dbg["raw"] = data
-            dbg["matched_variant"] = name
             code = _parse_qr_payload(data)
             if code:
+                dbg["raw"] = data; dbg["matched_variant"] = name
                 return code, dbg
 
     return "", dbg

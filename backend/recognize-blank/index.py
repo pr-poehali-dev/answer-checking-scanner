@@ -5,6 +5,8 @@ POST / — { image: base64, questionsCount?: 20, optionsCount?: 4, answerKey?: "
 """
 # v52: robust QR read for phone photos (CLAHE/adaptive/unsharp/upscale variants) +
 # density-based QR-zone masking fallback when decode fails.
+# v53: stricter "filled" threshold (reject ~0.2 background noise false positives).
+# v53.1: redeploy confirm.
 import json, base64, math
 import numpy as np
 import cv2
@@ -530,10 +532,15 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
                               "norm_gap": round(norm_gap, 4),
                               "xy": [(px, py) for (_, px, py) in row],
                               "thr": thr_value, "chosen": chosen})
-        is_marked = max_f > 0.07 and (gap > 0.03 or norm_gap > 0.18)
+        # Закрашенный кружок тёмный почти целиком (≈0.8-1.0), тогда как фоновый
+        # шум/тень/печатная буква дают лишь ≈0.15-0.25. Поэтому требуем:
+        #  • высокую абсолютную закраску (max_f ≥ 0.45), ИЛИ
+        #  • умеренную закраску при ОЧЕНЬ явном отрыве от остальных.
+        is_marked = (max_f >= 0.45 and gap >= 0.20) or \
+                    (max_f >= 0.30 and gap >= 0.25 and norm_gap >= 0.55)
         if is_marked:
             answers.append(chosen)
-            confidences.append(round(min(0.99, norm_gap * 0.7 + gap * 2 + 0.2), 2))
+            confidences.append(round(min(0.99, norm_gap * 0.5 + max_f * 0.5), 2))
         else:
             answers.append(""); confidences.append(0.0)
 

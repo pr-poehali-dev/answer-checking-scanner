@@ -6,7 +6,8 @@ POST / — { image: base64, questionsCount?: 20, optionsCount?: 4, answerKey?: "
 # v52: robust QR read for phone photos (CLAHE/adaptive/unsharp/upscale variants) +
 # density-based QR-zone masking fallback when decode fails.
 # v53: stricter "filled" threshold (reject ~0.2 background noise false positives).
-# v53.1: redeploy confirm.
+# v54: auto-detect real answer circles (Hough) and calibrate template X-cols / Y-rows
+# to them — fixes column shift when printed grid differs from template geometry.
 import json, base64, math
 import numpy as np
 import cv2
@@ -443,6 +444,100 @@ def _read_qr_code(img, gray):
     return "", dbg
 
 
+def _cluster_1d(values, n_target, tol):
+    """Группирует значения в кластеры (расстояние < tol), возвращает центры
+    кластеров, отсортированные по возрастанию. Сливает близкие."""
+    if not values:
+        return []
+    vs = sorted(values)
+    clusters = [[vs[0]]]
+    for v in vs[1:]:
+        if v - clusters[-1][-1] <= tol:
+            clusters[-1].append(v)
+        else:
+            clusters.append([v])
+    centers = [float(np.mean(c)) for c in clusters]
+    return centers
+
+
+def _calibrate_cells_to_circles(gray, cells_by_q, n_q, n_opts,
+                                anchors_px_w, gx0, gy0, gx1, gy1):
+    """Находит реальные кружки внутри зоны ответов и калибрует X-колонки и
+    Y-строки шаблона по ним. Возвращает (cells_by_q_calibrated, debug)."""
+    dbg = {"detected": 0}
+    h, w = gray.shape
+    n_cols = 1 if n_q <= 15 else (2 if n_q <= 40 else 3)
+    n_rows = math.ceil(n_q / n_cols)
+    total_cols = n_opts * n_cols   # столбцов кружков на всю ширину
+
+    # Ожидаемый радиус кружка из шаблона (sq/2 ≈ rel_sq). Берём из расстояния
+    # между соседними клетками одной строки.
+    sample = cells_by_q.get(0, [])
+    if len(sample) >= 2:
+        sx = sorted(p[1] for p in sample)
+        est_step = np.median(np.diff(sx)) if len(sx) > 1 else anchors_px_w * 0.04
+    else:
+        est_step = anchors_px_w * 0.04
+    r_guess = max(6, int(est_step * 0.42))
+
+    # Детектируем кружки HoughCircles в зоне ответов
+    pad = int(r_guess * 2)
+    zx0 = max(0, gx0 - pad); zy0 = max(0, gy0 - pad)
+    zx1 = min(w, gx1 + pad); zy1 = min(h, gy1 + pad)
+    zone = gray[zy0:zy1, zx0:zx1]
+    if zone.size == 0:
+        return cells_by_q, dbg
+    bl = cv2.GaussianBlur(zone, (5, 5), 1)
+    circles = cv2.HoughCircles(
+        bl, cv2.HOUGH_GRADIENT, dp=1.2,
+        minDist=int(r_guess * 1.6),
+        param1=80, param2=18,
+        minRadius=int(r_guess * 0.55), maxRadius=int(r_guess * 1.7))
+    if circles is None:
+        dbg["fallback"] = "no_circles"
+        return cells_by_q, dbg
+    cx_list = [float(x) + zx0 for x, y, r in circles[0]]
+    cy_list = [float(y) + zy0 for x, y, r in circles[0]]
+    dbg["detected"] = len(cx_list)
+
+    # Калибровка X-колонок: кластеризуем X всех кружков
+    col_centers = _cluster_1d(cx_list, total_cols, tol=est_step * 0.5)
+    # Калибровка Y-строк
+    row_centers = _cluster_1d(cy_list, n_rows, tol=est_step * 0.6)
+    dbg["col_centers"] = [int(c) for c in col_centers]
+    dbg["row_centers"] = [int(c) for c in row_centers][:6]
+
+    # Если число найденных колонок/строк не совпало с ожидаемым — частичная
+    # калибровка: используем найденные оси, остальное оставляем по шаблону.
+    use_cols = len(col_centers) == total_cols
+    use_rows = len(row_centers) == n_rows
+    dbg["use_cols"] = use_cols
+    dbg["use_rows"] = use_rows
+    if not use_cols and not use_rows:
+        dbg["fallback"] = f"cols={len(col_centers)}/{total_cols} rows={len(row_centers)}/{n_rows}"
+        return cells_by_q, dbg
+
+    # Перестраиваем центры клеток
+    calibrated = {}
+    for qi in range(n_q):
+        ci = qi // n_rows          # индекс колонки-блока (левый/правый)
+        ri = qi % n_rows           # строка внутри блока
+        orig = sorted(cells_by_q.get(qi, []), key=lambda c: c[0])
+        new_row = []
+        for oi in range(len(orig)):
+            opt_idx, ox, oy = orig[oi]
+            nx, ny = ox, oy
+            if use_cols:
+                col_global = ci * n_opts + oi
+                if col_global < len(col_centers):
+                    nx = col_centers[col_global]
+            if use_rows and ri < len(row_centers):
+                ny = row_centers[ri]
+            new_row.append((opt_idx, nx, ny))
+        calibrated[qi] = new_row
+    return calibrated, dbg
+
+
 # ── Главная функция ───────────────────────────────────────────────────────────
 def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict:
     img, gray = _load(image_b64)
@@ -495,7 +590,7 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
     anchors_px_w = math.hypot(P_tr[0] - P_tl[0], P_tr[1] - P_tl[1])
     sq_px = max(10, int(rel_sq * anchors_px_w))
 
-    # Собираем пиксельные центры клеток по вопросам
+    # Собираем ПРИБЛИЗИТЕЛЬНЫЕ пиксельные центры клеток по вопросам (по шаблону)
     cells_by_q = {}
     for (qi, oi, u, v) in rel_cells:
         px, py = _project(u, v, P_tl, P_tr, P_bl, P_br)
@@ -510,11 +605,28 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
     bg_median = float(np.median(zone_pixels)) if zone_pixels.size else 200.0
     thr_value = max(60, min(140, int(bg_median * 0.55)))
 
+    # ── 2b. АВТООПРЕДЕЛЕНИЕ КРУЖКОВ: привязываем шаблон к реальным кружкам ────
+    # Шаблон даёт лишь грубую оценку; реальная сетка может быть смещена/шире.
+    # Находим настоящие кружки и калибруем X-колонки и Y-строки по ним.
+    cells_by_q, dbg_snap = _calibrate_cells_to_circles(
+        gray, cells_by_q, questions_count, options_count,
+        anchors_px_w, gx0, gy0, gx1, gy1)
+
+    # Размер окна чтения = по реальному шагу между кружками (если калибровка
+    # дала колонки). Иначе — по шаблону.
+    read_px = sq_px
+    cc = dbg_snap.get("col_centers") or []
+    if len(cc) >= 2:
+        steps = [cc[i+1] - cc[i] for i in range(len(cc)-1) if cc[i+1] - cc[i] > 0]
+        if steps:
+            read_px = max(sq_px, int(np.median(steps) * 0.66))
+    dbg_snap["read_px"] = read_px
+
     # ── 3. ЧИТАЕМ ОТВЕТЫ по шаблону ──────────────────────────────────────────
     answers, confidences, dbg_fills = [], [], []
     for qi in range(questions_count):
         row = sorted(cells_by_q.get(qi, []), key=lambda c: c[0])
-        fills = [_darkness(gray, px, py, sq_px, sq_px, thr_value)
+        fills = [_darkness(gray, px, py, read_px, read_px, thr_value)
                  for (_, px, py) in row]
         if not fills:
             answers.append(""); confidences.append(0.0); continue
@@ -551,7 +663,7 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
     dbg_rows_dist = ["template_grid", questions_count,
                      f"sq_px={sq_px}", f"anchors_px_w={int(anchors_px_w)}",
                      f"thr={thr_value}", f"corners={dbg_corners}",
-                     f"find={dbg_find}"]
+                     f"snap={dbg_snap}", f"find={dbg_find}"]
 
     # ── 4. ИДЕНТИФИКАЦИЯ УЧЕНИКА по QR-коду ──────────────────────────────────
     code, dbg_code = _read_qr_code(img, gray)

@@ -7,6 +7,7 @@ const PRESENTATION_URL = "https://functions.poehali.dev/9aa03e93-715c-41fd-91f4-
 const TEST_URL = "https://functions.poehali.dev/80f9c6ec-e492-47b6-881a-633a41d7e4f4";
 const SUBSCRIPTION_URL = "https://functions.poehali.dev/0dc83bdb-3da2-4cb9-b9d9-f0b48cfb25da";
 const STUDENT_LINK_URL = "https://functions.poehali.dev/23f6c20d-f0bd-4bfb-84fe-75c97564d076";
+const UDS_URL = "https://functions.poehali.dev/3f54b399-3af0-45fa-a2b6-0736484f6059";
 
 export type UserRole = "admin" | "teacher" | "tester" | "student";
 export type SubscriptionStatus = "none" | "active" | "expired" | "trial";
@@ -251,6 +252,113 @@ export const studentLinkApi = {
   // Ученик: свои результаты
   myResults: (studentLogin: string) =>
     slRequest<{ bound: boolean; results: StudentResultRow[] }>("my-results", "GET", studentLogin),
+};
+
+// ── УДС API (Управление Движения Системы) ──────────────────────────────────────
+
+export interface UdsPerms {
+  can_register: boolean;
+  can_assign_roles: string[];
+  can_tokens: boolean;
+  can_lkview: boolean;
+  can_maintenance: boolean;
+  can_subscription: boolean;
+  can_support: boolean;
+  can_block: boolean;
+}
+
+export interface UdsEmployee {
+  login: string;
+  panel_role: string;
+  panel_role_label: string;
+  operator_number: number;
+  assigned_by: string | null;
+  assigned_at: string;
+  uds_registered: boolean;
+  phone: string | null;
+  email: string | null;
+  iis_code: string | null;
+  full_name: string;
+  is_active: boolean;
+  last_seen_at: string | null;
+}
+
+export interface UdsAuditEntry {
+  actor_login: string;
+  actor_role: string | null;
+  action: string;
+  target_login: string | null;
+  details: string | null;
+  created_at: string;
+}
+
+export interface UdsUser {
+  login: string;
+  full_name: string;
+  email: string | null;
+  phone: string | null;
+  role: string;
+  is_active: boolean;
+  subscription_status: string;
+  subscription_until: string | null;
+  last_seen_at: string | null;
+  created_at: string | null;
+  created_by: string | null;
+  study_group: string | null;
+  panel_role: string | null;
+  bound: boolean;
+  bind_code: string | null;
+}
+
+async function udsRequest<T>(action: string, method: string, login: string, token: string, body?: object, query?: Record<string, string>): Promise<T> {
+  const isGet = method === "GET";
+  const qs = new URLSearchParams({ action });
+  if (isGet) { qs.set("login", login); Object.entries(query || {}).forEach(([k, v]) => qs.set(k, v)); }
+  const res = await fetch(`${UDS_URL}?${qs.toString()}`, {
+    method,
+    headers: { "Content-Type": "application/json", "X-Authorization": token },
+    ...(isGet ? {} : { body: JSON.stringify({ login, ...(body || {}) }) }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Ошибка ${res.status}`);
+  return data as T;
+}
+
+export const udsApi = {
+  login: (loginName: string, password: string) =>
+    fetch(`${UDS_URL}?action=uds-login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ login: loginName, password }),
+    }).then(async r => {
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || `Ошибка ${r.status}`);
+      return d as { ok: boolean; login: string; token: string; panel_role: string; panel_role_label: string; operator_number: number; perms: UdsPerms };
+    }),
+
+  me: (login: string, token: string) =>
+    udsRequest<{ login: string; panel_role: string | null; panel_role_label: string | null; operator_number: number | null; is_panel: boolean; uds_registered: boolean; uds_access: boolean; perms: UdsPerms | null }>("me", "GET", login, token),
+
+  employees: (login: string, token: string) =>
+    udsRequest<{ employees: UdsEmployee[] }>("employees", "GET", login, token),
+
+  employee: (login: string, token: string, targetLogin: string) =>
+    udsRequest<{ employee: UdsEmployee; logs: UdsAuditEntry[] }>("employee", "GET", login, token, undefined, { target_login: targetLogin }),
+
+  registerEmployee: (login: string, token: string, payload: { first_name: string; last_name: string; middle_name?: string; email?: string; phone?: string; panel_role: string }) =>
+    udsRequest<{ ok: boolean; login: string; password: string; iis_code: string; operator_number: number; full_name: string; panel_role: string }>("register-employee", "POST", login, token, payload),
+
+  setRole: (login: string, token: string, targetLogin: string, panelRole: string) =>
+    udsRequest<{ ok: boolean }>("set-role", "POST", login, token, { target_login: targetLogin, panel_role: panelRole }),
+
+  block: (login: string, token: string, targetLogin: string, blocked: boolean) =>
+    udsRequest<{ ok: boolean }>("block", "POST", login, token, { target_login: targetLogin, blocked }),
+
+  auditLog: (login: string, token: string, targetLogin?: string) =>
+    udsRequest<{ logs: UdsAuditEntry[] }>("audit-log", "GET", login, token, undefined, targetLogin ? { target_login: targetLogin } : {}),
+
+  users: (login: string, token: string, q?: string) =>
+    udsRequest<{ users: UdsUser[] }>("users", "GET", login, token, undefined, q ? { q } : {}),
 };
 
 // ── Institution API ───────────────────────────────────────────────────────────

@@ -1,0 +1,42 @@
+{
+  "tests": [
+    {
+      "name": "OPTIONS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    },
+    {
+      "name": "uds-login wrong creds returns 401",
+      "method": "POST",
+      "path": "/?action=uds-login",
+      "body": { "login": "nobody_xyz", "password": "wrongpass" },
+      "expectedStatus": 401
+    },
+    {
+      "name": "uds-login missing fields returns 400",
+      "method": "POST",
+      "path": "/?action=uds-login",
+      "body": { "login": "" },
+      "expectedStatus": 400
+    },
+    {
+      "name": "me without auth returns 401",
+      "method": "GET",
+      "path": "/?action=me",
+      "expectedStatus": 401
+    },
+    {
+      "name": "employees without access returns 403",
+      "method": "GET",
+      "path": "/?action=employees",
+      "expectedStatus": 403
+    },
+    {
+      "name": "unknown action returns 403 (no access)",
+      "method": "GET",
+      "path": "/?action=nope",
+      "expectedStatus": 403
+    }
+  ]
+}

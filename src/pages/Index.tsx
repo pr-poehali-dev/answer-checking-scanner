@@ -18,7 +18,6 @@ import { authApi } from "@/lib/api";
 import LoginPage from "@/pages/LoginPage";
 import LandingPage from "@/pages/LandingPage";
 import StudentCabinet from "@/pages/StudentCabinet";
-import AdminPanel from "@/pages/AdminPanel";
 import InstitutionRegisterPage from "@/pages/InstitutionRegisterPage";
 import InstitutionLoginPage from "@/pages/InstitutionLoginPage";
 import InstitutionDashboard from "@/pages/InstitutionDashboard";
@@ -92,10 +91,6 @@ export default function Index() {
   const [ouUser, setOuUser]         = useState<OUUser | null>(() => loadOUSession());
   const [hasInstitution, setHasInstitution] = useState(false);
   const [showTokensModal, setShowTokensModal] = useState(false);
-  const [showPanel, setShowPanel]       = useState(false);
-  const [adminShowLK, setAdminShowLK]   = useState(false);
-  const [hasPanelRole, setHasPanelRole] = useState(false);
-  const [panelRoleChecked, setPanelRoleChecked] = useState(false); // проверка завершена
   const { teacher, yadiskConnected, maintenanceSections, hiddenSections } = useAppStore();
   const ActiveSection = SECTION_COMPONENTS[active];
 
@@ -122,47 +117,11 @@ export default function Index() {
   useEffect(() => {
     const handler = (e: Event) => {
       const section = (e as CustomEvent).detail as Section;
-      if (section) { setActive(section); setSidebar(false); setShowPanel(false); }
+      if (section) { setActive(section); setSidebar(false); }
     };
     window.addEventListener("navigate-to-section", handler);
     return () => window.removeEventListener("navigate-to-section", handler);
   }, []);
-
-  // Открытие ЛК из ПУ (для admin и операторов)
-  useEffect(() => {
-    const handler = () => { setShowPanel(false); setAdminShowLK(true); };
-    window.addEventListener("open-lk-from-panel", handler);
-    return () => window.removeEventListener("open-lk-from-panel", handler);
-  }, []);
-
-  // Проверяем панельную роль для не-admin пользователей
-  useEffect(() => {
-    if (!teacher) return;
-    // admin — сразу помечаем проверку завершённой (они всегда в ПУ)
-    if (teacher.role === "admin") {
-      setPanelRoleChecked(true);
-      return;
-    }
-    setPanelRoleChecked(false);
-    import("@/lib/api").then(({ supportApi }) => {
-      supportApi.operators(teacher.login, teacher.authToken)
-        .then(res => {
-          const me = res.operators.find((o: { login: string; panel_role: string }) => o.login === teacher.login);
-          if (me && me.panel_role && me.panel_role !== "removed") {
-            setHasPanelRole(true);
-            setShowPanel(true); // автоматически открываем ПУ
-          } else {
-            setHasPanelRole(false);
-          }
-        })
-        .catch(() => {
-          setHasPanelRole(false);
-        })
-        .finally(() => {
-          setPanelRoleChecked(true);
-        });
-    });
-  }, [teacher?.login]);
 
   // Закрываем сайдбар при смене раздела
   const navigate = (s: Section) => { setActive(s); setSidebar(false); };
@@ -222,30 +181,9 @@ export default function Index() {
     return <StudentCabinet />;
   }
 
-  // Ждём завершения проверки панельной роли (чтобы не мигал ЛК перед ПУ)
-  if (!panelRoleChecked) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="flex flex-col items-center gap-3">
-          <Icon name="Loader2" size={24} className="animate-spin text-muted-foreground" />
-          <p className="text-xs text-muted-foreground">Загрузка…</p>
-        </div>
-      </div>
-    );
-  }
-
-  // ПУ: admin (если не нажал "Открыть ЛК") или оператор с панельной ролью
-  if ((teacher.role === "admin" && !adminShowLK) || showPanel) {
-    return (
-      <AdminPanel
-        onOpenLK={() => { setAdminShowLK(true); setShowPanel(false); }}
-      />
-    );
-  }
-
+  // УДС вынесена на отдельный домен /piot-colldent19 — на главной ПУ больше нет.
   const isTester = teacher.role === "tester";
-  const isAdminInLK = teacher.role === "admin" && adminShowLK;
-  const canGoToPanel = isAdminInLK || hasPanelRole;
+  const isAdminInLK = teacher.role === "admin";
 
   // Тестер и admin — обходят проверки подписки и Я.Диска
   if (!isTester && !isAdminInLK) {
@@ -357,19 +295,6 @@ export default function Index() {
             </span>
           </div>
         </div>
-
-        {/* Кнопка возврата в Панель Управления */}
-        {canGoToPanel && (
-          <div className="px-3 mb-2">
-            <button onClick={() => { setAdminShowLK(false); if (!isAdminInLK) setShowPanel(true); }}
-              className="w-full px-3 py-2 rounded-sm border flex items-center gap-2 hover:border-blue-400/40 transition-colors"
-              style={{ borderColor: "hsl(215 60% 40% / 0.3)", background: "hsl(215 60% 40% / 0.06)" }}>
-              <Icon name="Shield" size={13} style={{ color: "hsl(215 60% 40%)" }} />
-              <span className="text-xs flex-1 text-left" style={{ color: "hsl(215 60% 40%)" }}>Панель управления</span>
-              <Icon name="ChevronRight" size={11} style={{ color: "hsl(215 60% 40%)", opacity: 0.6 }} />
-            </button>
-          </div>
-        )}
 
         {/* User */}
         <div className="px-3 py-4 border-t" style={{ borderColor: "hsl(var(--sidebar-border))" }}>

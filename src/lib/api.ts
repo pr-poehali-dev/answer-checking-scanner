@@ -318,6 +318,20 @@ export interface UdsCharge {
   created_at: string | null;
 }
 
+export interface UdsCert {
+  status: "assigned" | "issuing" | "active" | "revoked";
+  container_type: string | null;
+  serial_number: string | null;
+  fingerprint?: string | null;
+  not_before?: string | null;
+  not_after: string | null;
+  assigned_by: string | null;
+  assigned_at: string | null;
+  issued_at?: string | null;
+  revoked_by?: string | null;
+  revoked_at?: string | null;
+}
+
 export interface UdsEmployee {
   login: string;
   panel_role: string;
@@ -396,7 +410,7 @@ export const udsApi = {
     ),
 
   me: (login: string, token: string) =>
-    udsRequest<{ login: string; panel_role: string | null; panel_role_label: string | null; operator_number: number | null; is_panel: boolean; uds_registered: boolean; uds_access: boolean; perms: UdsPerms | null }>("me", "GET", login, token),
+    udsRequest<{ login: string; panel_role: string | null; panel_role_label: string | null; operator_number: number | null; is_panel: boolean; uds_registered: boolean; uds_access: boolean; perms: UdsPerms | null; my_cert: UdsCert | null }>("me", "GET", login, token),
 
   employees: (login: string, token: string) =>
     udsRequest<{ employees: UdsEmployee[] }>("employees", "GET", login, token),
@@ -448,6 +462,30 @@ export const udsApi = {
 
   setMaintenance: (login: string, token: string, sections: string[]) =>
     udsRequest<{ ok: boolean; sections: string[] }>("maintenance", "POST", login, token, { sections }),
+
+  // ── Сертификаты УДС ──
+  certChallenge: () =>
+    udsPost<{ nonce: string }>("cert-challenge", {}),
+
+  certLogin: (fingerprint: string, nonce: string, signature: string) =>
+    udsPost<{ ok: boolean; login: string; token: string; panel_role: string; panel_role_label: string; operator_number: number; perms: UdsPerms }>(
+      "cert-login", { fingerprint, nonce, signature }
+    ),
+
+  assignCert: (login: string, token: string, targetLogin: string, issueCode: string) =>
+    udsRequest<{ ok: boolean }>("assign-cert", "POST", login, token, { target_login: targetLogin, issue_code: issueCode }),
+
+  certStatus: (login: string, token: string, targetLogin: string) =>
+    udsRequest<{ cert: UdsCert | null }>("cert-status", "GET", login, token, undefined, { target_login: targetLogin }),
+
+  certAgree: (login: string, token: string, containerType: "rutoken" | "cryptopro") =>
+    udsRequest<{ ok: boolean }>("cert-agree", "POST", login, token, { container_type: containerType }),
+
+  signCsr: (login: string, token: string, csr: string) =>
+    udsRequest<{ ok: boolean; certificate: string; serial_number: string; fingerprint: string; not_after: string }>("sign-csr", "POST", login, token, { csr }),
+
+  revokeCert: (login: string, token: string, targetLogin: string, reason?: string) =>
+    udsRequest<{ ok: boolean }>("revoke-cert", "POST", login, token, { target_login: targetLogin, reason: reason || "" }),
 };
 
 // ── Institution API ───────────────────────────────────────────────────────────

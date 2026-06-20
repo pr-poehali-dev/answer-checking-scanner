@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import Icon from "@/components/ui/icon";
-import { udsApi, UdsPerms } from "@/lib/api";
+import { udsApi, UdsPerms, UdsCert } from "@/lib/api";
+import { cryptoPlugins, ContainerType } from "@/lib/cryptoPlugins";
 import UdsEmployees from "@/pages/uds/UdsEmployees";
 import UdsUsers from "@/pages/uds/UdsUsers";
 import UdsAuditLog from "@/pages/uds/UdsAuditLog";
@@ -8,6 +9,7 @@ import UdsProfile from "@/pages/uds/UdsProfile";
 import UdsSupport from "@/pages/uds/UdsSupport";
 import UdsLkView from "@/pages/uds/UdsLkView";
 import UdsMaintenance from "@/pages/uds/UdsMaintenance";
+import UdsCertIssue from "@/pages/uds/UdsCertIssue";
 
 const PANEL_ROLE_LABELS: Record<string, string> = {
   head: "Глава Правления",
@@ -27,19 +29,43 @@ interface Session {
   perms: UdsPerms;
 }
 
-const LS_KEY = "uds_session_v2";
+const LS_KEY = "uds_session_v3";
 
 type Tab = "employees" | "users" | "audit" | "support" | "profile" | "lkview" | "maintenance";
 
 export default function UdsPage() {
   const [session, setSession] = useState<Session | null>(null);
-  const [step, setStep] = useState<"iis" | "creds">("iis");
+  const [myCert, setMyCert] = useState<UdsCert | null>(null);
+  // Способ входа: cert (по умолчанию) → certPlugin выбор; iis открывается по 5 кликам
+  const [step, setStep] = useState<"cert" | "iis" | "creds">("cert");
   const [iisCode, setIisCode] = useState("");
   const [loginName, setLoginName] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [tab, setTab] = useState<Tab>("employees");
+  const [logoClicks, setLogoClicks] = useState(0);
+
+  const applyAuth = useCallback((res: { login: string; token: string; panel_role: string; panel_role_label: string; operator_number: number; perms: UdsPerms }) => {
+    const s: Session = {
+      login: res.login, token: res.token,
+      panel_role: res.panel_role, panel_role_label: res.panel_role_label,
+      operator_number: res.operator_number, perms: res.perms,
+    };
+    setSession(s);
+    localStorage.setItem(LS_KEY, JSON.stringify(s));
+  }, []);
+
+  const refreshMe = useCallback((s: Session) => {
+    udsApi.me(s.login, s.token).then(me => {
+      if (me.uds_access && me.perms) {
+        setSession(prev => prev ? { ...prev, panel_role: me.panel_role || prev.panel_role, perms: me.perms! } : prev);
+        setMyCert(me.my_cert);
+      } else {
+        localStorage.removeItem(LS_KEY); setSession(null);
+      }
+    }).catch(() => { localStorage.removeItem(LS_KEY); setSession(null); });
+  }, []);
 
   // Восстановление сессии
   useEffect(() => {
@@ -47,17 +73,33 @@ export default function UdsPage() {
       const raw = localStorage.getItem(LS_KEY);
       if (raw) {
         const s = JSON.parse(raw) as Session;
-        // Проверяем доступ заново
-        udsApi.me(s.login, s.token).then(me => {
-          if (me.uds_access && me.perms) {
-            setSession({ ...s, panel_role: me.panel_role || s.panel_role, perms: me.perms });
-          } else {
-            localStorage.removeItem(LS_KEY);
-          }
-        }).catch(() => localStorage.removeItem(LS_KEY));
+        setSession(s);
+        refreshMe(s);
       }
     } catch { /* ignore */ }
-  }, []);
+  }, [refreshMe]);
+
+  // Вход по сертификату (плагин подписывает nonce ключом токена)
+  const certLogin = async (containerType: ContainerType, pin?: string) => {
+    setBusy(true); setError("");
+    try {
+      const { nonce } = await udsApi.certChallenge();
+      const { signature, fingerprint } = await cryptoPlugins.sign(containerType, nonce, pin);
+      const res = await udsApi.certLogin(fingerprint, nonce, signature);
+      applyAuth(res);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // 5 кликов по логотипу → открыть вход по коду ИИС
+  const onLogoClick = () => {
+    const n = logoClicks + 1;
+    setLogoClicks(n);
+    if (n >= 5) { setStep("iis"); setLogoClicks(0); setError(""); }
+  };
 
   const verifyIis = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -77,13 +119,7 @@ export default function UdsPage() {
     setBusy(true); setError("");
     try {
       const res = await udsApi.login(loginName.trim(), password, iisCode.trim());
-      const s: Session = {
-        login: res.login, token: res.token,
-        panel_role: res.panel_role, panel_role_label: res.panel_role_label,
-        operator_number: res.operator_number, perms: res.perms,
-      };
-      setSession(s);
-      localStorage.setItem(LS_KEY, JSON.stringify(s));
+      applyAuth(res);
       setPassword("");
     } catch (e) {
       setError((e as Error).message);
@@ -94,8 +130,8 @@ export default function UdsPage() {
 
   const logout = useCallback(() => {
     localStorage.removeItem(LS_KEY);
-    setSession(null);
-    setStep("iis"); setIisCode("");
+    setSession(null); setMyCert(null);
+    setStep("cert"); setIisCode("");
     setLoginName(""); setPassword("");
   }, []);
 
@@ -105,14 +141,47 @@ export default function UdsPage() {
       <div className="min-h-screen flex items-center justify-center bg-slate-900 px-4">
         <div className="w-full max-w-sm">
           <div className="text-center mb-6">
-            <div className="w-14 h-14 rounded-xl bg-blue-600 flex items-center justify-center mx-auto mb-3">
+            <button onClick={onLogoClick} title="УДС"
+              className="w-14 h-14 rounded-xl bg-blue-600 flex items-center justify-center mx-auto mb-3 active:scale-95 transition-transform">
               <Icon name="ShieldCheck" size={28} className="text-white" />
-            </div>
+            </button>
             <h1 className="text-xl font-bold text-white">УДС</h1>
             <p className="text-sm text-slate-400 mt-1">Управление Движения Системы</p>
           </div>
 
-          {step === "iis" ? (
+          {step === "cert" ? (
+            <div className="bg-white rounded-xl p-6 space-y-4 shadow-xl">
+              <div className="text-center">
+                <Icon name="BadgeCheck" size={22} className="text-blue-600 mx-auto mb-1" fallback="ShieldCheck" />
+                <p className="text-sm font-bold">Вход по сертификату</p>
+                <p className="text-[11px] text-gray-400 mt-1">Предъявите сертификат с носителя. Требуется установленный плагин.</p>
+              </div>
+              {error && (
+                <div className="flex items-start gap-2 p-2.5 rounded-lg bg-red-50 border border-red-200">
+                  <Icon name="AlertCircle" size={14} className="text-red-500 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs text-red-600">{error}</p>
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-2">
+                <button onClick={() => certLogin("rutoken")} disabled={busy}
+                  className="flex flex-col items-center gap-1.5 py-3 border border-gray-200 rounded-lg hover:border-blue-400 hover:bg-blue-50 disabled:opacity-50 transition-colors">
+                  <Icon name="Usb" size={20} className="text-blue-600" fallback="HardDrive" />
+                  <span className="text-xs font-semibold">Рутокен</span>
+                </button>
+                <button onClick={() => certLogin("cryptopro")} disabled={busy}
+                  className="flex flex-col items-center gap-1.5 py-3 border border-gray-200 rounded-lg hover:border-blue-400 hover:bg-blue-50 disabled:opacity-50 transition-colors">
+                  <Icon name="Monitor" size={20} className="text-blue-600" fallback="Cpu" />
+                  <span className="text-xs font-semibold">КриптоПро</span>
+                </button>
+              </div>
+              {busy && (
+                <p className="text-xs text-center text-muted-foreground flex items-center justify-center gap-1.5">
+                  <Icon name="Loader2" size={13} className="animate-spin" /> Проверка сертификата…
+                </p>
+              )}
+              <p className="text-[10px] text-gray-300 text-center">Вход по коду ИИС — 5 раз нажмите на значок УДС</p>
+            </div>
+          ) : step === "iis" ? (
             <form onSubmit={verifyIis} className="bg-white rounded-xl p-6 space-y-4 shadow-xl">
               <div>
                 <label className="text-xs text-gray-500 block mb-1">Код ИИС</label>
@@ -186,8 +255,28 @@ export default function UdsPage() {
               </button>
             </form>
           )}
+
+          {step === "iis" && (
+            <button onClick={() => { setStep("cert"); setError(""); }}
+              className="w-full mt-3 text-[11px] text-slate-400 hover:text-slate-200 text-center">
+              ← Вернуться ко входу по сертификату
+            </button>
+          )}
         </div>
       </div>
+    );
+  }
+
+  // ── Полноэкранный выпуск сертификата (назначен Главой/Замом) ──────────────
+  if (myCert && (myCert.status === "assigned" || myCert.status === "issuing")) {
+    return (
+      <UdsCertIssue
+        login={session.login}
+        token={session.token}
+        cert={myCert}
+        onDone={() => refreshMe(session)}
+        onLogout={logout}
+      />
     );
   }
 

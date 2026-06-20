@@ -20,7 +20,7 @@ import re
 import random
 import hashlib
 import psycopg2
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 SCHEMA = os.environ.get("MAIN_DB_SCHEMA", "t_p31556921_answer_checking_scan")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin2026")
@@ -54,6 +54,12 @@ CAN_REGISTER = {"advisor", "developer", "deputy", "head"}
 CAN_TOKENS = {"developer", "advisor", "deputy", "head"}
 # Кто может менять Вид ЛК / Тех. работы (разработчик и выше)
 CAN_LKVIEW = {"developer", "deputy", "head"}
+# Кто может выпускать и отзывать сертификаты УДС (Глава и Зам Главы)
+CAN_CERT = {"head", "deputy"}
+# Код выпуска сертификата (вводит Глава/Зам при назначении)
+CERT_ISSUE_CODE = os.environ.get("CERT_ISSUE_CODE", "di9u7")
+# Срок действия сертификата — строго 11 месяцев
+CERT_MONTHS = 11
 # Подписку могут все панельные роли
 
 
@@ -176,6 +182,7 @@ def perms_for(role: str) -> dict:
         "can_support": True,              # тех. поддержка у всех
         "can_block": PANEL_ROLE_RANK.get(role, 0) >= 5,   # блокировка СОТРУДНИКОВ — зам/глава
         "can_block_user": True,           # блокировка/смена пароля ПОЛЬЗОВАТЕЛЕЙ — все
+        "can_cert": role in CAN_CERT,     # выпуск/отзыв сертификатов — Глава и Зам
     }
 
 
@@ -186,6 +193,102 @@ def log_action(cur, actor_login, actor_role, action, target_login=None, details=
         (actor_login, actor_role, action, target_login,
          json.dumps(details, ensure_ascii=False) if isinstance(details, (dict, list)) else (details or None))
     )
+
+
+# ── Мини-УЦ "Управление УДС САОУ" ──────────────────────────────────────────────
+CA_SUBJECT_CN = 'Управление УДС "САОУ"'
+
+
+def get_or_create_ca(cur):
+    """Возвращает (ca_cert, ca_key) корневого УЦ. Создаёт при первом обращении."""
+    from cryptography import x509
+    from cryptography.x509.oid import NameOID
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    cur.execute(f"SELECT private_key_pem, certificate_pem FROM {SCHEMA}.uds_ca WHERE id = 1")
+    row = cur.fetchone()
+    if row:
+        key = serialization.load_pem_private_key(row[0].encode(), password=None)
+        cert = x509.load_pem_x509_certificate(row[1].encode())
+        return cert, key
+
+    # Генерируем корневой УЦ один раз
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    subject = issuer = x509.Name([
+        x509.NameAttribute(NameOID.COMMON_NAME, CA_SUBJECT_CN),
+        x509.NameAttribute(NameOID.ORGANIZATION_NAME, 'САОУ'),
+        x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, 'УДС'),
+    ])
+    now = datetime.now(timezone.utc)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(issuer)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(days=1))
+        .not_valid_after(now + timedelta(days=3650))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
+        .add_extension(x509.KeyUsage(digital_signature=True, key_cert_sign=True, crl_sign=True,
+                                     content_commitment=False, key_encipherment=False,
+                                     data_encipherment=False, key_agreement=False,
+                                     encipher_only=False, decipher_only=False), critical=True)
+        .sign(key, hashes.SHA256())
+    )
+    key_pem = key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    ).decode()
+    cert_pem = cert.public_bytes(serialization.Encoding.PEM).decode()
+    cur.execute(
+        f"INSERT INTO {SCHEMA}.uds_ca (id, private_key_pem, certificate_pem) VALUES (1, %s, %s) ON CONFLICT (id) DO NOTHING",
+        (key_pem, cert_pem)
+    )
+    return cert, key
+
+
+def sign_user_csr(cur, csr_pem: str, full_name: str):
+    """Подписывает PKCS#10 CSR от плагина. Возвращает (cert_pem, serial_hex, fingerprint, not_before, not_after)."""
+    from cryptography import x509
+    from cryptography.x509.oid import NameOID, ExtendedKeyUsageOID
+    from cryptography.hazmat.primitives import hashes, serialization
+
+    csr = x509.load_pem_x509_csr(csr_pem.encode())
+    if not csr.is_signature_valid:
+        raise ValueError("Подпись CSR недействительна")
+
+    ca_cert, ca_key = get_or_create_ca(cur)
+    now = datetime.now(timezone.utc)
+    # Строго 11 месяцев (≈ 11 * 30 дней)
+    not_after = now + timedelta(days=CERT_MONTHS * 30)
+
+    subject = x509.Name([
+        x509.NameAttribute(NameOID.COMMON_NAME, full_name),
+        x509.NameAttribute(NameOID.ORGANIZATION_NAME, 'САОУ'),
+        x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, 'УДС'),
+    ])
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(ca_cert.subject)
+        .public_key(csr.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(minutes=5))
+        .not_valid_after(not_after)
+        .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+        .add_extension(x509.KeyUsage(digital_signature=True, content_commitment=True,
+                                     key_encipherment=False, data_encipherment=False,
+                                     key_agreement=False, key_cert_sign=False, crl_sign=False,
+                                     encipher_only=False, decipher_only=False), critical=True)
+        .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH]), critical=False)
+        .sign(ca_key, hashes.SHA256())
+    )
+    cert_pem = cert.public_bytes(serialization.Encoding.PEM).decode()
+    serial_hex = format(cert.serial_number, 'x')
+    fingerprint = cert.fingerprint(hashes.SHA256()).hex()
+    return cert_pem, serial_hex, fingerprint, cert.not_valid_before_utc, cert.not_valid_after_utc
 
 
 def handler(event: dict, context) -> dict:
@@ -289,6 +392,80 @@ def handler(event: dict, context) -> dict:
                 "perms": perms_for(p_role),
             })
 
+        # ── cert-challenge — выдать nonce для входа по сертификату ────────────
+        if action == "cert-challenge" and method == "POST":
+            nonce = hashlib.sha256(os.urandom(32)).hexdigest()
+            return _resp(200, {"nonce": nonce})
+
+        # ── cert-login — вход по сертификату (подпись nonce ключом токена) ───
+        if action == "cert-login" and method == "POST":
+            fingerprint = (body.get("fingerprint") or "").strip().lower()
+            nonce = (body.get("nonce") or "").strip()
+            signature_b64 = (body.get("signature") or "").strip()
+            if not fingerprint or not nonce or not signature_b64:
+                return _resp(400, {"error": "Недостаточно данных для входа по сертификату"})
+            cur = conn.cursor()
+            cur.execute(
+                f"""SELECT c.login, c.certificate_pem, c.not_after, u.role, u.is_active
+                    FROM {SCHEMA}.uds_certificates c
+                    JOIN {SCHEMA}.users u ON u.login = c.login
+                    WHERE LOWER(c.fingerprint) = %s AND c.status = 'active'""",
+                (fingerprint,)
+            )
+            row = cur.fetchone()
+            if not row:
+                return _resp(403, {"error": "Сертификат не найден или отозван"})
+            cert_login, cert_pem, not_after, sys_role, is_active = row
+            if not is_active:
+                return _resp(403, {"error": "Сотрудник заблокирован"})
+            if not_after:
+                na = not_after if not_after.tzinfo else not_after.replace(tzinfo=timezone.utc)
+                if na < datetime.now(timezone.utc):
+                    return _resp(403, {"error": "Срок действия сертификата истёк"})
+            # Проверяем подпись nonce открытым ключом из сертификата
+            import base64
+            from cryptography import x509
+            from cryptography.hazmat.primitives import hashes
+            from cryptography.hazmat.primitives.asymmetric import padding, ec
+            try:
+                cert = x509.load_pem_x509_certificate(cert_pem.encode())
+                pub = cert.public_key()
+                sig = base64.b64decode(signature_b64)
+                if hasattr(pub, "verify"):
+                    try:
+                        pub.verify(sig, nonce.encode(), padding.PKCS1v15(), hashes.SHA256())
+                    except TypeError:
+                        pub.verify(sig, nonce.encode(), ec.ECDSA(hashes.SHA256()))
+            except Exception:
+                return _resp(403, {"error": "Подпись недействительна"})
+
+            cur.execute(
+                f"SELECT panel_role, operator_number, uds_registered FROM {SCHEMA}.panel_operators WHERE login = %s",
+                (cert_login,)
+            )
+            op = cur.fetchone()
+            is_admin_role = (sys_role == "admin")
+            if not is_admin_role and (not op or not op[0] or op[0] == "removed" or not op[2]):
+                return _resp(403, {"error": "Нет доступа к УДС"})
+            prefix = sys_role if sys_role in ("teacher", "student", "tester") else "teacher"
+            cur.execute(f"SELECT password_hash FROM {SCHEMA}.users WHERE login = %s", (cert_login,))
+            pwh = cur.fetchone()[0]
+            new_token = f"{prefix}:{hash_password(cert_login + pwh[:16] + 'certsalt')}"
+            cur.execute(
+                f"UPDATE {SCHEMA}.users SET last_seen_at = NOW(), auth_token_hash = %s WHERE login = %s",
+                (hash_password(new_token), cert_login)
+            )
+            log_action(cur, cert_login, op[0] if op else "head", "cert_login", cert_login, None)
+            conn.commit()
+            p_role = "head" if is_admin_role else op[0]
+            return _resp(200, {
+                "ok": True, "login": cert_login, "token": new_token,
+                "panel_role": p_role,
+                "panel_role_label": PANEL_ROLE_LABELS.get(p_role, p_role),
+                "operator_number": (op[1] if op else 1),
+                "perms": perms_for(p_role),
+            })
+
         caller = get_caller(login, token, conn)
 
         # ── me — статус доступа и права ──────────────────────────────────────
@@ -297,6 +474,24 @@ def handler(event: dict, context) -> dict:
                 return _resp(401, {"error": "Не авторизованы"})
             role = caller.get("panel_role")
             access = has_uds_access(caller)
+            # Статус собственного сертификата (для полноэкранного выпуска в ЛК)
+            my_cert = None
+            if access:
+                curc = conn.cursor()
+                curc.execute(
+                    f"""SELECT status, container_type, serial_number, not_after, assigned_by, assigned_at
+                        FROM {SCHEMA}.uds_certificates
+                        WHERE login = %s AND status IN ('assigned','issuing','active')
+                        ORDER BY assigned_at DESC LIMIT 1""",
+                    (caller["login"],)
+                )
+                rc = curc.fetchone()
+                if rc:
+                    my_cert = {
+                        "status": rc[0], "container_type": rc[1], "serial_number": rc[2],
+                        "not_after": str(rc[3]) if rc[3] else None,
+                        "assigned_by": rc[4], "assigned_at": str(rc[5]) if rc[5] else None,
+                    }
             return _resp(200, {
                 "login": caller["login"],
                 "panel_role": role,
@@ -306,6 +501,7 @@ def handler(event: dict, context) -> dict:
                 "uds_registered": caller.get("uds_registered", False),
                 "uds_access": access,
                 "perms": perms_for(role) if (access and role) else None,
+                "my_cert": my_cert,
             })
 
         # ── update-profile — смена своего логина/пароля ──────────────────────
@@ -838,6 +1034,146 @@ def handler(event: dict, context) -> dict:
             log_action(cur, caller["login"], my_role, "maintenance", None, {"sections": sections})
             conn.commit()
             return _resp(200, {"ok": True, "sections": sections})
+
+        # ════════════ СЕРТИФИКАТЫ УДС ════════════════════════════════════════
+
+        # ── assign-cert — Глава/Зам назначает выпуск сертификата сотруднику ──
+        if action == "assign-cert" and method == "POST":
+            if not perms["can_cert"]:
+                return _resp(403, {"error": "Выпуск доступен только Главе и Зам. Главы"})
+            tl = (body.get("target_login") or "").strip()
+            issue_code = (body.get("issue_code") or "").strip()
+            if not tl:
+                return _resp(400, {"error": "Укажите сотрудника"})
+            if issue_code != CERT_ISSUE_CODE:
+                return _resp(403, {"error": "Неверный код ИИС выпуска"})
+            cur = conn.cursor()
+            # сотрудник должен быть зарегистрирован в УДС
+            cur.execute(
+                f"""SELECT u.full_name, po.panel_role FROM {SCHEMA}.users u
+                    JOIN {SCHEMA}.panel_operators po ON po.login = u.login
+                    WHERE u.login = %s AND po.panel_role != 'removed' AND po.uds_registered = TRUE""",
+                (tl,)
+            )
+            r = cur.fetchone()
+            if not r:
+                return _resp(404, {"error": "Сотрудник не найден или не зарегистрирован в УДС"})
+            full_name = r[0]
+            # уже есть активный/назначенный?
+            cur.execute(
+                f"SELECT status FROM {SCHEMA}.uds_certificates WHERE login = %s AND status IN ('assigned','issuing','active')",
+                (tl,)
+            )
+            if cur.fetchone():
+                return _resp(409, {"error": "У сотрудника уже есть назначенный или активный сертификат"})
+            cur.execute(
+                f"""INSERT INTO {SCHEMA}.uds_certificates (login, full_name, status, assigned_by)
+                    VALUES (%s, %s, 'assigned', %s) RETURNING id""",
+                (tl, full_name, caller["login"])
+            )
+            log_action(cur, caller["login"], my_role, "assign_cert", tl, None)
+            conn.commit()
+            return _resp(200, {"ok": True})
+
+        # ── cert-status — статус сертификата сотрудника (для Главы/Зама) ─────
+        if action == "cert-status" and method == "GET":
+            tl = (qs.get("target_login") or "").strip()
+            if not tl:
+                return _resp(400, {"error": "Укажите сотрудника"})
+            cur = conn.cursor()
+            cur.execute(
+                f"""SELECT status, container_type, serial_number, fingerprint, not_before, not_after,
+                           assigned_by, assigned_at, issued_at, revoked_by, revoked_at
+                    FROM {SCHEMA}.uds_certificates WHERE login = %s
+                    ORDER BY assigned_at DESC LIMIT 1""", (tl,)
+            )
+            r = cur.fetchone()
+            if not r:
+                return _resp(200, {"cert": None})
+            return _resp(200, {"cert": {
+                "status": r[0], "container_type": r[1], "serial_number": r[2],
+                "fingerprint": r[3],
+                "not_before": str(r[4]) if r[4] else None,
+                "not_after": str(r[5]) if r[5] else None,
+                "assigned_by": r[6], "assigned_at": str(r[7]) if r[7] else None,
+                "issued_at": str(r[8]) if r[8] else None,
+                "revoked_by": r[9], "revoked_at": str(r[10]) if r[10] else None,
+            }})
+
+        # ── cert-agree — сотрудник согласился, выбрал носитель ──────────────
+        if action == "cert-agree" and method == "POST":
+            container_type = (body.get("container_type") or "").strip().lower()
+            if container_type not in ("rutoken", "cryptopro"):
+                return _resp(400, {"error": "Выберите носитель: rutoken или cryptopro"})
+            cur = conn.cursor()
+            cur.execute(
+                f"""UPDATE {SCHEMA}.uds_certificates
+                    SET status = 'issuing', container_type = %s
+                    WHERE login = %s AND status = 'assigned' RETURNING id""",
+                (container_type, caller["login"])
+            )
+            if not cur.fetchone():
+                return _resp(404, {"error": "Нет назначенного выпуска"})
+            log_action(cur, caller["login"], my_role, "cert_agree", caller["login"], {"container_type": container_type})
+            conn.commit()
+            return _resp(200, {"ok": True})
+
+        # ── sign-csr — подпись запроса (CSR от плагина) → выдача сертификата ──
+        if action == "sign-csr" and method == "POST":
+            csr_pem = (body.get("csr") or "").strip()
+            if not csr_pem:
+                return _resp(400, {"error": "Не передан запрос на сертификат (CSR)"})
+            cur = conn.cursor()
+            cur.execute(
+                f"""SELECT full_name FROM {SCHEMA}.uds_certificates
+                    WHERE login = %s AND status = 'issuing'""", (caller["login"],)
+            )
+            r = cur.fetchone()
+            if not r:
+                return _resp(404, {"error": "Нет процесса выпуска. Сначала согласитесь и выберите носитель."})
+            full_name = r[0]
+            try:
+                cert_pem, serial_hex, fingerprint, not_before, not_after = sign_user_csr(cur, csr_pem, full_name)
+            except Exception as e:
+                return _resp(400, {"error": f"Не удалось подписать сертификат: {e}"})
+            cur.execute(
+                f"""UPDATE {SCHEMA}.uds_certificates
+                    SET status = 'active', serial_number = %s, fingerprint = %s,
+                        certificate_pem = %s, not_before = %s, not_after = %s, issued_at = NOW()
+                    WHERE login = %s AND status = 'issuing'""",
+                (serial_hex, fingerprint, cert_pem, not_before, not_after, caller["login"])
+            )
+            log_action(cur, caller["login"], my_role, "cert_issued", caller["login"],
+                       {"serial": serial_hex})
+            conn.commit()
+            return _resp(200, {
+                "ok": True,
+                "certificate": cert_pem,
+                "serial_number": serial_hex,
+                "fingerprint": fingerprint,
+                "not_after": not_after.isoformat() if not_after else None,
+            })
+
+        # ── revoke-cert — Глава/Зам отзывает сертификат ─────────────────────
+        if action == "revoke-cert" and method == "POST":
+            if not perms["can_cert"]:
+                return _resp(403, {"error": "Отзыв доступен только Главе и Зам. Главы"})
+            tl = (body.get("target_login") or "").strip()
+            reason = (body.get("reason") or "").strip()[:256]
+            if not tl:
+                return _resp(400, {"error": "Укажите сотрудника"})
+            cur = conn.cursor()
+            cur.execute(
+                f"""UPDATE {SCHEMA}.uds_certificates
+                    SET status = 'revoked', revoked_by = %s, revoked_at = NOW(), revoke_reason = %s
+                    WHERE login = %s AND status IN ('assigned','issuing','active') RETURNING id""",
+                (caller["login"], reason or None, tl)
+            )
+            if not cur.fetchone():
+                return _resp(404, {"error": "Активный сертификат не найден"})
+            log_action(cur, caller["login"], my_role, "revoke_cert", tl, {"reason": reason})
+            conn.commit()
+            return _resp(200, {"ok": True})
 
         return _resp(404, {"error": f"Неизвестный action: {action}"})
     finally:

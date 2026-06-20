@@ -15,13 +15,18 @@ interface Props {
 
 type Phase = "intro" | "install" | "choose" | "issuing" | "done";
 
-// Официальные ссылки на загрузки плагинов и драйверов
+// Официальные ссылки на загрузки плагинов, драйверов и расширений
 const DOWNLOADS = {
+  // Рутокен
   rutokenPlugin: "https://www.rutoken.ru/support/download/rutoken-plugin/",
-  rutokenDrivers: "https://www.rutoken.ru/support/download/get/rtDrivers-windows.html",
+  rutokenDrivers: "https://www.rutoken.ru/support/download/drivers-for-windows/",
+  rutokenExtChrome: "https://chromewebstore.google.com/detail/ohedcglhbbfdgaogjhcclacoccbagkjg",
+  rutokenExtEdge: "https://microsoftedge.microsoft.com/addons/search/%D0%90%D0%B4%D0%B0%D0%BF%D1%82%D0%B5%D1%80%20%D0%A0%D1%83%D1%82%D0%BE%D0%BA%D0%B5%D0%BD",
+  rutokenExtFirefox: "https://addons.mozilla.org/ru/firefox/addon/rutoken-plugin-adapter/",
+  // КриптоПро
   cryptoProPlugin: "https://www.cryptopro.ru/products/cades/plugin/get_2_0",
   cryptoProCsp: "https://www.cryptopro.ru/products/csp/downloads",
-  rutokenExtChrome: "https://chromewebstore.google.com/detail/адаптер-rutoken-plugin/bbmnnnnmcmbcmmkdmdfpljpdghmpljhd",
+  cryptoProExtChrome: "https://chromewebstore.google.com/detail/iifchhfnnmpdbibifmljnfjhpififfog",
 };
 
 export default function UdsCertIssue({ login, token, cert, onDone, onLogout }: Props) {
@@ -33,13 +38,15 @@ export default function UdsCertIssue({ login, token, cert, onDone, onLogout }: P
   const [busy, setBusy] = useState(false);
   const [rtState, setRtState] = useState<PluginState>("checking");
   const [cpState, setCpState] = useState<PluginState>("checking");
+  const [rtReason, setRtReason] = useState("");
+  const [cpReason, setCpReason] = useState("");
 
   const checkPlugins = useCallback(async () => {
-    setRtState("checking"); setCpState("checking");
-    const rt = await cryptoPlugins.isAvailable("rutoken").catch(() => false);
-    setRtState(rt ? "ok" : "missing");
-    const cp = await cryptoPlugins.isAvailable("cryptopro").catch(() => false);
-    setCpState(cp ? "ok" : "missing");
+    setRtState("checking"); setCpState("checking"); setRtReason(""); setCpReason("");
+    const rt = await cryptoPlugins.diagnose("rutoken").catch((e) => ({ ok: false, reason: (e as Error).message }));
+    setRtState(rt.ok ? "ok" : "missing"); setRtReason(rt.reason);
+    const cp = await cryptoPlugins.diagnose("cryptopro").catch((e) => ({ ok: false, reason: (e as Error).message }));
+    setCpState(cp.ok ? "ok" : "missing"); setCpReason(cp.reason);
   }, []);
 
   // Проверяем плагины при входе на экран выбора носителя
@@ -142,10 +149,15 @@ export default function UdsCertIssue({ login, token, cert, onDone, onLogout }: P
                 <li>Подключите токен Рутокен 2.0 / 3.0 в USB и перезапустите браузер.</li>
               </ol>
               <div className="grid grid-cols-1 gap-2">
-                <DlLink href={DOWNLOADS.rutokenDrivers} label="Драйверы Рутокен (Windows)" />
-                <DlLink href={DOWNLOADS.rutokenPlugin} label="Rutoken Plugin" />
-                <DlLink href={DOWNLOADS.rutokenExtChrome} label="Расширение для Chrome / Яндекс" />
+                <DlLink href={DOWNLOADS.rutokenPlugin} label="Rutoken Plugin (драйверы внутри)" />
+                <DlLink href={rutokenExtLink()} label={`Расширение «Адаптер Рутокен» для ${browserName()}`} />
               </div>
+              <p className="text-[10px] text-slate-500">
+                Расширения для других браузеров:{" "}
+                <a href={DOWNLOADS.rutokenExtChrome} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">Chrome</a>{" · "}
+                <a href={DOWNLOADS.rutokenExtEdge} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">Edge</a>{" · "}
+                <a href={DOWNLOADS.rutokenExtFirefox} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">Firefox</a>
+              </p>
             </div>
 
             {/* КРИПТОПРО */}
@@ -162,6 +174,7 @@ export default function UdsCertIssue({ login, token, cert, onDone, onLogout }: P
               <div className="grid grid-cols-1 gap-2">
                 <DlLink href={DOWNLOADS.cryptoProCsp} label="КриптоПро CSP" />
                 <DlLink href={DOWNLOADS.cryptoProPlugin} label="КриптоПро ЭЦП Browser plug-in" />
+                <DlLink href={DOWNLOADS.cryptoProExtChrome} label="Расширение КриптоПро для Chrome / Edge" />
               </div>
             </div>
 
@@ -219,13 +232,21 @@ export default function UdsCertIssue({ login, token, cert, onDone, onLogout }: P
               </button>
             </div>
 
-            {/* Подсказка, если плагины не найдены */}
-            {(rtState === "missing" && cpState === "missing") && (
+            {/* Точная диагностика по каждому плагину */}
+            {(rtState === "missing" || cpState === "missing") && (
               <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 space-y-2">
-                <p className="text-xs text-amber-300 flex items-start gap-2">
-                  <Icon name="AlertTriangle" size={14} className="flex-shrink-0 mt-0.5" />
-                  Плагин не найден. Установите его, затем нажмите «Проверить снова».
-                </p>
+                {rtState === "missing" && rtReason && (
+                  <p className="text-xs text-amber-300 flex items-start gap-2">
+                    <Icon name="AlertTriangle" size={14} className="flex-shrink-0 mt-0.5" />
+                    <span><b>Рутокен:</b> {rtReason}</span>
+                  </p>
+                )}
+                {cpState === "missing" && cpReason && (
+                  <p className="text-xs text-amber-300 flex items-start gap-2">
+                    <Icon name="AlertTriangle" size={14} className="flex-shrink-0 mt-0.5" />
+                    <span><b>КриптоПро:</b> {cpReason}</span>
+                  </p>
+                )}
                 <button onClick={() => setPhase("install")}
                   className="text-[11px] text-blue-300 hover:text-blue-200 flex items-center gap-1">
                   <Icon name="Download" size={12} /> Скачать и установить плагин
@@ -306,6 +327,23 @@ function PluginBadge({ state }: { state: PluginState }) {
       {map.label}
     </span>
   );
+}
+
+function browserName(): string {
+  const ua = navigator.userAgent;
+  if (/YaBrowser/i.test(ua)) return "Яндекс.Браузера";
+  if (/Edg\//i.test(ua)) return "Edge";
+  if (/Firefox/i.test(ua)) return "Firefox";
+  if (/OPR\//i.test(ua)) return "Opera";
+  if (/Chrome/i.test(ua)) return "Chrome";
+  return "вашего браузера";
+}
+
+function rutokenExtLink(): string {
+  const ua = navigator.userAgent;
+  if (/Firefox/i.test(ua)) return DOWNLOADS.rutokenExtFirefox;
+  if (/Edg\//i.test(ua)) return DOWNLOADS.rutokenExtEdge;
+  return DOWNLOADS.rutokenExtChrome; // Chrome, Яндекс, Opera — из Chrome Web Store
 }
 
 function DlLink({ href, label }: { href: string; label: string }) {

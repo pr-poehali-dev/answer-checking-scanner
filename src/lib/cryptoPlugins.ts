@@ -204,4 +204,18 @@ export const cryptoPlugins = {
       return false;
     }
   },
+
+  /** Возвращает {ok, reason} с понятным объяснением, чего не хватает. */
+  async diagnose(type: ContainerType): Promise<{ ok: boolean; reason: string }> {
+    try {
+      if (type === "rutoken") {
+        await rutoken.plugin();
+        return { ok: true, reason: "Плагин Рутокен готов" };
+      }
+      await cryptopro.api();
+      return { ok: true, reason: "КриптоПро готов" };
+    } catch (e) {
+      return { ok: false, reason: (e as Error).message || "Плагин не найден" };
+    }
+  },
 };

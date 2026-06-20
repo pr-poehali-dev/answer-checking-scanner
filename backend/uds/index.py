@@ -1106,22 +1106,24 @@ def handler(event: dict, context) -> dict:
             if container_type not in ("rutoken", "cryptopro"):
                 return _resp(400, {"error": "Выберите носитель: rutoken или cryptopro"})
             cur = conn.cursor()
-            # Любой зарегистрированный сотрудник может сам начать выпуск.
-            # Если уже есть активный/выпускаемый сертификат — нельзя.
+            # Любой сотрудник может выпускать сертификат сам, в любой момент.
+            # Старый активный сертификат не мешает — отзываем его при новом выпуске.
             cur.execute(
-                f"SELECT status FROM {SCHEMA}.uds_certificates WHERE login = %s AND status IN ('issuing','active')",
-                (caller["login"],)
+                f"""UPDATE {SCHEMA}.uds_certificates
+                    SET status = 'revoked', revoked_by = %s, revoked_at = NOW(),
+                        revoke_reason = 'Перевыпуск сертификата'
+                    WHERE login = %s AND status = 'active'""",
+                (caller["login"], caller["login"])
             )
-            if cur.fetchone():
-                return _resp(409, {"error": "У вас уже есть активный или выпускаемый сертификат"})
-            # Переводим назначенный выпуск в 'issuing', либо создаём его сами
+            # Незавершённый выпуск (assigned/issuing) переиспользуем — переводим в 'issuing'.
             cur.execute(
                 f"""UPDATE {SCHEMA}.uds_certificates
                     SET status = 'issuing', container_type = %s
-                    WHERE login = %s AND status = 'assigned' RETURNING id""",
+                    WHERE login = %s AND status IN ('assigned','issuing') RETURNING id""",
                 (container_type, caller["login"])
             )
             if not cur.fetchone():
+                # Нет незавершённой заявки — создаём новую
                 cur.execute(f"SELECT full_name FROM {SCHEMA}.users WHERE login = %s", (caller["login"],))
                 fn_row = cur.fetchone()
                 full_name = (fn_row[0] if fn_row and fn_row[0] else caller["login"])

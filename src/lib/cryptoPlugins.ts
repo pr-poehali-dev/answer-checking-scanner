@@ -45,6 +45,10 @@ async function ensureRutokenAdapter(): Promise<void> {
   if (rtAdapterLoaded && window.rutoken) return;
   // Официальный адаптер @aktivco/rutoken-plugin создаёт глобальный window.rutoken
   await import("@aktivco/rutoken-plugin");
+  // Адаптер инициализируется асинхронно — ждём появления window.rutoken
+  for (let i = 0; i < 30 && !window.rutoken; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+  }
   rtAdapterLoaded = true;
 }
 
@@ -54,7 +58,7 @@ const rutoken = {
     await ensureRutokenAdapter();
     const rt = window.rutoken;
     if (!rt || !rt.ready) {
-      throw new Error("Плагин Рутокен не найден. Установите Rutoken Plugin и перезапустите браузер.");
+      throw new Error("Не найдено расширение «Адаптер Рутокен Плагин» в браузере. Установите его по ссылке ниже, включите и перезапустите браузер.");
     }
     await rt.ready;
     const isChromiumOrFF = !!window.chrome || typeof (window as any).InstallTrigger !== "undefined";
@@ -117,10 +121,15 @@ let cpCache: any = null;
 const cryptopro = {
   async api(): Promise<any> {
     if (cpCache) return cpCache;
-    // Пакет crypto-pro сам подгружает cadesplugin и даёт к нему доступ через execute()
-    const { execute } = await import("crypto-pro");
-    const cp = await execute(({ cadesplugin }: any) => cadesplugin);
-    if (!cp) throw new Error("КриптоПро ЭЦП Browser plug-in не найден. Установите плагин и КриптоПро CSP.");
+    // Официальный cadesplugin_api.js сам внедряет глобальный window.cadesplugin
+    if (!window.cadesplugin) {
+      await import("crypto-pro-cadesplugin/dist/lib/cadesplugin_api.js");
+    }
+    const cp = window.cadesplugin;
+    if (!cp) {
+      throw new Error("Не найдено расширение «CryptoPro Extension for CAdES» в браузере. Установите его и перезапустите браузер.");
+    }
+    // Дожидаемся готовности плагина (cadesplugin — это Promise)
     await cp;
     cpCache = cp;
     return cp;

@@ -38,7 +38,7 @@
         "class-variance-authority": "^0.7.1",
         "clsx": "^2.1.1",
         "cmdk": "^1.0.0",
-        "crypto-pro": "^2.5.2",
+        "crypto-pro-cadesplugin": "^1.1.2",
         "date-fns": "^3.6.0",
         "embla-carousel-react": "^8.3.0",
         "input-otp": "^1.2.4",
@@ -563,7 +563,7 @@
 
     "cross-spawn": ["cross-spawn@7.0.6", "", { "dependencies": { "path-key": "^3.1.0", "shebang-command": "^2.0.0", "which": "^2.0.1" } }, "sha512-uV2QOWP2nWzsy2aMp8aRibhi9dlzF5Hgh5SHaB9OiTGEyDTiJJyx0uy51QXdyWbtAHNua4XJzUKca3OzKUd3vA=="],
 
-    "crypto-pro": ["crypto-pro@2.5.2", "", {}, "sha512-RC2WstXqH1yvx9CePEDxYz+cpCss5VVfl0Rnp/Oi3vQiLDEN6ZOjagdGnySB209z7H/T9RO6uo08gZTtkKqqaQ=="],
+    "crypto-pro-cadesplugin": ["crypto-pro-cadesplugin@1.1.2", "", {}, "sha512-NGvxsmkbsd6Rwl1r8X5VIAU4Vg7EtBuu22GzNw9QKehqXQcqnTK+bARnXwspYxU3vXp/VdOLdG+qt8GqxPyoLA=="],
 
     "css-line-break": ["css-line-break@2.1.0", "", { "dependencies": { "utrie": "^1.0.2" } }, "sha512-FHcKFCZcAha3LwfVBhCQbW2nCNbkZXn7KVUJcsT5/P8YmfsVja0FMPJr0B903j/E69HUphKiV9iQArX8SDYA4w=="],
 

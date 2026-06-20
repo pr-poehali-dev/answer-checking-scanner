@@ -1,7 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Icon from "@/components/ui/icon";
 import { udsApi, UdsCert } from "@/lib/api";
 import { cryptoPlugins, ContainerType } from "@/lib/cryptoPlugins";
+
+type PluginState = "checking" | "ok" | "missing";
 
 interface Props {
   login: string;
@@ -29,6 +31,21 @@ export default function UdsCertIssue({ login, token, cert, onDone, onLogout }: P
   const [stage, setStage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [rtState, setRtState] = useState<PluginState>("checking");
+  const [cpState, setCpState] = useState<PluginState>("checking");
+
+  const checkPlugins = useCallback(async () => {
+    setRtState("checking"); setCpState("checking");
+    const rt = await cryptoPlugins.isAvailable("rutoken").catch(() => false);
+    setRtState(rt ? "ok" : "missing");
+    const cp = await cryptoPlugins.isAvailable("cryptopro").catch(() => false);
+    setCpState(cp ? "ok" : "missing");
+  }, []);
+
+  // Проверяем плагины при входе на экран выбора носителя
+  useEffect(() => {
+    if (phase === "choose") checkPlugins();
+  }, [phase, checkPlugins]);
 
   const issue = async (type: ContainerType) => {
     setContainer(type);
@@ -186,19 +203,43 @@ export default function UdsCertIssue({ login, token, cert, onDone, onLogout }: P
               </div>
             )}
             <div className="grid grid-cols-2 gap-3">
-              <button onClick={() => issue("rutoken")} disabled={busy}
-                className="flex flex-col items-center gap-2 py-6 bg-slate-800 border border-slate-700 rounded-xl hover:border-blue-500 hover:bg-slate-700 disabled:opacity-50 transition-colors">
+              <button onClick={() => issue("rutoken")} disabled={busy || rtState !== "ok"}
+                className="relative flex flex-col items-center gap-2 py-6 bg-slate-800 border border-slate-700 rounded-xl hover:border-blue-500 hover:bg-slate-700 disabled:opacity-50 disabled:hover:border-slate-700 transition-colors">
+                <PluginBadge state={rtState} />
                 <Icon name="Usb" size={28} className="text-blue-400" fallback="HardDrive" />
                 <span className="text-sm font-semibold">На Рутокен</span>
                 <span className="text-[10px] text-slate-500">аппаратный носитель</span>
               </button>
-              <button onClick={() => issue("cryptopro")} disabled={busy}
-                className="flex flex-col items-center gap-2 py-6 bg-slate-800 border border-slate-700 rounded-xl hover:border-blue-500 hover:bg-slate-700 disabled:opacity-50 transition-colors">
+              <button onClick={() => issue("cryptopro")} disabled={busy || cpState !== "ok"}
+                className="relative flex flex-col items-center gap-2 py-6 bg-slate-800 border border-slate-700 rounded-xl hover:border-blue-500 hover:bg-slate-700 disabled:opacity-50 disabled:hover:border-slate-700 transition-colors">
+                <PluginBadge state={cpState} />
                 <Icon name="Monitor" size={28} className="text-blue-400" fallback="Cpu" />
                 <span className="text-sm font-semibold">На ПК (КриптоПро)</span>
                 <span className="text-[10px] text-slate-500">контейнер CSP</span>
               </button>
             </div>
+
+            {/* Подсказка, если плагины не найдены */}
+            {(rtState === "missing" && cpState === "missing") && (
+              <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 space-y-2">
+                <p className="text-xs text-amber-300 flex items-start gap-2">
+                  <Icon name="AlertTriangle" size={14} className="flex-shrink-0 mt-0.5" />
+                  Плагин не найден. Установите его, затем нажмите «Проверить снова».
+                </p>
+                <button onClick={() => setPhase("install")}
+                  className="text-[11px] text-blue-300 hover:text-blue-200 flex items-center gap-1">
+                  <Icon name="Download" size={12} /> Скачать и установить плагин
+                </button>
+              </div>
+            )}
+
+            <div className="flex items-center justify-center gap-2">
+              <button onClick={checkPlugins}
+                className="text-[11px] text-slate-400 hover:text-slate-200 flex items-center gap-1.5">
+                <Icon name="RefreshCw" size={12} /> Проверить плагин снова
+              </button>
+            </div>
+
             <div>
               <label className="text-xs text-slate-400 block mb-1">PIN-код Рутокена (если требуется)</label>
               <input type="password" value={pin} onChange={e => setPin(e.target.value)}
@@ -251,6 +292,20 @@ export default function UdsCertIssue({ login, token, cert, onDone, onLogout }: P
 function displayName(v: string): string {
   // Тема сертификата формируется на бэкенде из ФИО; здесь только CN-заглушка.
   return v;
+}
+
+function PluginBadge({ state }: { state: PluginState }) {
+  const map = {
+    checking: { icon: "Loader2", cls: "bg-slate-600 text-slate-200", spin: true, label: "проверка" },
+    ok: { icon: "CheckCircle2", cls: "bg-green-600 text-white", spin: false, label: "найден" },
+    missing: { icon: "XCircle", cls: "bg-red-600 text-white", spin: false, label: "не найден" },
+  }[state];
+  return (
+    <span className={`absolute top-2 right-2 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-semibold ${map.cls}`}>
+      <Icon name={map.icon} size={10} className={map.spin ? "animate-spin" : ""} fallback="Circle" />
+      {map.label}
+    </span>
+  );
 }
 
 function DlLink({ href, label }: { href: string; label: string }) {

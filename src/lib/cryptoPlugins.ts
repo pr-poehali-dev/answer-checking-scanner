@@ -176,4 +176,18 @@ export const cryptoPlugins = {
   async sign(type: ContainerType, nonce: string, pin?: string): Promise<SignResult> {
     return type === "rutoken" ? rutoken.sign(nonce, pin || "") : cryptopro.sign(nonce);
   },
+
+  /** Проверяет, установлен ли и доступен плагин нужного типа. */
+  async isAvailable(type: ContainerType): Promise<boolean> {
+    try {
+      if (type === "rutoken") {
+        const plugin = await rutoken.plugin();
+        return !!plugin;
+      }
+      const cp = await cryptopro.api();
+      return !!cp;
+    } catch {
+      return false;
+    }
+  },
 };

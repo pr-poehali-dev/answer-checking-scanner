@@ -1106,6 +1106,15 @@ def handler(event: dict, context) -> dict:
             if container_type not in ("rutoken", "cryptopro"):
                 return _resp(400, {"error": "Выберите носитель: rutoken или cryptopro"})
             cur = conn.cursor()
+            # Любой зарегистрированный сотрудник может сам начать выпуск.
+            # Если уже есть активный/выпускаемый сертификат — нельзя.
+            cur.execute(
+                f"SELECT status FROM {SCHEMA}.uds_certificates WHERE login = %s AND status IN ('issuing','active')",
+                (caller["login"],)
+            )
+            if cur.fetchone():
+                return _resp(409, {"error": "У вас уже есть активный или выпускаемый сертификат"})
+            # Переводим назначенный выпуск в 'issuing', либо создаём его сами
             cur.execute(
                 f"""UPDATE {SCHEMA}.uds_certificates
                     SET status = 'issuing', container_type = %s
@@ -1113,7 +1122,14 @@ def handler(event: dict, context) -> dict:
                 (container_type, caller["login"])
             )
             if not cur.fetchone():
-                return _resp(404, {"error": "Нет назначенного выпуска"})
+                cur.execute(f"SELECT full_name FROM {SCHEMA}.users WHERE login = %s", (caller["login"],))
+                fn_row = cur.fetchone()
+                full_name = (fn_row[0] if fn_row and fn_row[0] else caller["login"])
+                cur.execute(
+                    f"""INSERT INTO {SCHEMA}.uds_certificates (login, full_name, status, container_type, assigned_by)
+                        VALUES (%s, %s, 'issuing', %s, %s) RETURNING id""",
+                    (caller["login"], full_name, container_type, caller["login"])
+                )
             log_action(cur, caller["login"], my_role, "cert_agree", caller["login"], {"container_type": container_type})
             conn.commit()
             return _resp(200, {"ok": True})

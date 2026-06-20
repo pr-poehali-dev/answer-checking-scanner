@@ -21,18 +21,6 @@ export interface SignResult {
   fingerprint: string;  // SHA-256 hex отпечаток сертификата
 }
 
-// ── Загрузка внешних скриптов плагинов ─────────────────────────────────────────
-function loadScript(src: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (document.querySelector(`script[src="${src}"]`)) { resolve(); return; }
-    const s = document.createElement("script");
-    s.src = src; s.async = true;
-    s.onload = () => resolve();
-    s.onerror = () => reject(new Error(`Не удалось загрузить ${src}`));
-    document.head.appendChild(s);
-  });
-}
-
 const PEM_HEAD = "-----BEGIN CERTIFICATE REQUEST-----";
 const PEM_FOOT = "-----END CERTIFICATE REQUEST-----";
 
@@ -48,18 +36,39 @@ function stripPem(pem: string): string {
 
 // ════════════════════════ RUTOKEN ════════════════════════════════════════════
 /* eslint-disable @typescript-eslint/no-explicit-any */
-declare global { interface Window { rutoken?: any; cadesplugin?: any; } }
+declare global { interface Window { rutoken?: any; cadesplugin?: any; chrome?: any; } }
+
+let rtPluginCache: any = null;
+let rtAdapterLoaded = false;
+
+async function ensureRutokenAdapter(): Promise<void> {
+  if (rtAdapterLoaded && window.rutoken) return;
+  // Официальный адаптер @aktivco/rutoken-plugin создаёт глобальный window.rutoken
+  await import("@aktivco/rutoken-plugin");
+  rtAdapterLoaded = true;
+}
 
 const rutoken = {
   async plugin(): Promise<any> {
-    await loadScript("https://localhost:53415/api/rutoken.js").catch(() => {});
+    if (rtPluginCache) return rtPluginCache;
+    await ensureRutokenAdapter();
     const rt = window.rutoken;
-    if (!rt) throw new Error("Плагин Рутокен не найден. Установите Rutoken Plugin и перезапустите браузер.");
-    const ext = await rt.ready
-      .then(() => (rt.isExtensionInstalled ? rt.isExtensionInstalled() : Promise.resolve(true)))
-      .then((ok: boolean) => (ok ? (rt.isPluginInstalled ? rt.isPluginInstalled() : Promise.resolve(true)) : Promise.reject(new Error("Расширение Рутокен не установлено"))))
-      .then((ok: boolean) => (ok ? rt.loadPlugin() : Promise.reject(new Error("Плагин Рутокен не установлен"))));
-    return ext;
+    if (!rt || !rt.ready) {
+      throw new Error("Плагин Рутокен не найден. Установите Rutoken Plugin и перезапустите браузер.");
+    }
+    await rt.ready;
+    const isChromiumOrFF = !!window.chrome || typeof (window as any).InstallTrigger !== "undefined";
+    if (isChromiumOrFF && rt.isExtensionInstalled) {
+      const extOk = await rt.isExtensionInstalled();
+      if (!extOk) throw new Error("Расширение «Адаптер Rutoken Plugin» не установлено в браузере.");
+    }
+    if (rt.isPluginInstalled) {
+      const plugOk = await rt.isPluginInstalled();
+      if (!plugOk) throw new Error("Rutoken Plugin не установлен. Установите плагин и перезапустите браузер.");
+    }
+    const plugin = await rt.loadPlugin();
+    rtPluginCache = plugin;
+    return plugin;
   },
 
   async firstDevice(plugin: any): Promise<number> {
@@ -103,12 +112,17 @@ const rutoken = {
 };
 
 // ════════════════════════ КРИПТОПРО ══════════════════════════════════════════
+let cpCache: any = null;
+
 const cryptopro = {
   async api(): Promise<any> {
-    await loadScript("/cadesplugin_api.js").catch(() => {});
-    const cp = window.cadesplugin;
+    if (cpCache) return cpCache;
+    // Пакет crypto-pro сам подгружает cadesplugin и даёт к нему доступ через execute()
+    const { execute } = await import("crypto-pro");
+    const cp = await execute(({ cadesplugin }: any) => cadesplugin);
     if (!cp) throw new Error("КриптоПро ЭЦП Browser plug-in не найден. Установите плагин и КриптоПро CSP.");
     await cp;
+    cpCache = cp;
     return cp;
   },
 

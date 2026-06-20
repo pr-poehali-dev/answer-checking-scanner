@@ -38,18 +38,34 @@ function stripPem(pem: string): string {
 /* eslint-disable @typescript-eslint/no-explicit-any */
 declare global { interface Window { rutoken?: any; cadesplugin?: any; chrome?: any; } }
 
+// Официальные api-скрипты грузим как обычные <script src> (через Vite ?url),
+// чтобы они выполнились в окне страницы и подцепили мост, внедрённый расширением.
+import rutokenAdapterUrl from "@aktivco/rutoken-plugin/rutoken-plugin.min.js?url";
+import cadespluginUrl from "crypto-pro-cadesplugin/dist/lib/cadesplugin_api.js?url";
+
+// Загрузка внешнего скрипта в <head> один раз
+const loadedScripts = new Set<string>();
+function loadScript(src: string): Promise<void> {
+  if (loadedScripts.has(src)) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = src;
+    s.async = false;
+    s.onload = () => { loadedScripts.add(src); resolve(); };
+    s.onerror = () => reject(new Error(`Не удалось загрузить ${src}`));
+    document.head.appendChild(s);
+  });
+}
+
 let rtPluginCache: any = null;
-let rtAdapterLoaded = false;
 
 async function ensureRutokenAdapter(): Promise<void> {
-  if (rtAdapterLoaded && window.rutoken) return;
-  // Официальный адаптер @aktivco/rutoken-plugin создаёт глобальный window.rutoken
-  await import("@aktivco/rutoken-plugin");
+  if (window.rutoken) return;
+  await loadScript(rutokenAdapterUrl);
   // Адаптер инициализируется асинхронно — ждём появления window.rutoken
-  for (let i = 0; i < 30 && !window.rutoken; i++) {
+  for (let i = 0; i < 50 && !window.rutoken; i++) {
     await new Promise((r) => setTimeout(r, 100));
   }
-  rtAdapterLoaded = true;
 }
 
 const rutoken = {
@@ -123,7 +139,10 @@ const cryptopro = {
     if (cpCache) return cpCache;
     // Официальный cadesplugin_api.js сам внедряет глобальный window.cadesplugin
     if (!window.cadesplugin) {
-      await import("crypto-pro-cadesplugin/dist/lib/cadesplugin_api.js");
+      await loadScript(cadespluginUrl);
+      for (let i = 0; i < 50 && !window.cadesplugin; i++) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
     }
     const cp = window.cadesplugin;
     if (!cp) {

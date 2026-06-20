@@ -4,6 +4,7 @@ import { udsApi, UdsPerms } from "@/lib/api";
 import UdsEmployees from "@/pages/uds/UdsEmployees";
 import UdsUsers from "@/pages/uds/UdsUsers";
 import UdsAuditLog from "@/pages/uds/UdsAuditLog";
+import UdsProfile from "@/pages/uds/UdsProfile";
 
 const PANEL_ROLE_LABELS: Record<string, string> = {
   head: "Глава Правления",
@@ -25,7 +26,7 @@ interface Session {
 
 const LS_KEY = "uds_session_v1";
 
-type Tab = "employees" | "users" | "audit" | "support";
+type Tab = "employees" | "users" | "audit" | "support" | "profile";
 
 export default function UdsPage() {
   const [session, setSession] = useState<Session | null>(null);
@@ -140,7 +141,14 @@ export default function UdsPage() {
     { id: "users", label: "Пользователи", icon: "UserSearch", show: true },
     { id: "audit", label: "Логи действий", icon: "ScrollText", show: true },
     { id: "support", label: "Тех. поддержка", icon: "Headphones", show: perms.can_support },
+    { id: "profile", label: "Мой профиль", icon: "UserCog", show: session.login !== "admin" },
   ].filter(t => t.show);
+
+  const onProfileUpdated = (newLogin: string, newToken: string) => {
+    const updated = { ...session, login: newLogin, token: newToken };
+    setSession(updated);
+    localStorage.setItem(LS_KEY, JSON.stringify(updated));
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -203,6 +211,15 @@ export default function UdsPage() {
             <Icon name="Headphones" size={28} className="mx-auto mb-2 text-muted-foreground/50" />
             Раздел технической поддержки. Обращения пользователей обрабатываются здесь.
           </div>
+        )}
+        {tab === "profile" && (
+          <UdsProfile
+            login={session.login}
+            token={session.token}
+            panelRoleLabel={session.panel_role_label || PANEL_ROLE_LABELS[session.panel_role]}
+            operatorNumber={session.operator_number}
+            onUpdated={onProfileUpdated}
+          />
         )}
       </main>
     </div>

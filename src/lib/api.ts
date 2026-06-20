@@ -359,6 +359,9 @@ export const udsApi = {
 
   users: (login: string, token: string, q?: string) =>
     udsRequest<{ users: UdsUser[] }>("users", "GET", login, token, undefined, q ? { q } : {}),
+
+  updateProfile: (login: string, token: string, payload: { current_password: string; new_login?: string; new_password?: string }) =>
+    udsRequest<{ ok: boolean; login: string; token: string }>("update-profile", "POST", login, token, payload),
 };
 
 // ── Institution API ───────────────────────────────────────────────────────────

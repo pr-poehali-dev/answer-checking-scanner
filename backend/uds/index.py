@@ -278,6 +278,62 @@ def handler(event: dict, context) -> dict:
                 "perms": perms_for(role) if (access and role) else None,
             })
 
+        # ── update-profile — смена своего логина/пароля ──────────────────────
+        if action == "update-profile" and method == "POST":
+            if not has_uds_access(caller):
+                return _resp(403, {"error": "Нет доступа к УДС"})
+            if caller.get("is_admin"):
+                return _resp(403, {"error": "Учётную запись администратора нельзя изменить"})
+            cur_login = caller["login"]
+            new_login = (body.get("new_login") or "").strip()
+            new_password = (body.get("new_password") or "").strip()
+            current_password = (body.get("current_password") or "").strip()
+
+            if not new_login and not new_password:
+                return _resp(400, {"error": "Укажите новый логин или пароль"})
+
+            cur = conn.cursor()
+            cur.execute(f"SELECT password_hash FROM {SCHEMA}.users WHERE login = %s", (cur_login,))
+            row = cur.fetchone()
+            if not row:
+                return _resp(404, {"error": "Пользователь не найден"})
+            # Подтверждение текущим паролем
+            if not current_password or row[0] != hash_password(current_password):
+                return _resp(403, {"error": "Неверный текущий пароль"})
+
+            final_login = cur_login
+            if new_login and new_login != cur_login:
+                if not re.fullmatch(r"[A-Za-z0-9_.-]{3,32}", new_login):
+                    return _resp(400, {"error": "Логин: 3-32 символа (латиница, цифры, . _ -)"})
+                cur.execute(f"SELECT 1 FROM {SCHEMA}.users WHERE login = %s", (new_login,))
+                if cur.fetchone():
+                    return _resp(409, {"error": "Этот логин уже занят"})
+                final_login = new_login
+
+            final_password_plain = new_password if new_password else current_password
+            if new_password and len(new_password) < 6:
+                return _resp(400, {"error": "Пароль должен быть не менее 6 символов"})
+
+            new_pw_hash = hash_password(final_password_plain)
+            prefix = caller.get("sys_role") if caller.get("sys_role") in ("teacher", "student", "tester") else "teacher"
+            new_token = f"{prefix}:{hash_password(final_login + final_password_plain + 'salt')}"
+            new_token_hash = hash_password(new_token)
+
+            # Обновляем users (логин — в т.ч. в panel_operators по FK по значению)
+            cur.execute(
+                f"UPDATE {SCHEMA}.users SET login = %s, password_hash = %s, auth_token_hash = %s WHERE login = %s",
+                (final_login, new_pw_hash, new_token_hash, cur_login)
+            )
+            if final_login != cur_login:
+                cur.execute(
+                    f"UPDATE {SCHEMA}.panel_operators SET login = %s WHERE login = %s",
+                    (final_login, cur_login)
+                )
+            log_action(cur, final_login, caller.get("panel_role"), "update_profile", final_login,
+                       {"login_changed": final_login != cur_login, "password_changed": bool(new_password)})
+            conn.commit()
+            return _resp(200, {"ok": True, "login": final_login, "token": new_token})
+
         # Все остальные действия требуют доступа в УДС
         if not has_uds_access(caller):
             return _resp(403, {"error": "Нет доступа к УДС. Сотрудник должен быть зарегистрирован через УДС."})

@@ -46,16 +46,6 @@ export default function UdsPage() {
   const [tab, setTab] = useState<Tab>("employees");
   const [logoClicks, setLogoClicks] = useState(0);
 
-  const applyAuth = useCallback((res: { login: string; token: string; panel_role: string; panel_role_label: string; operator_number: number; perms: UdsPerms }) => {
-    const s: Session = {
-      login: res.login, token: res.token,
-      panel_role: res.panel_role, panel_role_label: res.panel_role_label,
-      operator_number: res.operator_number, perms: res.perms,
-    };
-    setSession(s);
-    localStorage.setItem(LS_KEY, JSON.stringify(s));
-  }, []);
-
   const refreshMe = useCallback((s: Session) => {
     udsApi.me(s.login, s.token).then(me => {
       if (me.uds_access && me.perms) {
@@ -66,6 +56,18 @@ export default function UdsPage() {
       }
     }).catch(() => { localStorage.removeItem(LS_KEY); setSession(null); });
   }, []);
+
+  const applyAuth = useCallback((res: { login: string; token: string; panel_role: string; panel_role_label: string; operator_number: number; perms: UdsPerms }) => {
+    const s: Session = {
+      login: res.login, token: res.token,
+      panel_role: res.panel_role, panel_role_label: res.panel_role_label,
+      operator_number: res.operator_number, perms: res.perms,
+    };
+    setSession(s);
+    localStorage.setItem(LS_KEY, JSON.stringify(s));
+    // Сразу подтягиваем статус сертификата, чтобы показать экран выпуска
+    refreshMe(s);
+  }, [refreshMe]);
 
   // Восстановление сессии
   useEffect(() => {

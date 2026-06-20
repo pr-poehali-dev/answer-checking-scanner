@@ -10,8 +10,22 @@
       "name": "uds-login wrong creds returns 401",
       "method": "POST",
       "path": "/?action=uds-login",
-      "body": { "login": "nobody_xyz", "password": "wrongpass" },
+      "body": { "login": "nobody_xyz", "password": "wrongpass", "iis_code": "ABC12" },
       "expectedStatus": 401
+    },
+    {
+      "name": "verify-iis empty returns 400",
+      "method": "POST",
+      "path": "/?action=verify-iis",
+      "body": { "iis_code": "" },
+      "expectedStatus": 400
+    },
+    {
+      "name": "verify-iis unknown returns 403",
+      "method": "POST",
+      "path": "/?action=verify-iis",
+      "body": { "iis_code": "ZZ999" },
+      "expectedStatus": 403
     },
     {
       "name": "uds-login missing fields returns 400",

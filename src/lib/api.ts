@@ -265,6 +265,57 @@ export interface UdsPerms {
   can_subscription: boolean;
   can_support: boolean;
   can_block: boolean;
+  can_block_user: boolean;
+}
+
+export interface UdsUserDetail {
+  login: string;
+  full_name: string;
+  first_name: string | null;
+  last_name: string | null;
+  email: string | null;
+  phone: string | null;
+  role: string;
+  is_active: boolean;
+  school: string | null;
+  study_group: string | null;
+  subscription_status: string;
+  subscription_until: string | null;
+  subscription_plan: string | null;
+  subscription_started_at: string | null;
+  trial_until: string | null;
+  ai_balance_rub: number;
+  last_seen_at: string | null;
+  created_at: string | null;
+  created_by: string | null;
+  institution_id: number | null;
+  institution_position: string | null;
+  subject: string | null;
+  panel_role: string | null;
+  bound: boolean;
+  bind_code: string | null;
+  bound_name: string | null;
+  teacher_login: string | null;
+}
+
+export interface UdsPayment {
+  plan: string;
+  amount_rub: number;
+  months: number;
+  provider: string;
+  status: string;
+  source: string;
+  granted_by: string | null;
+  created_at: string | null;
+  paid_at: string | null;
+}
+
+export interface UdsCharge {
+  action: string;
+  tokens: number;
+  amount_rub: number;
+  balance_rub_after: number;
+  created_at: string | null;
 }
 
 export interface UdsEmployee {
@@ -324,17 +375,25 @@ async function udsRequest<T>(action: string, method: string, login: string, toke
   return data as T;
 }
 
+async function udsPost<T>(action: string, body: object): Promise<T> {
+  const r = await fetch(`${UDS_URL}?action=${action}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || `Ошибка ${r.status}`);
+  return d as T;
+}
+
 export const udsApi = {
-  login: (loginName: string, password: string) =>
-    fetch(`${UDS_URL}?action=uds-login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ login: loginName, password }),
-    }).then(async r => {
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(d.error || `Ошибка ${r.status}`);
-      return d as { ok: boolean; login: string; token: string; panel_role: string; panel_role_label: string; operator_number: number; perms: UdsPerms };
-    }),
+  verifyIis: (iisCode: string) =>
+    udsPost<{ ok: boolean }>("verify-iis", { iis_code: iisCode }),
+
+  login: (loginName: string, password: string, iisCode: string) =>
+    udsPost<{ ok: boolean; login: string; token: string; panel_role: string; panel_role_label: string; operator_number: number; perms: UdsPerms }>(
+      "uds-login", { login: loginName, password, iis_code: iisCode }
+    ),
 
   me: (login: string, token: string) =>
     udsRequest<{ login: string; panel_role: string | null; panel_role_label: string | null; operator_number: number | null; is_panel: boolean; uds_registered: boolean; uds_access: boolean; perms: UdsPerms | null }>("me", "GET", login, token),
@@ -362,6 +421,33 @@ export const udsApi = {
 
   updateProfile: (login: string, token: string, payload: { current_password: string; new_login?: string; new_password?: string }) =>
     udsRequest<{ ok: boolean; login: string; token: string }>("update-profile", "POST", login, token, payload),
+
+  userDetail: (login: string, token: string, targetLogin: string) =>
+    udsRequest<{ user: UdsUserDetail; payments: UdsPayment[]; charges: UdsCharge[] }>("user-detail", "GET", login, token, undefined, { target_login: targetLogin }),
+
+  grantTokens: (login: string, token: string, targetLogin: string, amountRub: number) =>
+    udsRequest<{ ok: boolean; balance_rub: number }>("grant-tokens", "POST", login, token, { target_login: targetLogin, amount_rub: amountRub }),
+
+  grantSubscription: (login: string, token: string, targetLogin: string, months: number, revoke = false) =>
+    udsRequest<{ ok: boolean; subscription_until?: string }>("grant-subscription", "POST", login, token, { target_login: targetLogin, months, revoke }),
+
+  blockUser: (login: string, token: string, targetLogin: string, blocked: boolean) =>
+    udsRequest<{ ok: boolean }>("block-user", "POST", login, token, { target_login: targetLogin, blocked }),
+
+  resetUserPassword: (login: string, token: string, targetLogin: string, newPassword: string) =>
+    udsRequest<{ ok: boolean }>("reset-user-password", "POST", login, token, { target_login: targetLogin, new_password: newPassword }),
+
+  getLkVisibility: (login: string, token: string) =>
+    udsRequest<{ hidden: { teacher: string[]; student: string[] } }>("lk-visibility", "GET", login, token),
+
+  setLkVisibility: (login: string, token: string, role: "teacher" | "student", hidden: string[]) =>
+    udsRequest<{ ok: boolean }>("lk-visibility", "POST", login, token, { role, hidden }),
+
+  getMaintenance: (login: string, token: string) =>
+    udsRequest<{ sections: string[] }>("maintenance", "GET", login, token),
+
+  setMaintenance: (login: string, token: string, sections: string[]) =>
+    udsRequest<{ ok: boolean; sections: string[] }>("maintenance", "POST", login, token, { sections }),
 };
 
 // ── Institution API ───────────────────────────────────────────────────────────

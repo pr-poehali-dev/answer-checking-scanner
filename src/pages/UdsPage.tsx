@@ -5,6 +5,9 @@ import UdsEmployees from "@/pages/uds/UdsEmployees";
 import UdsUsers from "@/pages/uds/UdsUsers";
 import UdsAuditLog from "@/pages/uds/UdsAuditLog";
 import UdsProfile from "@/pages/uds/UdsProfile";
+import UdsSupport from "@/pages/uds/UdsSupport";
+import UdsLkView from "@/pages/uds/UdsLkView";
+import UdsMaintenance from "@/pages/uds/UdsMaintenance";
 
 const PANEL_ROLE_LABELS: Record<string, string> = {
   head: "Глава Правления",
@@ -24,12 +27,14 @@ interface Session {
   perms: UdsPerms;
 }
 
-const LS_KEY = "uds_session_v1";
+const LS_KEY = "uds_session_v2";
 
-type Tab = "employees" | "users" | "audit" | "support" | "profile";
+type Tab = "employees" | "users" | "audit" | "support" | "profile" | "lkview" | "maintenance";
 
 export default function UdsPage() {
   const [session, setSession] = useState<Session | null>(null);
+  const [step, setStep] = useState<"iis" | "creds">("iis");
+  const [iisCode, setIisCode] = useState("");
   const [loginName, setLoginName] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -54,11 +59,24 @@ export default function UdsPage() {
     } catch { /* ignore */ }
   }, []);
 
+  const verifyIis = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true); setError("");
+    try {
+      await udsApi.verifyIis(iisCode.trim());
+      setStep("creds");
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const doLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true); setError("");
     try {
-      const res = await udsApi.login(loginName.trim(), password);
+      const res = await udsApi.login(loginName.trim(), password, iisCode.trim());
       const s: Session = {
         login: res.login, token: res.token,
         panel_role: res.panel_role, panel_role_label: res.panel_role_label,
@@ -77,6 +95,7 @@ export default function UdsPage() {
   const logout = useCallback(() => {
     localStorage.removeItem(LS_KEY);
     setSession(null);
+    setStep("iis"); setIisCode("");
     setLoginName(""); setPassword("");
   }, []);
 
@@ -92,44 +111,81 @@ export default function UdsPage() {
             <h1 className="text-xl font-bold text-white">УДС</h1>
             <p className="text-sm text-slate-400 mt-1">Управление Движения Системы</p>
           </div>
-          <form onSubmit={doLogin} className="bg-white rounded-xl p-6 space-y-4 shadow-xl">
-            <div>
-              <label className="text-xs text-gray-500 block mb-1">Логин сотрудника</label>
-              <input
-                value={loginName}
-                onChange={e => setLoginName(e.target.value)}
-                autoFocus
-                className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Логин"
-              />
-            </div>
-            <div>
-              <label className="text-xs text-gray-500 block mb-1">Пароль</label>
-              <input
-                type="password"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Пароль"
-              />
-            </div>
-            {error && (
-              <div className="flex items-start gap-2 p-2.5 rounded-lg bg-red-50 border border-red-200">
-                <Icon name="AlertCircle" size={14} className="text-red-500 flex-shrink-0 mt-0.5" />
-                <p className="text-xs text-red-600">{error}</p>
+
+          {step === "iis" ? (
+            <form onSubmit={verifyIis} className="bg-white rounded-xl p-6 space-y-4 shadow-xl">
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">Код ИИС</label>
+                <input
+                  value={iisCode}
+                  onChange={e => setIisCode(e.target.value.toUpperCase())}
+                  autoFocus
+                  maxLength={5}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm text-center font-mono tracking-[0.4em] uppercase focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="•••••"
+                />
               </div>
-            )}
-            <button
-              type="submit"
-              disabled={busy || !loginName.trim() || !password}
-              className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white py-2.5 rounded-lg font-semibold flex items-center justify-center gap-2 text-sm transition-colors"
-            >
-              {busy ? <><Icon name="Loader2" size={15} className="animate-spin" /> Вход…</> : <><Icon name="LogIn" size={15} /> Войти</>}
-            </button>
-            <p className="text-[11px] text-gray-400 text-center">
-              Вход только для сотрудников УДС
-            </p>
-          </form>
+              {error && (
+                <div className="flex items-start gap-2 p-2.5 rounded-lg bg-red-50 border border-red-200">
+                  <Icon name="AlertCircle" size={14} className="text-red-500 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs text-red-600">{error}</p>
+                </div>
+              )}
+              <button
+                type="submit"
+                disabled={busy || iisCode.trim().length < 3}
+                className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white py-2.5 rounded-lg font-semibold flex items-center justify-center gap-2 text-sm transition-colors"
+              >
+                {busy ? <><Icon name="Loader2" size={15} className="animate-spin" /> Проверка…</> : <><Icon name="ArrowRight" size={15} /> Далее</>}
+              </button>
+              <p className="text-[11px] text-gray-400 text-center">
+                Введите код ИИС, выданный при регистрации
+              </p>
+            </form>
+          ) : (
+            <form onSubmit={doLogin} className="bg-white rounded-xl p-6 space-y-4 shadow-xl">
+              <div className="flex items-center gap-2 text-[11px] text-green-600 bg-green-50 border border-green-200 rounded-lg px-2.5 py-1.5">
+                <Icon name="CheckCircle2" size={13} /> Код ИИС подтверждён
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">Логин сотрудника</label>
+                <input
+                  value={loginName}
+                  onChange={e => setLoginName(e.target.value)}
+                  autoFocus
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Логин"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">Пароль</label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Пароль"
+                />
+              </div>
+              {error && (
+                <div className="flex items-start gap-2 p-2.5 rounded-lg bg-red-50 border border-red-200">
+                  <Icon name="AlertCircle" size={14} className="text-red-500 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs text-red-600">{error}</p>
+                </div>
+              )}
+              <button
+                type="submit"
+                disabled={busy || !loginName.trim() || !password}
+                className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white py-2.5 rounded-lg font-semibold flex items-center justify-center gap-2 text-sm transition-colors"
+              >
+                {busy ? <><Icon name="Loader2" size={15} className="animate-spin" /> Вход…</> : <><Icon name="LogIn" size={15} /> Войти</>}
+              </button>
+              <button type="button" onClick={() => { setStep("iis"); setError(""); }}
+                className="w-full text-[11px] text-gray-400 hover:text-gray-600 text-center">
+                ← Назад к коду ИИС
+              </button>
+            </form>
+          )}
         </div>
       </div>
     );
@@ -139,8 +195,10 @@ export default function UdsPage() {
   const TABS: { id: Tab; label: string; icon: string; show: boolean }[] = [
     { id: "employees", label: "Сотрудники", icon: "Users", show: true },
     { id: "users", label: "Пользователи", icon: "UserSearch", show: true },
-    { id: "audit", label: "Логи действий", icon: "ScrollText", show: true },
     { id: "support", label: "Тех. поддержка", icon: "Headphones", show: perms.can_support },
+    { id: "lkview", label: "Вид ЛК", icon: "LayoutDashboard", show: perms.can_lkview },
+    { id: "maintenance", label: "Тех. работы", icon: "Construction", show: perms.can_maintenance },
+    { id: "audit", label: "Логи действий", icon: "ScrollText", show: true },
     { id: "profile", label: "Мой профиль", icon: "UserCog", show: session.login !== "admin" },
   ].filter(t => t.show);
 
@@ -201,16 +259,19 @@ export default function UdsPage() {
           <UdsEmployees login={session.login} token={session.token} perms={perms} myRole={session.panel_role} />
         )}
         {tab === "users" && (
-          <UdsUsers login={session.login} token={session.token} />
+          <UdsUsers login={session.login} token={session.token} perms={perms} />
         )}
         {tab === "audit" && (
           <UdsAuditLog login={session.login} token={session.token} />
         )}
         {tab === "support" && (
-          <div className="text-sm text-muted-foreground p-8 text-center border border-border rounded-lg bg-white">
-            <Icon name="Headphones" size={28} className="mx-auto mb-2 text-muted-foreground/50" />
-            Раздел технической поддержки. Обращения пользователей обрабатываются здесь.
-          </div>
+          <UdsSupport login={session.login} token={session.token} panelRole={session.panel_role} />
+        )}
+        {tab === "lkview" && (
+          <UdsLkView login={session.login} token={session.token} />
+        )}
+        {tab === "maintenance" && (
+          <UdsMaintenance login={session.login} token={session.token} />
         )}
         {tab === "profile" && (
           <UdsProfile

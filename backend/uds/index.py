@@ -172,9 +172,10 @@ def perms_for(role: str) -> dict:
         "can_tokens": role in CAN_TOKENS,
         "can_lkview": role in CAN_LKVIEW,
         "can_maintenance": role in CAN_LKVIEW,
-        "can_subscription": True,
-        "can_support": True,
-        "can_block": role in ("deputy", "head") or PANEL_ROLE_RANK.get(role, 0) >= 5,
+        "can_subscription": True,         # подписку пользователю могут все
+        "can_support": True,              # тех. поддержка у всех
+        "can_block": PANEL_ROLE_RANK.get(role, 0) >= 5,   # блокировка СОТРУДНИКОВ — зам/глава
+        "can_block_user": True,           # блокировка/смена пароля ПОЛЬЗОВАТЕЛЕЙ — все
     }
 
 
@@ -210,14 +211,40 @@ def handler(event: dict, context) -> dict:
 
     conn = get_conn()
     try:
-        # ── uds-login — отдельный вход сотрудников УДС ───────────────────────
+        # ── verify-iis — 1-й шаг входа: проверка кода ИИС ────────────────────
+        if action == "verify-iis" and method == "POST":
+            code = (body.get("iis_code") or "").strip().upper()
+            if not code:
+                return _resp(400, {"error": "Введите код ИИС"})
+            # Спец-код для админа (Главы)
+            admin_iis = os.environ.get("ADMIN_IIS_CODE", "ADMIN")
+            if code == admin_iis.upper():
+                return _resp(200, {"ok": True})
+            cur = conn.cursor()
+            cur.execute(
+                f"""SELECT 1 FROM {SCHEMA}.panel_operators
+                    WHERE UPPER(iis_code) = %s AND panel_role IS NOT NULL AND panel_role != 'removed'
+                      AND uds_registered = TRUE""",
+                (code,)
+            )
+            if not cur.fetchone():
+                return _resp(403, {"error": "Код ИИС не найден или сотрудник не зарегистрирован"})
+            return _resp(200, {"ok": True})
+
+        # ── uds-login — 2-й шаг: логин + пароль (после кода ИИС) ─────────────
         if action == "uds-login" and method == "POST":
             in_login = (body.get("login") or "").strip()
             password = (body.get("password") or "").strip()
+            iis_code = (body.get("iis_code") or "").strip().upper()
             if not in_login or not password:
                 return _resp(400, {"error": "Укажите логин и пароль"})
+            if not iis_code:
+                return _resp(400, {"error": "Сначала введите код ИИС"})
             cur = conn.cursor()
+            admin_iis = os.environ.get("ADMIN_IIS_CODE", "ADMIN")
             if in_login == "admin" and password == ADMIN_PASSWORD:
+                if iis_code != admin_iis.upper():
+                    return _resp(403, {"error": "Неверный код ИИС"})
                 admin_token = f"admin:{hash_password(ADMIN_PASSWORD + 'salt_admin')}"
                 return _resp(200, {"ok": True, "login": "admin", "token": admin_token,
                                    "panel_role": "head",
@@ -233,7 +260,7 @@ def handler(event: dict, context) -> dict:
                 return _resp(401, {"error": "Неверный логин или пароль"})
             sys_role = row[1]
             cur.execute(
-                f"SELECT panel_role, operator_number, uds_registered FROM {SCHEMA}.panel_operators WHERE login = %s",
+                f"SELECT panel_role, operator_number, uds_registered, iis_code FROM {SCHEMA}.panel_operators WHERE login = %s",
                 (in_login,)
             )
             op = cur.fetchone()
@@ -243,6 +270,9 @@ def handler(event: dict, context) -> dict:
                     return _resp(403, {"error": "У вас нет роли в УДС"})
                 if not op[2]:
                     return _resp(403, {"error": "Доступ закрыт. Сотрудник не зарегистрирован через УДС."})
+                # Код ИИС должен совпадать с кодом этого сотрудника
+                if (op[3] or "").upper() != iis_code:
+                    return _resp(403, {"error": "Код ИИС не соответствует сотруднику"})
             prefix = sys_role if sys_role in ("teacher", "student", "tester") else "teacher"
             new_token = f"{prefix}:{hash_password(in_login + password + 'salt')}"
             cur.execute(
@@ -579,6 +609,235 @@ def handler(event: dict, context) -> dict:
                     "bound": r[13] is not None, "bind_code": r[13],
                 })
             return _resp(200, {"users": users})
+
+        # ── user-detail — карточка пользователя + платежи + списания ──────────
+        if action == "user-detail" and method == "GET":
+            tl = (qs.get("target_login") or "").strip()
+            if not tl:
+                return _resp(400, {"error": "Укажите пользователя"})
+            cur = conn.cursor()
+            cur.execute(
+                f"""SELECT u.login, u.full_name, u.first_name, u.last_name, u.email, u.phone,
+                           u.role, u.is_active, u.school, u.study_group,
+                           u.subscription_status, u.subscription_until, u.subscription_plan,
+                           u.subscription_started_at, u.trial_until,
+                           u.ai_balance_kopecks, u.last_seen_at, u.created_at, u.created_by,
+                           u.institution_id, u.institution_position, u.subject,
+                           po.panel_role, sc.bind_code, sc.full_name, sc.teacher_login
+                    FROM {SCHEMA}.users u
+                    LEFT JOIN {SCHEMA}.panel_operators po ON po.login = u.login AND po.panel_role != 'removed'
+                    LEFT JOIN {SCHEMA}.student_codes sc ON sc.bound_login = u.login
+                    WHERE u.login = %s""", (tl,)
+            )
+            r = cur.fetchone()
+            if not r:
+                return _resp(404, {"error": "Пользователь не найден"})
+            user = {
+                "login": r[0], "full_name": r[1], "first_name": r[2], "last_name": r[3],
+                "email": r[4], "phone": r[5], "role": r[6], "is_active": bool(r[7]),
+                "school": r[8], "study_group": r[9],
+                "subscription_status": r[10], "subscription_until": str(r[11]) if r[11] else None,
+                "subscription_plan": r[12], "subscription_started_at": str(r[13]) if r[13] else None,
+                "trial_until": str(r[14]) if r[14] else None,
+                "ai_balance_rub": round((r[15] or 0) / 100, 2),
+                "last_seen_at": str(r[16]) if r[16] else None,
+                "created_at": str(r[17]) if r[17] else None, "created_by": r[18],
+                "institution_id": r[19], "institution_position": r[20], "subject": r[21],
+                "panel_role": r[22],
+                "bound": r[23] is not None, "bind_code": r[23],
+                "bound_name": r[24], "teacher_login": r[25],
+            }
+            # История платежей (подписки/токены)
+            cur.execute(
+                f"""SELECT plan, amount, months, provider, status, source, granted_by, created_at, paid_at
+                    FROM {SCHEMA}.payments WHERE user_login = %s
+                    ORDER BY created_at DESC LIMIT 100""", (tl,)
+            )
+            payments = [{
+                "plan": p[0], "amount_rub": float(p[1] or 0), "months": p[2],
+                "provider": p[3], "status": p[4], "source": p[5], "granted_by": p[6],
+                "created_at": str(p[7]) if p[7] else None, "paid_at": str(p[8]) if p[8] else None,
+            } for p in cur.fetchall()]
+            # История начислений/списаний ИИ-баланса
+            cur.execute(
+                f"""SELECT action, tokens, amount_kopecks, balance_kopecks_after, created_at
+                    FROM {SCHEMA}.ai_token_logs WHERE login = %s
+                    ORDER BY created_at DESC LIMIT 100""", (tl,)
+            )
+            charges = [{
+                "action": c[0], "tokens": c[1],
+                "amount_rub": round((c[2] or 0) / 100, 2),
+                "balance_rub_after": round((c[3] or 0) / 100, 2),
+                "created_at": str(c[4]) if c[4] else None,
+            } for c in cur.fetchall()]
+            return _resp(200, {"user": user, "payments": payments, "charges": charges})
+
+        # ── grant-tokens — начислить ИИ-баланс (руб) пользователю ─────────────
+        if action == "grant-tokens" and method == "POST":
+            if not perms["can_tokens"]:
+                return _resp(403, {"error": "Нет прав начислять токены"})
+            tl = (body.get("target_login") or "").strip()
+            try:
+                amount_rub = float(body.get("amount_rub") or 0)
+            except (TypeError, ValueError):
+                amount_rub = 0
+            if not tl or amount_rub == 0:
+                return _resp(400, {"error": "Укажите пользователя и сумму"})
+            kop = round(amount_rub * 100)
+            cur = conn.cursor()
+            cur.execute(
+                f"""UPDATE {SCHEMA}.users SET ai_balance_kopecks = GREATEST(0, ai_balance_kopecks + %s)
+                    WHERE login = %s RETURNING ai_balance_kopecks""", (kop, tl)
+            )
+            row = cur.fetchone()
+            if not row:
+                return _resp(404, {"error": "Пользователь не найден"})
+            new_kop = row[0] or 0
+            cur.execute(
+                f"""INSERT INTO {SCHEMA}.ai_token_logs (login, action, tokens, balance_after, amount_kopecks, balance_kopecks_after)
+                    VALUES (%s, %s, 0, %s, %s, %s)""",
+                (tl, "uds_grant" if kop >= 0 else "uds_deduct", new_kop, kop, new_kop)
+            )
+            log_action(cur, caller["login"], my_role, "grant_tokens", tl, {"amount_rub": amount_rub})
+            conn.commit()
+            return _resp(200, {"ok": True, "balance_rub": round(new_kop / 100, 2)})
+
+        # ── grant-subscription — выдать/продлить/отозвать подписку ────────────
+        if action == "grant-subscription" and method == "POST":
+            tl = (body.get("target_login") or "").strip()
+            try:
+                months = int(body.get("months") or 1)
+            except (TypeError, ValueError):
+                months = 1
+            months = max(1, min(months, 36))
+            revoke = bool(body.get("revoke"))
+            plan = (body.get("plan") or "УДС").strip()
+            if not tl:
+                return _resp(400, {"error": "Укажите пользователя"})
+            cur = conn.cursor()
+            cur.execute(f"SELECT subscription_until FROM {SCHEMA}.users WHERE login = %s", (tl,))
+            row = cur.fetchone()
+            if not row:
+                return _resp(404, {"error": "Пользователь не найден"})
+            if revoke:
+                cur.execute(
+                    f"""UPDATE {SCHEMA}.users SET subscription_status='none',
+                        subscription_until=NULL, subscription_plan=NULL WHERE login = %s""", (tl,)
+                )
+                log_action(cur, caller["login"], my_role, "revoke_subscription", tl, None)
+                conn.commit()
+                return _resp(200, {"ok": True, "subscription_status": "none"})
+            now = datetime.utcnow()
+            cur_until = row[0] if isinstance(row[0], datetime) else None
+            base = cur_until if (cur_until and cur_until > now) else now
+            new_until = base + timedelta(days=30 * months)
+            cur.execute(
+                f"""UPDATE {SCHEMA}.users SET subscription_status='active',
+                    subscription_plan=%s, subscription_until=%s WHERE login = %s""",
+                (plan, new_until, tl)
+            )
+            cur.execute(
+                f"""INSERT INTO {SCHEMA}.payments
+                    (user_login, plan, amount, months, provider, status, source, granted_by, paid_at, subscription_until)
+                    VALUES (%s, %s, 0, %s, 'uds-grant', 'succeeded', 'uds', %s, NOW(), %s)""",
+                (tl, plan, months, caller["login"], new_until)
+            )
+            log_action(cur, caller["login"], my_role, "grant_subscription", tl, {"months": months})
+            conn.commit()
+            return _resp(200, {"ok": True, "subscription_until": new_until.isoformat()})
+
+        # ── block-user — заблокировать/разблокировать пользователя (все) ─────
+        if action == "block-user" and method == "POST":
+            tl = (body.get("target_login") or "").strip()
+            blocked = bool(body.get("blocked"))
+            if not tl or tl == "admin":
+                return _resp(400, {"error": "Недопустимый пользователь"})
+            cur = conn.cursor()
+            cur.execute(f"UPDATE {SCHEMA}.users SET is_active = %s WHERE login = %s RETURNING id", (not blocked, tl))
+            if not cur.fetchone():
+                return _resp(404, {"error": "Пользователь не найден"})
+            log_action(cur, caller["login"], my_role, "block_user" if blocked else "unblock_user", tl, None)
+            conn.commit()
+            return _resp(200, {"ok": True})
+
+        # ── reset-user-password — сменить пароль пользователю (все) ──────────
+        if action == "reset-user-password" and method == "POST":
+            tl = (body.get("target_login") or "").strip()
+            new_password = (body.get("new_password") or "").strip()
+            if not tl:
+                return _resp(400, {"error": "Укажите пользователя"})
+            if len(new_password) < 6:
+                return _resp(400, {"error": "Пароль не менее 6 символов"})
+            if tl == "admin":
+                return _resp(403, {"error": "Нельзя изменить пароль администратора"})
+            cur = conn.cursor()
+            cur.execute(
+                f"UPDATE {SCHEMA}.users SET password_hash = %s, auth_token_hash = NULL WHERE login = %s RETURNING id",
+                (hash_password(new_password), tl)
+            )
+            if not cur.fetchone():
+                return _resp(404, {"error": "Пользователь не найден"})
+            log_action(cur, caller["login"], my_role, "reset_user_password", tl, None)
+            conn.commit()
+            return _resp(200, {"ok": True})
+
+        # ── lk-visibility — видимость разделов ЛК (разработчик+) ─────────────
+        if action == "lk-visibility" and method == "GET":
+            cur = conn.cursor()
+            cur.execute(f"SELECT role, section FROM {SCHEMA}.lk_section_visibility WHERE visible = FALSE")
+            hidden = {"teacher": [], "student": []}
+            for rr, sect in cur.fetchall():
+                hidden.setdefault(rr, []).append(sect)
+            return _resp(200, {"hidden": hidden})
+
+        if action == "lk-visibility" and method == "POST":
+            if not perms["can_lkview"]:
+                return _resp(403, {"error": "Доступно только разработчику и выше"})
+            role_key = (body.get("role") or "").strip().lower()
+            hidden = body.get("hidden", [])
+            if role_key not in ("teacher", "student"):
+                return _resp(400, {"error": "role: teacher или student"})
+            if not isinstance(hidden, list):
+                return _resp(400, {"error": "hidden — массив"})
+            hidden = [str(s)[:32] for s in hidden]
+            cur = conn.cursor()
+            cur.execute(f"DELETE FROM {SCHEMA}.lk_section_visibility WHERE role = %s", (role_key,))
+            for sect in hidden:
+                cur.execute(
+                    f"""INSERT INTO {SCHEMA}.lk_section_visibility (role, section, visible, updated_at)
+                        VALUES (%s, %s, FALSE, NOW())
+                        ON CONFLICT (role, section) DO UPDATE SET visible = FALSE, updated_at = NOW()""",
+                    (role_key, sect)
+                )
+            log_action(cur, caller["login"], my_role, "lk_visibility", None, {"role": role_key, "hidden": hidden})
+            conn.commit()
+            return _resp(200, {"ok": True, "role": role_key, "hidden": hidden})
+
+        # ── maintenance — разделы на тех. работах (разработчик+) ─────────────
+        if action == "maintenance" and method == "GET":
+            cur = conn.cursor()
+            cur.execute(f"SELECT sections FROM {SCHEMA}.maintenance WHERE id = 1")
+            row = cur.fetchone()
+            sections = json.loads(row[0]) if row and row[0] else []
+            return _resp(200, {"sections": sections})
+
+        if action == "maintenance" and method == "POST":
+            if not perms["can_maintenance"]:
+                return _resp(403, {"error": "Доступно только разработчику и выше"})
+            sections = body.get("sections", [])
+            if not isinstance(sections, list):
+                return _resp(400, {"error": "sections — массив"})
+            cur = conn.cursor()
+            cur.execute(
+                f"""INSERT INTO {SCHEMA}.maintenance (id, sections, updated_at, updated_by)
+                    VALUES (1, %s, NOW(), %s)
+                    ON CONFLICT (id) DO UPDATE
+                    SET sections = EXCLUDED.sections, updated_at = EXCLUDED.updated_at, updated_by = EXCLUDED.updated_by""",
+                (json.dumps(sections, ensure_ascii=False), caller["login"])
+            )
+            log_action(cur, caller["login"], my_role, "maintenance", None, {"sections": sections})
+            conn.commit()
+            return _resp(200, {"ok": True, "sections": sections})
 
         return _resp(404, {"error": f"Неизвестный action: {action}"})
     finally:

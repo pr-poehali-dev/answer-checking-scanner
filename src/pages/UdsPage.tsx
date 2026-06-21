@@ -181,7 +181,7 @@ export default function UdsPage() {
                   <Icon name="Loader2" size={13} className="animate-spin" /> Проверка сертификата…
                 </p>
               )}
-              <p className="text-[10px] text-gray-300 text-center">Вход по коду ИИС — 5 раз нажмите на значок УДС</p>
+              <p className="text-[10px] text-gray-300 text-center">Вход по коду ИИС — невозможен без разрешения Советника </p>
             </div>
           ) : step === "iis" ? (
             <form onSubmit={verifyIis} className="bg-white rounded-xl p-6 space-y-4 shadow-xl">

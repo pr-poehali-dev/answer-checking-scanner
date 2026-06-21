@@ -59,6 +59,34 @@ function loadScript(src: string): Promise<void> {
 
 let rtPluginCache: any = null;
 
+// Человекочитаемые сообщения по кодам ошибок Рутокен Плагина
+function rutokenErrorMessage(err: any): string {
+  const code = typeof err === "number" ? err
+    : (err && (err.code ?? err.errorCode ?? err.message));
+  const n = Number(code);
+  const MAP: Record<number, string> = {
+    8:   "Рутокен не подключён или был извлечён. Вставьте токен и попробуйте снова.",
+    18:  "Неверный PIN-код Рутокена.",
+    19:  "PIN-код заблокирован: исчерпаны попытки ввода. Разблокируйте токен через «Панель управления Рутокен».",
+    93:  "Неверный PIN-код Рутокена. Введите корректный PIN и попробуйте снова.",
+    94:  "Требуется PIN-код Рутокена. Введите PIN в поле ниже.",
+    113: "PIN-код заблокирован. Разблокируйте токен через «Панель управления Рутокен».",
+  };
+  if (!Number.isNaN(n) && MAP[n]) return MAP[n];
+  if (typeof err === "string") return err;
+  if (err && err.message) return String(err.message);
+  return `Ошибка Рутокена (код ${code}). Проверьте PIN-код и подключение токена.`;
+}
+
+async function rtLogin(plugin: any, deviceId: number, pin: string): Promise<void> {
+  if (!pin) throw new Error("Введите PIN-код Рутокена в поле ниже.");
+  try {
+    await plugin.login(deviceId, pin);
+  } catch (e) {
+    throw new Error(rutokenErrorMessage(e));
+  }
+}
+
 async function ensureRutokenAdapter(): Promise<void> {
   if (window.rutoken) return;
   await loadScript(rutokenAdapterUrl);
@@ -100,13 +128,17 @@ const rutoken = {
   async issue(subjectCN: string, pin: string): Promise<IssueResult> {
     const plugin = await this.plugin();
     const deviceId = await this.firstDevice(plugin);
-    await plugin.login(deviceId, pin);
-    // Генерируем ключевую пару ГОСТ на самом токене (неизвлекаемую)
-    const keyOptions = { paramset: "A" };
-    const keyId = await plugin.generateKeyPair(deviceId, false, "", keyOptions);
-    const dn = [{ rdn: "commonName", value: subjectCN }, { rdn: "organizationName", value: "САОУ" }, { rdn: "organizationUnitName", value: "УДС" }];
-    const csrB64 = await plugin.createPkcs10(deviceId, keyId, { dn }, {});
-    return { csr: csrB64.includes(PEM_HEAD) ? csrB64 : toPemCsr(csrB64), context: { plugin, deviceId, keyId, pin } };
+    await rtLogin(plugin, deviceId, pin);
+    try {
+      // Генерируем ключевую пару ГОСТ на самом токене (неизвлекаемую)
+      const keyOptions = { paramset: "A" };
+      const keyId = await plugin.generateKeyPair(deviceId, false, "", keyOptions);
+      const dn = [{ rdn: "commonName", value: subjectCN }, { rdn: "organizationName", value: "САОУ" }, { rdn: "organizationUnitName", value: "УДС" }];
+      const csrB64 = await plugin.createPkcs10(deviceId, keyId, { dn }, {});
+      return { csr: csrB64.includes(PEM_HEAD) ? csrB64 : toPemCsr(csrB64), context: { plugin, deviceId, keyId, pin } };
+    } catch (e) {
+      throw new Error(rutokenErrorMessage(e));
+    }
   },
 
   async install(ctx: any, certPem: string): Promise<void> {
@@ -118,7 +150,7 @@ const rutoken = {
   async sign(nonce: string, pin: string): Promise<SignResult> {
     const plugin = await this.plugin();
     const deviceId = await this.firstDevice(plugin);
-    await plugin.login(deviceId, pin);
+    await rtLogin(plugin, deviceId, pin);
     const certs: string[] = await plugin.enumerateCertificates(deviceId, plugin.CERT_CATEGORY_USER ?? 1);
     if (!certs || certs.length === 0) throw new Error("На токене нет сертификата УДС");
     const certId = certs[0];

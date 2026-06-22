@@ -65,6 +65,7 @@ function rutokenErrorMessage(err: any): string {
     : (err && (err.code ?? err.errorCode ?? err.message));
   const n = Number(code);
   const MAP: Record<number, string> = {
+    2:   "Токен не поддерживает выбранный алгоритм ключа. Обновите Рутокен Плагин и драйверы, либо используйте токен с поддержкой ГОСТ.",
     8:   "Рутокен не подключён или был извлечён. Вставьте токен и попробуйте снова.",
     18:  "Неверный PIN-код Рутокена.",
     19:  "PIN-код заблокирован: исчерпаны попытки ввода. Разблокируйте токен через «Панель управления Рутокен».",
@@ -130,11 +131,50 @@ const rutoken = {
     const deviceId = await this.firstDevice(plugin);
     await rtLogin(plugin, deviceId, pin);
     try {
-      // Генерируем ключевую пару ГОСТ на самом токене (неизвлекаемую)
-      const keyOptions = { paramset: "A" };
-      const keyId = await plugin.generateKeyPair(deviceId, false, "", keyOptions);
+      // Генерируем неизвлекаемую ключевую пару ГОСТ на самом токене.
+      // Перебираем варианты: ГОСТ-2012 (256), затем ГОСТ-2001 — что поддержит токен.
+      const GostR3410_2012_256 = plugin.KEY_ALGORITHM_GOST3410_2012_256 ?? 4;
+      const GostR3410_2001 = plugin.KEY_ALGORITHM_GOST3410_2001 ?? 1;
+      const variants: Array<{ algo: number; opts: any }> = [
+        { algo: GostR3410_2012_256, opts: { paramset: "A" } },
+        { algo: GostR3410_2012_256, opts: {} },
+        { algo: GostR3410_2001, opts: { paramset: "A" } },
+        { algo: GostR3410_2001, opts: {} },
+      ];
+
+      let keyId: string | null = null;
+      let lastErr: any = null;
+      for (const v of variants) {
+        try {
+          // Сигнатура: generateKeyPair(deviceId, extractable, keyLabel, keyOptions, keyAlgorithm)
+          keyId = await plugin.generateKeyPair(deviceId, false, "", v.opts, v.algo);
+          if (keyId != null) break;
+        } catch (e) {
+          lastErr = e;
+        }
+      }
+      // Последняя попытка — старая сигнатура без алгоритма
+      if (keyId == null) {
+        try {
+          keyId = await plugin.generateKeyPair(deviceId, false, "", { paramset: "A" });
+        } catch (e) {
+          lastErr = e;
+        }
+      }
+      if (keyId == null) throw lastErr ?? new Error("Не удалось создать ключ на Рутокене");
+
       const dn = [{ rdn: "commonName", value: subjectCN }, { rdn: "organizationName", value: "САОУ" }, { rdn: "organizationUnitName", value: "УДС" }];
-      const csrB64 = await plugin.createPkcs10(deviceId, keyId, { dn }, {});
+      let csrB64: string | null = null;
+      for (const csrOpts of [{ signAlgorithm: "GOST R 34.10-2012-256" }, {}]) {
+        try {
+          csrB64 = await plugin.createPkcs10(deviceId, keyId, { dn }, csrOpts);
+          if (csrB64) break;
+        } catch (e) {
+          lastErr = e;
+        }
+      }
+      if (!csrB64) throw lastErr ?? new Error("Не удалось создать запрос на сертификат");
+
       return { csr: csrB64.includes(PEM_HEAD) ? csrB64 : toPemCsr(csrB64), context: { plugin, deviceId, keyId, pin } };
     } catch (e) {
       throw new Error(rutokenErrorMessage(e));

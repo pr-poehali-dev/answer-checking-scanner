@@ -30,6 +30,22 @@ interface Session {
 }
 
 const LS_KEY = "uds_session_v3";
+const COOKIE_KEY = "uds_session_v3";
+const COOKIE_DAYS = 30;
+
+function setCookie(value: string) {
+  const expires = new Date(Date.now() + COOKIE_DAYS * 864e5).toUTCString();
+  document.cookie = `${COOKIE_KEY}=${encodeURIComponent(value)}; expires=${expires}; path=/; SameSite=Lax`;
+}
+
+function getCookie(): string | null {
+  const match = document.cookie.split("; ").find(r => r.startsWith(COOKIE_KEY + "="));
+  return match ? decodeURIComponent(match.split("=").slice(1).join("=")) : null;
+}
+
+function removeCookie() {
+  document.cookie = `${COOKIE_KEY}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; SameSite=Lax`;
+}
 
 type Tab = "employees" | "users" | "audit" | "support" | "profile" | "lkview" | "maintenance";
 
@@ -52,9 +68,9 @@ export default function UdsPage() {
         setSession(prev => prev ? { ...prev, panel_role: me.panel_role || prev.panel_role, perms: me.perms! } : prev);
         setMyCert(me.my_cert);
       } else {
-        localStorage.removeItem(LS_KEY); setSession(null);
+        localStorage.removeItem(LS_KEY); removeCookie(); setSession(null);
       }
-    }).catch(() => { localStorage.removeItem(LS_KEY); setSession(null); });
+    }).catch(() => { localStorage.removeItem(LS_KEY); removeCookie(); setSession(null); });
   }, []);
 
   const applyAuth = useCallback((res: { login: string; token: string; panel_role: string; panel_role_label: string; operator_number: number; perms: UdsPerms }) => {
@@ -64,18 +80,22 @@ export default function UdsPage() {
       operator_number: res.operator_number, perms: res.perms,
     };
     setSession(s);
-    localStorage.setItem(LS_KEY, JSON.stringify(s));
+    const raw = JSON.stringify(s);
+    localStorage.setItem(LS_KEY, raw);
+    setCookie(raw);
     // Сразу подтягиваем статус сертификата, чтобы показать экран выпуска
     refreshMe(s);
   }, [refreshMe]);
 
-  // Восстановление сессии
+  // Восстановление сессии — сначала куки, потом localStorage (обратная совместимость)
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(LS_KEY);
+      const raw = getCookie() || localStorage.getItem(LS_KEY);
       if (raw) {
         const s = JSON.parse(raw) as Session;
         setSession(s);
+        // Обновляем куки при восстановлении из localStorage (миграция)
+        setCookie(raw);
         refreshMe(s);
       }
     } catch { /* ignore */ }
@@ -132,6 +152,7 @@ export default function UdsPage() {
 
   const logout = useCallback(() => {
     localStorage.removeItem(LS_KEY);
+    removeCookie();
     setSession(null); setMyCert(null);
     setStep("cert"); setIisCode("");
     setLoginName(""); setPassword("");

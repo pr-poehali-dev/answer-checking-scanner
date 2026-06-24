@@ -50,10 +50,22 @@ async function getDocxBase64(result: { docx_url?: string; docx_b64?: string }): 
 export function WorksheetsForm() {
   const { teacher, yadiskConnected } = useAppStore();
 
-  const [subject, setSubject] = useState<string>(SUBJECTS[0]);
-  const [classNum, setClassNum] = useState(7);
-  const [topic, setTopic] = useState("");
-  const [description, setDescription] = useState("");
+  // Предзаполнение из конспекта (если пришли из раздела «Конспекты»)
+  const synTopic = sessionStorage.getItem("synopsis_worksheet_topic") || "";
+  const synSubject = sessionStorage.getItem("synopsis_worksheet_subject") || "";
+  const synClass = Number(sessionStorage.getItem("synopsis_worksheet_class") || "0");
+  const synDesc = sessionStorage.getItem("synopsis_worksheet_description") || "";
+  if (synTopic) {
+    sessionStorage.removeItem("synopsis_worksheet_topic");
+    sessionStorage.removeItem("synopsis_worksheet_subject");
+    sessionStorage.removeItem("synopsis_worksheet_class");
+    sessionStorage.removeItem("synopsis_worksheet_description");
+  }
+
+  const [subject, setSubject] = useState<string>(synSubject || SUBJECTS[0]);
+  const [classNum, setClassNum] = useState(synClass || 7);
+  const [topic, setTopic] = useState(synTopic);
+  const [description, setDescription] = useState(synDesc);
   const [tasksCount, setTasksCount] = useState(6);
   const [withImages, setWithImages] = useState(true);
   const [busy, setBusy] = useState(false);

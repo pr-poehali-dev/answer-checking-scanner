@@ -8,9 +8,10 @@ interface Props {
   item: SynopsisItem;
   onGoPresentation: (item: SynopsisItem) => void;
   onGoTest: (item: SynopsisItem) => void;
+  onGoWorksheet: (item: SynopsisItem) => void;
 }
 
-export function SynopsisRow({ item, onGoPresentation, onGoTest }: Props) {
+export function SynopsisRow({ item, onGoPresentation, onGoTest, onGoWorksheet }: Props) {
   const [expanded, setExpanded] = useState(false);
 
   const onDelete = () => {
@@ -55,6 +56,13 @@ export function SynopsisRow({ item, onGoPresentation, onGoTest }: Props) {
             title="Составить тест по конспекту"
           >
             <Icon name="FileText" size={14} />
+          </button>
+          <button
+            onClick={() => onGoWorksheet(item)}
+            className="p-1.5 text-muted-foreground hover:text-blue-600 transition-colors"
+            title="Создать рабочий лист по конспекту"
+          >
+            <Icon name="FileSpreadsheet" size={14} fallback="FileText" />
           </button>
           <button
             onClick={() => onGoPresentation(item)}

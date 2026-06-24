@@ -116,6 +116,14 @@ export function SynopsisSection() {
     window.dispatchEvent(new CustomEvent("navigate-to-section", { detail: "tests" }));
   };
 
+  const goToWorksheet = (item: SynopsisItem) => {
+    sessionStorage.setItem("synopsis_worksheet_topic", item.topic);
+    sessionStorage.setItem("synopsis_worksheet_subject", item.subject);
+    sessionStorage.setItem("synopsis_worksheet_class", String(item.classNum));
+    sessionStorage.setItem("synopsis_worksheet_description", item.text);
+    window.dispatchEvent(new CustomEvent("navigate-to-section", { detail: "worksheets" }));
+  };
+
   return (
     <div className="animate-slide-up space-y-5">
       <SynopsisForm
@@ -153,7 +161,7 @@ export function SynopsisSection() {
         ) : (
           <div className="divide-y divide-border">
             {synopses.map(s => (
-              <SynopsisRow key={s.id} item={s} onGoPresentation={goToPresentation} onGoTest={goToTest} />
+              <SynopsisRow key={s.id} item={s} onGoPresentation={goToPresentation} onGoTest={goToTest} onGoWorksheet={goToWorksheet} />
             ))}
           </div>
         )}

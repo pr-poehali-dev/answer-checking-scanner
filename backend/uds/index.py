@@ -250,24 +250,30 @@ def otp_verify(cur, login: str, purpose: str, code: str) -> str:
 
 
 def send_email_otp(to_email: str, code: str, purpose: str) -> None:
-    """Отправляет OTP-код на email через SMTP."""
-    smtp_host = os.environ.get("SMTP_HOST", "")
-    smtp_port = int(os.environ.get("SMTP_PORT", "465"))
-    smtp_user = os.environ.get("SMTP_USER", "")
-    smtp_pass = os.environ.get("SMTP_PASSWORD", "")
+    """Отправляет OTP-код на email через SMTP УДС."""
+    # Сначала пробуем отдельные UDS-секреты, иначе общие SMTP
+    smtp_host = os.environ.get("UDS_SMTP_HOST") or os.environ.get("SMTP_HOST", "")
+    smtp_port = int(os.environ.get("UDS_SMTP_PORT") or os.environ.get("SMTP_PORT", "465"))
+    smtp_user = os.environ.get("UDS_SMTP_USER") or os.environ.get("SMTP_USER", "")
+    smtp_pass = os.environ.get("UDS_SMTP_PASSWORD") or os.environ.get("SMTP_PASSWORD", "")
+
+    print(f"[UDS SMTP] host={smtp_host} port={smtp_port} user={smtp_user} to={to_email} purpose={purpose}")
+
     if not smtp_host or not smtp_user:
-        raise RuntimeError("SMTP не настроен")
+        raise RuntimeError("SMTP не настроен: заполните UDS_SMTP_HOST и UDS_SMTP_USER")
+    if not smtp_pass:
+        raise RuntimeError("SMTP пароль не задан: заполните UDS_SMTP_PASSWORD")
 
     if purpose == "email_verify":
         subject = "УДС САОУ — подтверждение email"
-        body = (
+        text_body = (
             f"Ваш код подтверждения email для регистрации в УДС САОУ:\n\n"
             f"  {code}\n\n"
             f"Код действует 10 минут. Не сообщайте его никому."
         )
     else:
         subject = "УДС САОУ — код входа"
-        body = (
+        text_body = (
             f"Ваш код для входа в УДС САОУ:\n\n"
             f"  {code}\n\n"
             f"Код действует 5 минут. Не сообщайте его никому.\n"
@@ -278,19 +284,26 @@ def send_email_otp(to_email: str, code: str, purpose: str) -> None:
     msg["Subject"] = subject
     msg["From"] = smtp_user
     msg["To"] = to_email
-    msg.attach(MIMEText(body, "plain", "utf-8"))
+    msg.attach(MIMEText(text_body, "plain", "utf-8"))
 
-    if smtp_port == 465:
-        import ssl
-        ctx = ssl.create_default_context()
-        with smtplib.SMTP_SSL(smtp_host, smtp_port, context=ctx) as s:
-            s.login(smtp_user, smtp_pass)
-            s.sendmail(smtp_user, [to_email], msg.as_string())
-    else:
-        with smtplib.SMTP(smtp_host, smtp_port) as s:
-            s.starttls()
-            s.login(smtp_user, smtp_pass)
-            s.sendmail(smtp_user, [to_email], msg.as_string())
+    import ssl
+    try:
+        if smtp_port == 465:
+            ctx = ssl.create_default_context()
+            with smtplib.SMTP_SSL(smtp_host, smtp_port, context=ctx, timeout=15) as s:
+                s.login(smtp_user, smtp_pass)
+                s.sendmail(smtp_user, [to_email], msg.as_string())
+        else:
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as s:
+                s.ehlo()
+                s.starttls(context=ssl.create_default_context())
+                s.ehlo()
+                s.login(smtp_user, smtp_pass)
+                s.sendmail(smtp_user, [to_email], msg.as_string())
+        print(f"[UDS SMTP] OK: письмо отправлено на {to_email}")
+    except Exception as e:
+        print(f"[UDS SMTP] ОШИБКА: {e}")
+        raise
 
 
 # ── Мини-УЦ "Управление УДС САОУ" ──────────────────────────────────────────────

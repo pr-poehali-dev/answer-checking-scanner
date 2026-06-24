@@ -809,7 +809,10 @@ export interface PresentationOutline {
 }
 
 export interface PresentationResponse {
-  pptx_b64: string;
+  /** Прямая ссылка на готовый файл в хранилище (основной способ скачивания) */
+  pptx_url?: string;
+  /** base64 файла — запасной вариант для небольших презентаций */
+  pptx_b64?: string;
   filename: string;
   size: number;
   outline: PresentationOutline;
@@ -863,7 +866,7 @@ export const presentationApi = {
       teacherName: params.teacherName,
       teacherSchool: params.teacherSchool,
       login: params.login ?? "",
-      customDesign: params.customDesign ?? false,
+      customDesign: params.customDesign ?? true,
     };
 
     // ── Шаг 1: получаем структуру от GigaChat (до 85 сек) ────────────────

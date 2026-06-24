@@ -17,6 +17,16 @@ const AUDIENCE_PRESETS = [
   "Подготовка к ЕГЭ",
 ];
 
+function triggerDownload(href: string, filename: string, revoke?: string) {
+  const a = document.createElement("a");
+  a.href = href;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  if (revoke) setTimeout(() => URL.revokeObjectURL(revoke), 1500);
+}
+
 function downloadBase64(b64: string, filename: string) {
   const bin = atob(b64);
   const arr = new Uint8Array(bin.length);
@@ -25,13 +35,32 @@ function downloadBase64(b64: string, filename: string) {
     type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   });
   const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1500);
+  triggerDownload(url, filename, url);
+}
+
+/** Скачивает презентацию: сначала по прямой ссылке, иначе из base64. */
+function downloadPresentation(result: { pptx_url?: string; pptx_b64?: string }, filename: string) {
+  if (result.pptx_url) {
+    triggerDownload(result.pptx_url, filename);
+  } else if (result.pptx_b64) {
+    downloadBase64(result.pptx_b64, filename);
+  } else {
+    throw new Error("Файл презентации не получен. Попробуйте ещё раз.");
+  }
+}
+
+/** Возвращает base64 файла: из ответа или скачивая по ссылке (нужно для Я.Диска). */
+async function getPptxBase64(result: { pptx_url?: string; pptx_b64?: string }): Promise<string> {
+  if (result.pptx_b64) return result.pptx_b64;
+  if (result.pptx_url) {
+    const res = await fetch(result.pptx_url);
+    const buf = await res.arrayBuffer();
+    let binary = "";
+    const bytes = new Uint8Array(buf);
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary);
+  }
+  throw new Error("Файл презентации не получен");
 }
 
 const STAGE_HINTS: [number, string][] = [
@@ -121,7 +150,7 @@ export function PresentationsForm() {
           await yadisk.ensureFolder(teacher.yadiskToken, PRESENTATIONS_FOLDER);
           const date = new Date().toISOString().slice(0, 10);
           yadiskPath = `${PRESENTATIONS_FOLDER}/${date} ${result.filename}`;
-          await yadisk.uploadBinary(teacher.yadiskToken, yadiskPath, result.pptx_b64, true);
+          await yadisk.uploadBinary(teacher.yadiskToken, yadiskPath, await getPptxBase64(result), true);
           uploadedToYadisk = true;
         } catch (e) {
           console.error("Yadisk upload failed", e);
@@ -140,10 +169,10 @@ export function PresentationsForm() {
       }
 
       appStore.addPresentation(item);
-      downloadBase64(result.pptx_b64, result.filename);
+      downloadPresentation(result, result.filename);
 
       // Сохраняем структуру для быстрой пересборки дизайна (только индивидуальный)
-      if (customDesign && result.rawOutline) {
+      if (result.rawOutline) {
         setLastDesign({
           topic: topic.trim(), rawOutline: result.rawOutline, variant: 1,
           teacherName: teacher.name, teacherSchool: teacher.school,
@@ -189,7 +218,7 @@ export function PresentationsForm() {
           await yadisk.ensureFolder(teacher.yadiskToken, PRESENTATIONS_FOLDER);
           const date = new Date().toISOString().slice(0, 10);
           yadiskPath = `${PRESENTATIONS_FOLDER}/${date} ${result.filename}`;
-          await yadisk.uploadBinary(teacher.yadiskToken, yadiskPath, result.pptx_b64, true);
+          await yadisk.uploadBinary(teacher.yadiskToken, yadiskPath, await getPptxBase64(result), true);
           uploadedToYadisk = true;
         } catch (e) {
           console.error("Yadisk upload failed", e);
@@ -202,7 +231,7 @@ export function PresentationsForm() {
         yadiskPath, uploadedToYadisk, createdAt: new Date().toISOString(),
         outline: result.outline,
       });
-      downloadBase64(result.pptx_b64, result.filename);
+      downloadPresentation(result, result.filename);
       setLastDesign({ ...lastDesign, variant: lastDesign.variant + 1 });
       setSuccess("Готов новый вариант дизайна — файл скачан.");
     } catch (e) {

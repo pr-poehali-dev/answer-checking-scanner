@@ -70,6 +70,34 @@ CORS = {
     "Access-Control-Allow-Headers": "Content-Type",
 }
 
+
+def upload_pptx_to_s3(pptx_bytes: bytes, filename: str) -> str:
+    """Заливает готовый PPTX в S3 и возвращает CDN-ссылку. Пусто при ошибке."""
+    try:
+        import boto3
+        import uuid
+        key_id = os.environ.get("AWS_ACCESS_KEY_ID", "")
+        secret = os.environ.get("AWS_SECRET_ACCESS_KEY", "")
+        if not key_id or not secret:
+            return ""
+        s3 = boto3.client(
+            "s3",
+            endpoint_url="https://bucket.poehali.dev",
+            aws_access_key_id=key_id,
+            aws_secret_access_key=secret,
+        )
+        safe = re.sub(r"[^a-zA-Z0-9._-]", "_", filename) or "presentation.pptx"
+        key = f"presentations/{uuid.uuid4().hex}_{safe}"
+        s3.put_object(
+            Bucket="files",
+            Key=key,
+            Body=pptx_bytes,
+            ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        )
+        return f"https://cdn.poehali.dev/projects/{key_id}/bucket/{key}"
+    except Exception:
+        return ""
+
 # ─── ДИЗАЙН-ТЕМЫ ────────────────────────────────────────────────────────────
 
 THEMES = [
@@ -1422,11 +1450,14 @@ def handler(event: dict, context) -> dict:
 
         _, _, spent_rub, balance_rub = spend_ai_tokens(login, max(tokens_used, 1))
 
-        theme = make_custom_theme(topic, design_variant) if custom_design else pick_theme(topic)
+        # Каждая презентация — уникальный современный дизайн (генерируется на лету).
+        # Если variant не задан явно — берём случайный, чтобы одна тема давала разный стиль.
+        variant = design_variant or random.randint(1, 10_000)
+        theme = make_custom_theme(topic, variant)
         return _resp(200, {
             "outline": outline,
             "theme_name": theme["name"],
-            "theme_payload": theme_to_payload(theme) if custom_design else None,
+            "theme_payload": theme_to_payload(theme),
             "topic": topic,
             "spent_rub": spent_rub,
             "balance_rub": balance_rub,
@@ -1452,11 +1483,11 @@ def handler(event: dict, context) -> dict:
         # Восстанавливаем тему: при «обновить дизайн» генерируем новый индивидуальный
         # на лету, иначе из payload, иначе по имени.
         if regen_design:
-            theme = make_custom_theme(topic, design_variant)
+            theme = make_custom_theme(topic, design_variant or random.randint(1, 10_000))
         elif theme_payload:
             theme = theme_from_payload(theme_payload)
         else:
-            theme = next((t for t in THEMES if t["name"] == theme_name), None) or pick_theme(topic)
+            theme = make_custom_theme(topic, random.randint(1, 10_000))
 
         # Скачиваем до 3 фото на слайд параллельно
         images = {}
@@ -1484,8 +1515,9 @@ def handler(event: dict, context) -> dict:
             return _resp(500, {"error": f"Ошибка сборки PPTX: {e}"})
 
         filename = f"{safe_filename(topic)}.pptx"
-        return _resp(200, {
-            "pptx_b64": base64.b64encode(pptx_bytes).decode(),
+        pptx_url = upload_pptx_to_s3(pptx_bytes, filename)
+        resp_body = {
+            "pptx_url": pptx_url,
             "filename": filename,
             "size": len(pptx_bytes),
             "outline": {
@@ -1493,7 +1525,11 @@ def handler(event: dict, context) -> dict:
                 "slides": [{"title": s["title"], "bullets": s["bullets"]} for s in outline.get("slides", [])],
                 "conclusion": outline.get("conclusion", []),
             },
-        })
+        }
+        # base64 кладём как запасной вариант только для небольших файлов (иначе 502)
+        if not pptx_url or len(pptx_bytes) < 3_000_000:
+            resp_body["pptx_b64"] = base64.b64encode(pptx_bytes).decode()
+        return _resp(200, resp_body)
 
     # ── Legacy: оба шага вместе (action="" или не указан) ───────────────────
     login = (body.get("login") or "").strip()
@@ -1532,7 +1568,7 @@ def handler(event: dict, context) -> dict:
         except Exception:
             pass
 
-    theme = make_custom_theme(topic) if custom_design else pick_theme(topic)
+    theme = make_custom_theme(topic, random.randint(1, 10_000))
 
     try:
         outline, tokens_used = generate_outline(topic, description, slides_count, audience)
@@ -1571,8 +1607,9 @@ def handler(event: dict, context) -> dict:
         return _resp(500, {"error": f"Ошибка сборки PPTX: {e}"})
 
     filename = f"{safe_filename(topic)}.pptx"
-    return _resp(200, {
-        "pptx_b64": base64.b64encode(pptx_bytes).decode(),
+    pptx_url = upload_pptx_to_s3(pptx_bytes, filename)
+    resp_body = {
+        "pptx_url": pptx_url,
         "filename": filename,
         "size": len(pptx_bytes),
         "outline": {
@@ -1580,4 +1617,7 @@ def handler(event: dict, context) -> dict:
             "slides": [{"title": s["title"], "bullets": s["bullets"]} for s in outline["slides"]],
             "conclusion": outline["conclusion"],
         },
-    })
+    }
+    if not pptx_url or len(pptx_bytes) < 3_000_000:
+        resp_body["pptx_b64"] = base64.b64encode(pptx_bytes).decode()
+    return _resp(200, resp_body)

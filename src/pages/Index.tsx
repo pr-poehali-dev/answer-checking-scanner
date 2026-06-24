@@ -6,6 +6,7 @@ import { ResultsSection, SettingsSection } from "@/components/scanner/SectionsB"
 import { StudentsSection } from "@/components/scanner/StudentsSection";
 import { WorksSection } from "@/components/scanner/WorksSection";
 import { PresentationsSection } from "@/components/scanner/PresentationsSection";
+import { WorksheetsSection } from "@/components/scanner/WorksheetsSection";
 import { TestsSection } from "@/components/scanner/TestsSection";
 import { SynopsisSection } from "@/components/scanner/SynopsisSection";
 import { ExamsSection } from "@/components/scanner/ExamsSection";
@@ -64,6 +65,7 @@ const SECTION_COMPONENTS: Record<Section, React.FC> = {
   students: StudentsSection,
   works: WorksSection,
   presentations: PresentationsSection,
+  worksheets: WorksheetsSection,
   tests: TestsSection,
   synopsis: SynopsisSection,
   exams: ExamsSection,

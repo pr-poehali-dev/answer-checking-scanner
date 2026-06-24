@@ -5,6 +5,7 @@ const BLANK_URL = "https://functions.poehali.dev/5b4fc8cd-8022-458e-acb6-8606c6c
 const RECOGNIZE_URL = "https://functions.poehali.dev/de6ae337-82d7-4cc2-ae90-3cf97475be59";
 const PRESENTATION_URL = "https://functions.poehali.dev/9aa03e93-715c-41fd-91f4-6d4e79487ed9";
 const TEST_URL = "https://functions.poehali.dev/80f9c6ec-e492-47b6-881a-633a41d7e4f4";
+const WORKSHEET_URL = "https://functions.poehali.dev/34530eb2-3d3c-485e-b7f8-63df6db74f49";
 const SUBSCRIPTION_URL = "https://functions.poehali.dev/0dc83bdb-3da2-4cb9-b9d9-f0b48cfb25da";
 const STUDENT_LINK_URL = "https://functions.poehali.dev/23f6c20d-f0bd-4bfb-84fe-75c97564d076";
 const UDS_URL = "https://functions.poehali.dev/3f54b399-3af0-45fa-a2b6-0736484f6059";
@@ -1019,6 +1020,74 @@ export const testApi = {
       const err = e as Error;
       if (err.name === "AbortError") {
         throw new Error("Сервис GigaChat сейчас перегружен. Подождите минуту и попробуйте снова.");
+      }
+      if (err.message.includes("Failed to fetch")) {
+        throw new Error("Не удалось связаться с сервером. Проверьте интернет и попробуйте снова через минуту.");
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
+  },
+};
+
+// ── Рабочие листы ───────────────────────────────────────────────────────────
+
+export interface WorksheetTaskApi {
+  number: number;
+  type: string;
+  instruction: string;
+  content: string;
+  answer_lines: number;
+  image_query?: string;
+}
+
+export interface WorksheetResponse {
+  docx_url?: string;
+  docx_b64?: string;
+  filename: string;
+  size: number;
+  title: string;
+  subject: string;
+  classNum: number;
+  topic: string;
+  tasksCount: number;
+  withImages: boolean;
+  imagesAdded: number;
+  tasks: WorksheetTaskApi[];
+  intro: string;
+  spent_rub?: number;
+  balance_rub?: number;
+}
+
+export const worksheetApi = {
+  generate: async (params: {
+    subject: string;
+    classNum: number;
+    topic: string;
+    description?: string;
+    tasksCount: number;
+    withImages: boolean;
+    teacherName: string;
+    teacherSchool: string;
+    login?: string;
+  }): Promise<WorksheetResponse> => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 120000);
+    try {
+      const res = await fetch(WORKSHEET_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(params),
+        signal: controller.signal,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Ошибка генерации (${res.status})`);
+      return data as WorksheetResponse;
+    } catch (e) {
+      const err = e as Error;
+      if (err.name === "AbortError") {
+        throw new Error("ИИ-сервис сейчас перегружен. Подождите минуту и попробуйте снова.");
       }
       if (err.message.includes("Failed to fetch")) {
         throw new Error("Не удалось связаться с сервером. Проверьте интернет и попробуйте снова через минуту.");

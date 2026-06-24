@@ -202,6 +202,33 @@ export interface GeneratedTestItem {
   };
 }
 
+export interface WorksheetTask {
+  number: number;
+  type: string;
+  instruction: string;
+  content: string;
+  answer_lines: number;
+  image_query?: string;
+}
+
+export interface WorksheetItem {
+  id: string;
+  title: string;
+  subject: string;
+  classNum: number;
+  topic: string;
+  description: string;
+  tasksCount: number;
+  imagesAdded: number;
+  filename: string;
+  size: number;
+  yadiskPath: string | null;
+  uploadedToYadisk: boolean;
+  createdAt: string;
+  intro: string;
+  tasks: WorksheetTask[];
+}
+
 export type AppState = {
   teacher: Teacher | null;
   students: Student[];
@@ -209,6 +236,7 @@ export type AppState = {
   results: StudentResult[];
   presentations: PresentationItem[];
   generatedTests: GeneratedTestItem[];
+  worksheets: WorksheetItem[];
   synopses: SynopsisItem[];
   yadiskConnected: boolean;
   yadiskUser: YadiskUser | null;
@@ -228,6 +256,7 @@ let state: AppState = {
   results: [],
   presentations: [],
   generatedTests: [],
+  worksheets: [],
   synopses: [],
   yadiskConnected: false,
   yadiskUser: null,
@@ -409,6 +438,7 @@ export const appStore = {
       results: [],
       presentations: [],
       generatedTests: [],
+      worksheets: [],
       synopses: [],
     };
     notify();
@@ -529,6 +559,16 @@ export const appStore = {
 
   removeGeneratedTest: (id: string) => {
     state = { ...state, generatedTests: state.generatedTests.filter(t => t.id !== id) };
+    notify();
+  },
+
+  addWorksheet: (item: WorksheetItem) => {
+    state = { ...state, worksheets: [item, ...state.worksheets] };
+    notify();
+  },
+
+  removeWorksheet: (id: string) => {
+    state = { ...state, worksheets: state.worksheets.filter(w => w.id !== id) };
     notify();
   },
 

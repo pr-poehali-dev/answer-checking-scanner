@@ -4,6 +4,7 @@ export type Section =
   | "students"
   | "works"
   | "presentations"
+  | "worksheets"
   | "tests"
   | "synopsis"
   | "exams"
@@ -20,6 +21,7 @@ export const NAV_ITEMS: { id: Section; label: string; icon: string }[] = [
   { id: "results", label: "Результаты", icon: "BarChart2" },
   { id: "students", label: "Ученики", icon: "Users" },
   { id: "tests", label: "Тесты", icon: "FileText" },
+  { id: "worksheets", label: "Рабочие листы", icon: "FileSpreadsheet" },
   { id: "synopsis", label: "Конспекты", icon: "BookOpen" },
   { id: "presentations", label: "Презентации", icon: "Presentation" },
   { id: "exams", label: "ОГЭ / ЕГЭ", icon: "GraduationCap" },
@@ -59,6 +61,7 @@ export const SECTION_TITLES: Record<Section, string> = {
   students: "Список учеников",
   works: "Работы",
   presentations: "Презентации учителя",
+  worksheets: "Рабочие листы",
   tests: "Тесты и проверочные работы",
   synopsis: "Конспекты",
   exams: "ОГЭ / ЕГЭ — варианты по ФИПИ",

@@ -1,5 +1,5 @@
 """
-УДС — Управление Движения Системы. Сотрудники, роли, регистрация, аудит-лог.
+УДС — Управление Движения Системы. Сотрудники, роли, регистрация, аудит-лог, MFA.
 
 Действия (?action=...), X-Authorization: токен пользователя, login в body/qs:
 
@@ -7,7 +7,10 @@
   GET  ?action=employees       — список сотрудников УДС
   GET  ?action=employee&target_login=  — карточка сотрудника + лог действий
   POST ?action=register-employee — зарегистрировать сотрудника (ФИО, email, phone, role)
-                                    -> генерирует login/password/iis_code
+  POST ?action=send-email-code  — отправить 6-значный код подтверждения на email
+  POST ?action=verify-email-code — проверить 6-значный email-код
+  POST ?action=send-sms-code    — отправить 4-значный код входа (email/SMS МФА)
+  POST ?action=verify-sms-code  — проверить 4-значный код и получить токен сессии
   POST ?action=set-role        — изменить панельную роль {target_login, panel_role}
   POST ?action=block           — заблокировать/разблокировать {target_login, blocked}
   GET  ?action=audit-log&target_login=  — логи действий (по сотруднику или все)
@@ -19,7 +22,10 @@ import os
 import re
 import random
 import hashlib
+import smtplib
 import psycopg2
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta, timezone
 
 SCHEMA = os.environ.get("MAIN_DB_SCHEMA", "t_p31556921_answer_checking_scan")
@@ -195,6 +201,98 @@ def log_action(cur, actor_login, actor_role, action, target_login=None, details=
     )
 
 
+# ── OTP helpers ──────────────────────────────────────────────────────────────
+
+def gen_otp(length: int) -> str:
+    return "".join(str(random.randint(0, 9)) for _ in range(length))
+
+
+def otp_issue(cur, login: str, purpose: str, length: int, ttl_min: int = 10) -> str:
+    """Инвалидирует старые OTP и создаёт новый. Возвращает код."""
+    cur.execute(
+        f"UPDATE {SCHEMA}.uds_otp_codes SET used=TRUE WHERE login=%s AND purpose=%s AND used=FALSE",
+        (login, purpose)
+    )
+    code = gen_otp(length)
+    expires = datetime.now(timezone.utc) + timedelta(minutes=ttl_min)
+    cur.execute(
+        f"""INSERT INTO {SCHEMA}.uds_otp_codes (login, purpose, code, expires_at)
+            VALUES (%s, %s, %s, %s)""",
+        (login, purpose, code, expires)
+    )
+    return code
+
+
+def otp_verify(cur, login: str, purpose: str, code: str) -> str:
+    """Проверяет OTP. Возвращает 'ok', 'wrong', 'expired', 'limit'."""
+    cur.execute(
+        f"""SELECT id, code, expires_at, attempts FROM {SCHEMA}.uds_otp_codes
+            WHERE login=%s AND purpose=%s AND used=FALSE
+            ORDER BY created_at DESC LIMIT 1""",
+        (login, purpose)
+    )
+    row = cur.fetchone()
+    if not row:
+        return "expired"
+    otp_id, stored_code, expires_at, attempts = row
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if datetime.now(timezone.utc) > expires_at:
+        cur.execute(f"UPDATE {SCHEMA}.uds_otp_codes SET used=TRUE WHERE id=%s", (otp_id,))
+        return "expired"
+    if attempts >= 5:
+        return "limit"
+    if code.strip() != stored_code:
+        cur.execute(f"UPDATE {SCHEMA}.uds_otp_codes SET attempts=attempts+1 WHERE id=%s", (otp_id,))
+        return "wrong"
+    cur.execute(f"UPDATE {SCHEMA}.uds_otp_codes SET used=TRUE WHERE id=%s", (otp_id,))
+    return "ok"
+
+
+def send_email_otp(to_email: str, code: str, purpose: str) -> None:
+    """Отправляет OTP-код на email через SMTP."""
+    smtp_host = os.environ.get("SMTP_HOST", "")
+    smtp_port = int(os.environ.get("SMTP_PORT", "465"))
+    smtp_user = os.environ.get("SMTP_USER", "")
+    smtp_pass = os.environ.get("SMTP_PASSWORD", "")
+    if not smtp_host or not smtp_user:
+        raise RuntimeError("SMTP не настроен")
+
+    if purpose == "email_verify":
+        subject = "УДС САОУ — подтверждение email"
+        body = (
+            f"Ваш код подтверждения email для регистрации в УДС САОУ:\n\n"
+            f"  {code}\n\n"
+            f"Код действует 10 минут. Не сообщайте его никому."
+        )
+    else:
+        subject = "УДС САОУ — код входа"
+        body = (
+            f"Ваш код для входа в УДС САОУ:\n\n"
+            f"  {code}\n\n"
+            f"Код действует 5 минут. Не сообщайте его никому.\n"
+            f"Если вы не входили в систему — немедленно сообщите Главе Правления."
+        )
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = smtp_user
+    msg["To"] = to_email
+    msg.attach(MIMEText(body, "plain", "utf-8"))
+
+    if smtp_port == 465:
+        import ssl
+        ctx = ssl.create_default_context()
+        with smtplib.SMTP_SSL(smtp_host, smtp_port, context=ctx) as s:
+            s.login(smtp_user, smtp_pass)
+            s.sendmail(smtp_user, [to_email], msg.as_string())
+    else:
+        with smtplib.SMTP(smtp_host, smtp_port) as s:
+            s.starttls()
+            s.login(smtp_user, smtp_pass)
+            s.sendmail(smtp_user, [to_email], msg.as_string())
+
+
 # ── Мини-УЦ "Управление УДС САОУ" ──────────────────────────────────────────────
 CA_SUBJECT_CN = 'Управление УДС "САОУ"'
 
@@ -314,6 +412,173 @@ def handler(event: dict, context) -> dict:
 
     conn = get_conn()
     try:
+        # ── send-email-code — отправить 6-значный код на email (регистрация) ──
+        if action == "send-email-code" and method == "POST":
+            target_email = (body.get("email") or "").strip().lower()
+            reg_login = (body.get("login") or "").strip()
+            if not target_email:
+                return _resp(400, {"error": "Укажите email"})
+            cur = conn.cursor()
+            # Ищем email в users или panel_operators
+            if reg_login:
+                cur.execute(
+                    f"SELECT email FROM {SCHEMA}.users WHERE login=%s", (reg_login,)
+                )
+                row = cur.fetchone()
+                to_email = (row[0] if row else None) or target_email
+            else:
+                to_email = target_email
+            code = otp_issue(cur, reg_login or target_email, "email_verify", 6, ttl_min=10)
+            conn.commit()
+            try:
+                send_email_otp(to_email, code, "email_verify")
+            except Exception as e:
+                return _resp(500, {"error": f"Не удалось отправить email: {e}"})
+            return _resp(200, {"ok": True, "hint": f"Код отправлен на {to_email[:4]}***"})
+
+        # ── verify-email-code — подтвердить 6-значный email-код ─────────────
+        if action == "verify-email-code" and method == "POST":
+            reg_login = (body.get("login") or "").strip()
+            target_email = (body.get("email") or "").strip().lower()
+            code = (body.get("code") or "").strip()
+            key = reg_login or target_email
+            if not key or not code:
+                return _resp(400, {"error": "Укажите логин/email и код"})
+            cur = conn.cursor()
+            result = otp_verify(cur, key, "email_verify", code)
+            conn.commit()
+            if result == "ok":
+                return _resp(200, {"ok": True})
+            if result == "expired":
+                return _resp(400, {"error": "Код истёк. Запросите новый."})
+            if result == "limit":
+                return _resp(429, {"error": "Превышено число попыток. Запросите новый код."})
+            return _resp(400, {"error": "Неверный код. Попробуйте ещё раз."})
+
+        # ── send-sms-code — отправить 4-значный код для входа ───────────────
+        # (логин + пароль + iis_code уже проверены — это финальный шаг MFA)
+        if action == "send-sms-code" and method == "POST":
+            in_login = (body.get("login") or "").strip()
+            password = (body.get("password") or "").strip()
+            iis_code = (body.get("iis_code") or "").strip().upper()
+            if not in_login or not password:
+                return _resp(400, {"error": "Укажите логин и пароль"})
+            cur = conn.cursor()
+            # Проверяем логин/пароль (без выдачи токена)
+            admin_iis = os.environ.get("ADMIN_IIS_CODE", "ADMIN")
+            if in_login == "admin" and password == ADMIN_PASSWORD:
+                if iis_code and iis_code != admin_iis.upper():
+                    return _resp(403, {"error": "Неверный код ИИС"})
+                # Для admin — отправляем на email из env или просто возвращаем ok (нет phone)
+                admin_email = os.environ.get("ADMIN_EMAIL", "")
+                code = otp_issue(cur, "admin", "sms_login", 4, ttl_min=5)
+                conn.commit()
+                if admin_email:
+                    try:
+                        send_email_otp(admin_email, code, "sms_login")
+                    except Exception:
+                        pass
+                return _resp(200, {"ok": True, "hint": "Код отправлен"})
+            cur.execute(
+                f"SELECT password_hash, role, is_active, email, phone FROM {SCHEMA}.users WHERE login=%s",
+                (in_login,)
+            )
+            row = cur.fetchone()
+            if not row or not row[2] or row[0] != hash_password(password):
+                return _resp(401, {"error": "Неверный логин или пароль"})
+            cur.execute(
+                f"SELECT panel_role, uds_registered, iis_code, email FROM {SCHEMA}.panel_operators WHERE login=%s",
+                (in_login,)
+            )
+            op = cur.fetchone()
+            if not op or not op[0] or op[0] == "removed" or not op[1]:
+                return _resp(403, {"error": "У вас нет доступа в УДС"})
+            if iis_code and (op[2] or "").upper() != iis_code:
+                return _resp(403, {"error": "Код ИИС не соответствует сотруднику"})
+            # Берём email из panel_operators или users
+            to_email = op[3] or row[3]
+            if not to_email:
+                return _resp(400, {"error": "У сотрудника не указан email для отправки кода. Обратитесь к Главе Правления."})
+            code = otp_issue(cur, in_login, "sms_login", 4, ttl_min=5)
+            conn.commit()
+            try:
+                send_email_otp(to_email, code, "sms_login")
+            except Exception as e:
+                return _resp(500, {"error": f"Не удалось отправить код: {e}"})
+            masked = to_email[:3] + "***@" + to_email.split("@")[-1] if "@" in to_email else "***"
+            return _resp(200, {"ok": True, "hint": f"Код отправлен на {masked}"})
+
+        # ── verify-sms-code — 4-значный код МФА → выдаём токен сессии ───────
+        if action == "verify-sms-code" and method == "POST":
+            in_login = (body.get("login") or "").strip()
+            password = (body.get("password") or "").strip()
+            iis_code = (body.get("iis_code") or "").strip().upper()
+            code = (body.get("code") or "").strip()
+            if not in_login or not code:
+                return _resp(400, {"error": "Укажите логин и код"})
+            cur = conn.cursor()
+            # admin
+            admin_iis = os.environ.get("ADMIN_IIS_CODE", "ADMIN")
+            if in_login == "admin":
+                result = otp_verify(cur, "admin", "sms_login", code)
+                conn.commit()
+                if result == "ok":
+                    admin_token = f"admin:{hash_password(ADMIN_PASSWORD + 'salt_admin')}"
+                    return _resp(200, {"ok": True, "login": "admin", "token": admin_token,
+                                       "panel_role": "head",
+                                       "panel_role_label": PANEL_ROLE_LABELS["head"],
+                                       "operator_number": 1,
+                                       "perms": perms_for("head")})
+                if result == "expired":
+                    return _resp(400, {"error": "Код истёк. Запросите новый."})
+                if result == "limit":
+                    return _resp(429, {"error": "Превышено число попыток."})
+                return _resp(400, {"error": "Неверный код."})
+            # обычный сотрудник
+            result = otp_verify(cur, in_login, "sms_login", code)
+            if result != "ok":
+                conn.commit()
+                if result == "expired":
+                    return _resp(400, {"error": "Код истёк. Запросите новый."})
+                if result == "limit":
+                    return _resp(429, {"error": "Превышено число попыток. Запросите новый код."})
+                return _resp(400, {"error": "Неверный код. Попробуйте ещё раз."})
+            # Всё ок — проверяем ещё раз пароль и выдаём токен
+            cur.execute(
+                f"SELECT password_hash, role, is_active FROM {SCHEMA}.users WHERE login=%s", (in_login,)
+            )
+            row = cur.fetchone()
+            if not row or not row[2] or row[0] != hash_password(password):
+                conn.commit()
+                return _resp(401, {"error": "Ошибка аутентификации"})
+            sys_role = row[1]
+            cur.execute(
+                f"SELECT panel_role, operator_number, uds_registered, iis_code FROM {SCHEMA}.panel_operators WHERE login=%s",
+                (in_login,)
+            )
+            op = cur.fetchone()
+            if not op or not op[0] or op[0] == "removed" or not op[2]:
+                conn.commit()
+                return _resp(403, {"error": "У вас нет доступа в УДС"})
+            if iis_code and (op[3] or "").upper() != iis_code:
+                conn.commit()
+                return _resp(403, {"error": "Код ИИС не соответствует"})
+            prefix = sys_role if sys_role in ("teacher", "student", "tester") else "teacher"
+            new_token = f"{prefix}:{hash_password(in_login + password + 'salt')}"
+            cur.execute(
+                f"UPDATE {SCHEMA}.users SET last_seen_at=NOW(), auth_token_hash=%s WHERE login=%s",
+                (hash_password(new_token), in_login)
+            )
+            conn.commit()
+            p_role = op[0]
+            return _resp(200, {
+                "ok": True, "login": in_login, "token": new_token,
+                "panel_role": p_role,
+                "panel_role_label": PANEL_ROLE_LABELS.get(p_role, p_role),
+                "operator_number": op[1],
+                "perms": perms_for(p_role),
+            })
+
         # ── verify-iis — 1-й шаг входа: проверка кода ИИС ────────────────────
         if action == "verify-iis" and method == "POST":
             code = (body.get("iis_code") or "").strip().upper()

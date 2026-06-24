@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import Icon from "@/components/ui/icon";
 import { udsApi, UdsPerms, UdsCert } from "@/lib/api";
 import { cryptoPlugins, ContainerType } from "@/lib/cryptoPlugins";
@@ -47,20 +47,58 @@ function removeCookie() {
   document.cookie = `${COOKIE_KEY}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; SameSite=Lax`;
 }
 
+// Таймаут сессии — 5 минут простоя
+const SESSION_TIMEOUT_MS = 5 * 60 * 1000;
+
 type Tab = "employees" | "users" | "audit" | "support" | "profile" | "lkview" | "maintenance";
 
 export default function UdsPage() {
   const [session, setSession] = useState<Session | null>(null);
   const [myCert, setMyCert] = useState<UdsCert | null>(null);
-  // Способ входа: cert (по умолчанию) → certPlugin выбор; iis открывается по 5 кликам
-  const [step, setStep] = useState<"cert" | "iis" | "creds">("cert");
+  // Шаги входа: cert → iis → creds → sms
+  const [step, setStep] = useState<"cert" | "iis" | "creds" | "sms">("cert");
   const [iisCode, setIisCode] = useState("");
   const [loginName, setLoginName] = useState("");
   const [password, setPassword] = useState("");
+  const [smsCode, setSmsCode] = useState("");
+  const [smsHint, setSmsHint] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [tab, setTab] = useState<Tab>("employees");
   const [logoClicks, setLogoClicks] = useState(0);
+  const lastActivityRef = useRef<number>(Date.now());
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── Таймаут сессии: сброс при активности ─────────────────────────────────
+  const resetActivity = useCallback(() => {
+    lastActivityRef.current = Date.now();
+  }, []);
+
+  const doLogout = useCallback(() => {
+    localStorage.removeItem(LS_KEY);
+    removeCookie();
+    setSession(null); setMyCert(null);
+    setStep("cert"); setIisCode("");
+    setLoginName(""); setPassword(""); setSmsCode(""); setSmsHint("");
+  }, []);
+
+  // Проверяем таймаут каждые 30 секунд
+  useEffect(() => {
+    if (!session) return;
+    const events = ["mousemove", "keydown", "mousedown", "touchstart", "scroll"];
+    events.forEach(e => window.addEventListener(e, resetActivity, { passive: true }));
+
+    const check = () => {
+      if (Date.now() - lastActivityRef.current >= SESSION_TIMEOUT_MS) {
+        doLogout();
+      }
+    };
+    timeoutRef.current = setInterval(check, 30_000);
+    return () => {
+      events.forEach(e => window.removeEventListener(e, resetActivity));
+      if (timeoutRef.current) clearInterval(timeoutRef.current);
+    };
+  }, [session, resetActivity, doLogout]);
 
   const refreshMe = useCallback((s: Session) => {
     udsApi.me(s.login, s.token).then(me => {
@@ -80,28 +118,27 @@ export default function UdsPage() {
       operator_number: res.operator_number, perms: res.perms,
     };
     setSession(s);
+    lastActivityRef.current = Date.now();
     const raw = JSON.stringify(s);
     localStorage.setItem(LS_KEY, raw);
     setCookie(raw);
-    // Сразу подтягиваем статус сертификата, чтобы показать экран выпуска
     refreshMe(s);
   }, [refreshMe]);
 
-  // Восстановление сессии — сначала куки, потом localStorage (обратная совместимость)
+  // Восстановление сессии — сначала куки, потом localStorage
   useEffect(() => {
     try {
       const raw = getCookie() || localStorage.getItem(LS_KEY);
       if (raw) {
         const s = JSON.parse(raw) as Session;
         setSession(s);
-        // Обновляем куки при восстановлении из localStorage (миграция)
         setCookie(raw);
         refreshMe(s);
       }
     } catch { /* ignore */ }
   }, [refreshMe]);
 
-  // Вход по сертификату (плагин подписывает nonce ключом токена)
+  // Вход по сертификату
   const certLogin = async (containerType: ContainerType, pin?: string) => {
     setBusy(true); setError("");
     try {
@@ -116,7 +153,7 @@ export default function UdsPage() {
     }
   };
 
-  // 5 кликов по логотипу → открыть вход по коду ИИС
+  // 5 кликов по логотипу → вход по коду ИИС
   const onLogoClick = () => {
     const n = logoClicks + 1;
     setLogoClicks(n);
@@ -136,13 +173,15 @@ export default function UdsPage() {
     }
   };
 
+  // Шаг 2: логин+пароль → отправляем SMS-код
   const doLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true); setError("");
     try {
-      const res = await udsApi.login(loginName.trim(), password, iisCode.trim());
-      applyAuth(res);
-      setPassword("");
+      const res = await udsApi.sendSmsCode(loginName.trim(), password, iisCode.trim());
+      setSmsHint(res.hint || "");
+      setSmsCode("");
+      setStep("sms");
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -150,13 +189,36 @@ export default function UdsPage() {
     }
   };
 
-  const logout = useCallback(() => {
-    localStorage.removeItem(LS_KEY);
-    removeCookie();
-    setSession(null); setMyCert(null);
-    setStep("cert"); setIisCode("");
-    setLoginName(""); setPassword("");
-  }, []);
+  // Шаг 3: вводим 4-значный код → получаем токен
+  const doVerifySms = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true); setError("");
+    try {
+      const res = await udsApi.verifySmsCode(loginName.trim(), password, iisCode.trim(), smsCode.trim());
+      applyAuth(res);
+      setPassword(""); setSmsCode("");
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Повторная отправка кода
+  const resendSms = async () => {
+    setBusy(true); setError("");
+    try {
+      const res = await udsApi.sendSmsCode(loginName.trim(), password, iisCode.trim());
+      setSmsHint(res.hint || "");
+      setSmsCode("");
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const logout = doLogout;
 
   // ── Форма входа ──────────────────────────────────────────────────────────
   if (!session) {
@@ -202,62 +264,59 @@ export default function UdsPage() {
                   <Icon name="Loader2" size={13} className="animate-spin" /> Проверка сертификата…
                 </p>
               )}
-              <p className="text-[10px] text-gray-300 text-center">Вход по коду ИИС — невозможен без разрешения Советника </p>
+              <p className="text-[10px] text-gray-300 text-center">Вход по коду ИИС — невозможен без разрешения Советника</p>
             </div>
+
           ) : step === "iis" ? (
             <form onSubmit={verifyIis} className="bg-white rounded-xl p-6 space-y-4 shadow-xl">
-              <div>
-                <label className="text-xs text-gray-500 block mb-1">Код ИИС</label>
-                <input
-                  value={iisCode}
-                  onChange={e => setIisCode(e.target.value.toUpperCase())}
-                  autoFocus
-                  maxLength={5}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm text-center font-mono tracking-[0.4em] uppercase focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="•••••"
-                />
+              <div className="text-center">
+                <Icon name="Hash" size={20} className="text-blue-600 mx-auto mb-1" />
+                <p className="text-sm font-bold">Код ИИС</p>
+                <p className="text-[11px] text-gray-400 mt-1">Введите 5-значный код, выданный при регистрации</p>
               </div>
+              <input
+                value={iisCode}
+                onChange={e => setIisCode(e.target.value.toUpperCase())}
+                autoFocus maxLength={5}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm text-center font-mono tracking-[0.4em] uppercase focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="•••••"
+              />
               {error && (
                 <div className="flex items-start gap-2 p-2.5 rounded-lg bg-red-50 border border-red-200">
                   <Icon name="AlertCircle" size={14} className="text-red-500 flex-shrink-0 mt-0.5" />
                   <p className="text-xs text-red-600">{error}</p>
                 </div>
               )}
-              <button
-                type="submit"
-                disabled={busy || iisCode.trim().length < 3}
-                className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white py-2.5 rounded-lg font-semibold flex items-center justify-center gap-2 text-sm transition-colors"
-              >
+              <button type="submit" disabled={busy || iisCode.trim().length < 3}
+                className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white py-2.5 rounded-lg font-semibold flex items-center justify-center gap-2 text-sm transition-colors">
                 {busy ? <><Icon name="Loader2" size={15} className="animate-spin" /> Проверка…</> : <><Icon name="ArrowRight" size={15} /> Далее</>}
               </button>
-              <p className="text-[11px] text-gray-400 text-center">
-                Введите код ИИС, выданный при регистрации
-              </p>
+              <button type="button" onClick={() => { setStep("cert"); setError(""); }}
+                className="w-full text-[11px] text-gray-400 hover:text-gray-600 text-center">
+                ← Вернуться ко входу по сертификату
+              </button>
             </form>
-          ) : (
+
+          ) : step === "creds" ? (
             <form onSubmit={doLogin} className="bg-white rounded-xl p-6 space-y-4 shadow-xl">
+              <div className="text-center">
+                <Icon name="KeyRound" size={20} className="text-blue-600 mx-auto mb-1" />
+                <p className="text-sm font-bold">Логин и пароль</p>
+              </div>
               <div className="flex items-center gap-2 text-[11px] text-green-600 bg-green-50 border border-green-200 rounded-lg px-2.5 py-1.5">
                 <Icon name="CheckCircle2" size={13} /> Код ИИС подтверждён
               </div>
               <div>
                 <label className="text-xs text-gray-500 block mb-1">Логин сотрудника</label>
-                <input
-                  value={loginName}
-                  onChange={e => setLoginName(e.target.value)}
-                  autoFocus
+                <input value={loginName} onChange={e => setLoginName(e.target.value)} autoFocus
                   className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Логин"
-                />
+                  placeholder="Логин" />
               </div>
               <div>
                 <label className="text-xs text-gray-500 block mb-1">Пароль</label>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
+                <input type="password" value={password} onChange={e => setPassword(e.target.value)}
                   className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Пароль"
-                />
+                  placeholder="Пароль" />
               </div>
               {error && (
                 <div className="flex items-start gap-2 p-2.5 rounded-lg bg-red-50 border border-red-200">
@@ -265,25 +324,57 @@ export default function UdsPage() {
                   <p className="text-xs text-red-600">{error}</p>
                 </div>
               )}
-              <button
-                type="submit"
-                disabled={busy || !loginName.trim() || !password}
-                className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white py-2.5 rounded-lg font-semibold flex items-center justify-center gap-2 text-sm transition-colors"
-              >
-                {busy ? <><Icon name="Loader2" size={15} className="animate-spin" /> Вход…</> : <><Icon name="LogIn" size={15} /> Войти</>}
+              <button type="submit" disabled={busy || !loginName.trim() || !password}
+                className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white py-2.5 rounded-lg font-semibold flex items-center justify-center gap-2 text-sm transition-colors">
+                {busy
+                  ? <><Icon name="Loader2" size={15} className="animate-spin" /> Отправка кода…</>
+                  : <><Icon name="Send" size={15} /> Получить код входа</>}
               </button>
               <button type="button" onClick={() => { setStep("iis"); setError(""); }}
                 className="w-full text-[11px] text-gray-400 hover:text-gray-600 text-center">
                 ← Назад к коду ИИС
               </button>
             </form>
-          )}
 
-          {step === "iis" && (
-            <button onClick={() => { setStep("cert"); setError(""); }}
-              className="w-full mt-3 text-[11px] text-slate-400 hover:text-slate-200 text-center">
-              ← Вернуться ко входу по сертификату
-            </button>
+          ) : (
+            /* step === "sms" */
+            <form onSubmit={doVerifySms} className="bg-white rounded-xl p-6 space-y-4 shadow-xl">
+              <div className="text-center">
+                <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center mx-auto mb-2">
+                  <Icon name="MessageSquare" size={22} className="text-blue-600" fallback="Mail" />
+                </div>
+                <p className="text-sm font-bold">Код подтверждения</p>
+                {smsHint && <p className="text-[11px] text-gray-400 mt-1">{smsHint}</p>}
+                <p className="text-[11px] text-gray-400">Введите 4-значный код из письма</p>
+              </div>
+              <input
+                value={smsCode}
+                onChange={e => setSmsCode(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                autoFocus inputMode="numeric" maxLength={4}
+                className="w-full border-2 border-gray-200 rounded-xl px-3 py-3 text-xl text-center font-mono tracking-[0.6em] focus:outline-none focus:border-blue-500"
+                placeholder="••••"
+              />
+              {error && (
+                <div className="flex items-start gap-2 p-2.5 rounded-lg bg-red-50 border border-red-200">
+                  <Icon name="AlertCircle" size={14} className="text-red-500 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs text-red-600">{error}</p>
+                </div>
+              )}
+              <button type="submit" disabled={busy || smsCode.length < 4}
+                className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white py-2.5 rounded-lg font-semibold flex items-center justify-center gap-2 text-sm transition-colors">
+                {busy ? <><Icon name="Loader2" size={15} className="animate-spin" /> Проверка…</> : <><Icon name="LogIn" size={15} /> Войти</>}
+              </button>
+              <div className="flex items-center justify-between text-[11px]">
+                <button type="button" onClick={() => { setStep("creds"); setError(""); setSmsCode(""); }}
+                  className="text-gray-400 hover:text-gray-600">
+                  ← Назад
+                </button>
+                <button type="button" onClick={resendSms} disabled={busy}
+                  className="text-blue-500 hover:text-blue-700 disabled:opacity-50">
+                  Отправить снова
+                </button>
+              </div>
+            </form>
           )}
         </div>
       </div>

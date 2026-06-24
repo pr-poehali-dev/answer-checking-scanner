@@ -7,11 +7,39 @@
       "expectedStatus": 200
     },
     {
-      "name": "uds-login wrong creds returns 401",
+      "name": "send-email-code missing email returns 400",
       "method": "POST",
-      "path": "/?action=uds-login",
-      "body": { "login": "nobody_xyz", "password": "wrongpass", "iis_code": "ABC12" },
+      "path": "/?action=send-email-code",
+      "body": { "email": "" },
+      "expectedStatus": 400
+    },
+    {
+      "name": "verify-email-code missing fields returns 400",
+      "method": "POST",
+      "path": "/?action=verify-email-code",
+      "body": { "login": "", "code": "" },
+      "expectedStatus": 400
+    },
+    {
+      "name": "send-sms-code missing login returns 400",
+      "method": "POST",
+      "path": "/?action=send-sms-code",
+      "body": { "login": "", "password": "" },
+      "expectedStatus": 400
+    },
+    {
+      "name": "send-sms-code wrong creds returns 401",
+      "method": "POST",
+      "path": "/?action=send-sms-code",
+      "body": { "login": "nobody_xyz", "password": "wrong", "iis_code": "ABC12" },
       "expectedStatus": 401
+    },
+    {
+      "name": "verify-sms-code missing fields returns 400",
+      "method": "POST",
+      "path": "/?action=verify-sms-code",
+      "body": { "login": "", "code": "" },
+      "expectedStatus": 400
     },
     {
       "name": "verify-iis empty returns 400",

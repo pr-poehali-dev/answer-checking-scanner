@@ -486,6 +486,21 @@ export const udsApi = {
 
   revokeCert: (login: string, token: string, targetLogin: string, reason?: string) =>
     udsRequest<{ ok: boolean }>("revoke-cert", "POST", login, token, { target_login: targetLogin, reason: reason || "" }),
+
+  // ── OTP / MFA ──
+  sendEmailCode: (email: string, login?: string) =>
+    udsPost<{ ok: boolean; hint: string }>("send-email-code", { email, login: login || "" }),
+
+  verifyEmailCode: (key: string, code: string) =>
+    udsPost<{ ok: boolean }>("verify-email-code", { login: key, code }),
+
+  sendSmsCode: (loginName: string, password: string, iisCode: string) =>
+    udsPost<{ ok: boolean; hint: string }>("send-sms-code", { login: loginName, password, iis_code: iisCode }),
+
+  verifySmsCode: (loginName: string, password: string, iisCode: string, code: string) =>
+    udsPost<{ ok: boolean; login: string; token: string; panel_role: string; panel_role_label: string; operator_number: number; perms: UdsPerms }>(
+      "verify-sms-code", { login: loginName, password, iis_code: iisCode, code }
+    ),
 };
 
 // ── Institution API ───────────────────────────────────────────────────────────

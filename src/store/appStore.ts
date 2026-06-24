@@ -1,6 +1,6 @@
 // Глобальное хранилище приложения САОУ
 import { authApi } from "@/lib/api";
-import { yadisk, yadiskStorage, ROOT_FOLDER, STUDENTS_FILE, WORKS_FILE, type YadiskUser } from "@/lib/yadisk";
+import { yadisk, yadiskOAuth, yadiskStorage, ROOT_FOLDER, STUDENTS_FILE, WORKS_FILE, type YadiskUser } from "@/lib/yadisk";
 
 // ── Персистентность сессии ─────────────────────────────────────────────────
 const SESSION_KEY = "aousp_session_v1";
@@ -565,26 +565,59 @@ export const appStore = {
     notify();
   },
 
-  /** Восстанавливает подключение Я.Диска из localStorage (вызывать после login). */
+  /** Восстанавливает подключение Я.Диска — сначала из localStorage, потом из БД (любое устройство). */
   restoreYadisk: async (): Promise<boolean> => {
-    const login = state.teacher?.login || "";
+    const teacher = state.teacher;
+    const login = teacher?.login || "";
     if (!login) return false;
-    // Чистим старые ключи без суффикса (миграция) чтобы они не попали другому пользователю
     localStorage.removeItem("aousp_yadisk_access");
     localStorage.removeItem("aousp_yadisk_refresh");
     localStorage.removeItem("aousp_yadisk_user");
-    const { access, user } = yadiskStorage.load(login);
-    if (!access) return false;
-    const ok = await yadisk.ping(access);
-    if (!ok) {
+
+    // 1. Пробуем токен из localStorage
+    const { access, refresh, user } = yadiskStorage.load(login);
+    if (access) {
+      const ok = await yadisk.ping(access);
+      if (ok) {
+        state = {
+          ...state,
+          yadiskConnected: true,
+          yadiskUser: user,
+          teacher: state.teacher ? { ...state.teacher, yadiskToken: access } : null,
+        };
+        notify();
+        return true;
+      }
+      // access протух — пробуем обновить через refresh из localStorage
+      if (refresh) {
+        try {
+          const tokens = await yadiskOAuth.refresh(refresh);
+          tokens.refresh_token = tokens.refresh_token || refresh;
+          yadiskStorage.save({ ...tokens, user: user || undefined }, login);
+          state = {
+            ...state,
+            yadiskConnected: true,
+            yadiskUser: user,
+            teacher: state.teacher ? { ...state.teacher, yadiskToken: tokens.access_token } : null,
+          };
+          notify();
+          return true;
+        } catch { /* протух refresh тоже — идём в БД */ }
+      }
       yadiskStorage.clear(login);
-      return false;
     }
+
+    // 2. Нет токенов локально — тянем refresh_token из БД (другое устройство / новый браузер)
+    const authToken = teacher?.authToken || "";
+    if (!authToken) return false;
+    const tokens = await yadiskOAuth.fetchFromDb(login, authToken);
+    if (!tokens) return false;
+    yadiskStorage.save(tokens, login);
     state = {
       ...state,
       yadiskConnected: true,
-      yadiskUser: user,
-      teacher: state.teacher ? { ...state.teacher, yadiskToken: access } : null,
+      yadiskUser: tokens.user || null,
+      teacher: state.teacher ? { ...state.teacher, yadiskToken: tokens.access_token } : null,
     };
     notify();
     return true;

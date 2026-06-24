@@ -82,6 +82,25 @@ export const yadiskOAuth = {
     return data as YadiskTokens;
   },
 
+  /** Получить refresh_token из БД и обменять на живой access_token (для новых устройств) */
+  fetchFromDb: async (userLogin: string, authToken: string): Promise<YadiskTokens | null> => {
+    try {
+      const params = new URLSearchParams({ action: "get-yadisk-token", user_login: userLogin, auth_token: authToken });
+      const res = await fetch(`${OAUTH_URL}?${params}`);
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (!data.refresh_token) return null;
+      const tokens = await yadiskOAuth.refresh(data.refresh_token);
+      tokens.refresh_token = tokens.refresh_token || data.refresh_token;
+      if (data.yadisk_login) {
+        tokens.user = { login: data.yadisk_login, display_name: data.yadisk_login, default_email: null };
+      }
+      return tokens;
+    } catch {
+      return null;
+    }
+  },
+
   /** Обновить access_token по refresh_token */
   refresh: async (refresh_token: string): Promise<YadiskTokens> => {
     const res = await fetch(`${OAUTH_URL}?action=refresh`, {

@@ -215,6 +215,30 @@ def handler(event: dict, context) -> dict:
             return _resp(500, {"error": f"Ошибка обновления: {e}"})
         return _resp(200, tokens)
 
+    # ── GET get-yadisk-token: вернуть refresh_token из БД для залогиненного пользователя ───
+    if method == "GET" and action == "get-yadisk-token":
+        user_login = (qs.get("user_login") or "").strip()
+        auth_token = (qs.get("auth_token") or "").strip()
+        if not user_login or not auth_token:
+            return _resp(400, {"error": "user_login и auth_token обязательны"})
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"SELECT auth_token, yadisk_refresh_token, yadisk_login FROM {SCHEMA}.users WHERE login = %s",
+                (user_login,)
+            )
+            row = cur.fetchone()
+        finally:
+            conn.close()
+        if not row:
+            return _resp(404, {"error": "Пользователь не найден"})
+        if row[0] != auth_token:
+            return _resp(403, {"error": "Неверный токен авторизации"})
+        if not row[1]:
+            return _resp(404, {"error": "Я.Диск не привязан"})
+        return _resp(200, {"refresh_token": row[1], "yadisk_login": row[2] or ""})
+
     # ── POST unbind: отвязать Я.Диск от ЛК ─────────────────────────────────
     if method == "POST" and action == "unbind":
         user_login = (body.get("user_login") or "").strip()

@@ -32,6 +32,7 @@ export const NAV_ITEMS: { id: Section; label: string; icon: string }[] = [
 // Разделы личного кабинета ученика/студента (учебные инструменты)
 export const STUDENT_NAV_ITEMS: { id: Section; label: string; icon: string }[] = [
   { id: "myResults", label: "Мои результаты", icon: "BarChart2" },
+  { id: "presentations", label: "Презентации", icon: "Presentation" },
   { id: "chat", label: "Чат с ИИ", icon: "MessageSquare" },
   { id: "tests", label: "Тренировочные тесты", icon: "FileText" },
   { id: "synopsis", label: "Конспекты", icon: "BookOpen" },
@@ -57,7 +58,7 @@ export const SECTION_TITLES: Record<Section, string> = {
   results: "Результаты",
   students: "Список учеников",
   works: "Работы",
-  presentations: "Презентации",
+  presentations: "Презентации учителя",
   tests: "Тесты и проверочные работы",
   synopsis: "Конспекты",
   exams: "ОГЭ / ЕГЭ — варианты по ФИПИ",

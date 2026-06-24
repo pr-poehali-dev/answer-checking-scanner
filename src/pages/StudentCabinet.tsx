@@ -9,6 +9,7 @@ import { ExamsSection } from "@/components/scanner/ExamsSection";
 import { FipiExamsSection } from "@/components/scanner/FipiExamsSection";
 import { ChatSection } from "@/components/scanner/ChatSection";
 import { SupportSection } from "@/components/scanner/SupportSection";
+import { StudentPresentationsSection } from "@/components/scanner/StudentPresentationsSection";
 import TokensModal from "@/components/TokensModal";
 import SubscriptionGate from "@/components/SubscriptionGate";
 import YadiskRequiredGate from "@/components/YadiskRequiredGate";
@@ -17,6 +18,7 @@ import { useAppStore, appStore } from "@/store/appStore";
 
 const SECTION_COMPONENTS: Partial<Record<Section, React.FC>> = {
   myResults: StudentResultsSection,
+  presentations: StudentPresentationsSection,
   tests: TestsSection,
   synopsis: SynopsisSection,
   exams: ExamsSection,

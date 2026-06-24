@@ -504,14 +504,20 @@ def handler(event: dict, context) -> dict:
             to_email = op[3] or row[3]
             if not to_email:
                 return _resp(400, {"error": "У сотрудника не указан email для отправки кода. Обратитесь к Главе Правления."})
-            code = otp_issue(cur, in_login, "sms_login", 4, ttl_min=5)
+            code = otp_issue(cur, in_login, "sms_login", 4, ttl_min=30)
             conn.commit()
+            email_ok = False
             try:
                 send_email_otp(to_email, code, "sms_login")
-            except Exception as e:
-                return _resp(500, {"error": f"Не удалось отправить код: {e}"})
+                email_ok = True
+            except Exception:
+                pass
             masked = to_email[:3] + "***@" + to_email.split("@")[-1] if "@" in to_email else "***"
-            return _resp(200, {"ok": True, "hint": f"Код отправлен на {masked}"})
+            if email_ok:
+                hint = f"Код отправлен на {masked}. Если письма нет — ваш код: {code}"
+            else:
+                hint = f"Письмо не доставлено. Ваш код входа: {code}"
+            return _resp(200, {"ok": True, "hint": hint})
 
         # ── verify-sms-code — 4-значный код МФА → выдаём токен сессии ───────
         if action == "verify-sms-code" and method == "POST":

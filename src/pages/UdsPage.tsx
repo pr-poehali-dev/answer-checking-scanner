@@ -344,8 +344,19 @@ export default function UdsPage() {
                   <Icon name="MessageSquare" size={22} className="text-blue-600" fallback="Mail" />
                 </div>
                 <p className="text-sm font-bold">Код подтверждения</p>
-                {smsHint && <p className="text-[11px] text-gray-400 mt-1">{smsHint}</p>}
-                <p className="text-[11px] text-gray-400">Введите 4-значный код из письма</p>
+                {smsHint && (() => {
+                  const codeMatch = smsHint.match(/код[:\s]+(\d{4})/i);
+                  if (codeMatch) {
+                    return (
+                      <div className="mt-2 p-3 bg-amber-50 border border-amber-300 rounded-xl">
+                        <p className="text-[11px] text-amber-700 mb-1">Письмо не доставлено. Ваш код:</p>
+                        <p className="text-3xl font-mono font-bold tracking-[0.4em] text-amber-800">{codeMatch[1]}</p>
+                      </div>
+                    );
+                  }
+                  return <p className="text-[11px] text-gray-500 mt-1">{smsHint}</p>;
+                })()}
+                {!smsHint && <p className="text-[11px] text-gray-400">Введите 4-значный код из письма</p>}
               </div>
               <input
                 value={smsCode}

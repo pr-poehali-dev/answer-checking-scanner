@@ -36,6 +36,7 @@ export default function LandingFooter({ onLogin, onRegister, onScrollTo }: Landi
                   {label}
                 </button>
               ))}
+              <a href="/knowledge-base" className="block text-xs text-muted-foreground hover:text-foreground transition-colors">База знаний</a>
             </div>
           </div>
 

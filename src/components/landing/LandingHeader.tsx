@@ -31,6 +31,7 @@ export default function LandingHeader({
           <button onClick={() => onScrollTo("features")} className="text-muted-foreground hover:text-foreground transition-colors">Возможности</button>
           <button onClick={() => onScrollTo("how-it-works")} className="text-muted-foreground hover:text-foreground transition-colors">Как работает</button>
           <button onClick={() => onScrollTo("pricing")} className="text-muted-foreground hover:text-foreground transition-colors">Тарифы</button>
+          <a href="/knowledge-base" className="text-muted-foreground hover:text-foreground transition-colors">База знаний</a>
           <button onClick={() => onScrollTo("contacts")} className="text-muted-foreground hover:text-foreground transition-colors">Контакты</button>
         </nav>
 
@@ -80,6 +81,10 @@ export default function LandingHeader({
               {label}
             </button>
           ))}
+          <a href="/knowledge-base"
+            className="block w-full text-left text-sm py-2 text-muted-foreground hover:text-foreground border-b border-border">
+            База знаний
+          </a>
           <button onClick={onLogin} className="block w-full text-left text-sm py-2 font-semibold text-primary">
             Войти в систему
           </button>

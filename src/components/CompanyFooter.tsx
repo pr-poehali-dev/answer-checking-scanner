@@ -50,6 +50,8 @@ export default function CompanyFooter({
               {COMPANY_INFO.email}
             </a>
             <span>·</span>
+            <a href="/knowledge-base" className="hover:text-foreground underline underline-offset-2">База знаний</a>
+            <span>·</span>
             <a href="/oferta" className="hover:text-foreground underline underline-offset-2">Оферта</a>
             <span>·</span>
             <a href="/privacy" className="hover:text-foreground underline underline-offset-2">Конфиденциальность</a>
@@ -123,6 +125,8 @@ export default function CompanyFooter({
           </p>
           <p className="inline-flex flex-wrap items-center gap-x-3 gap-y-1">
             <span>Платежи через ЮKassa</span>
+            <span>·</span>
+            <a href="/knowledge-base" className="hover:text-foreground underline underline-offset-2">База знаний</a>
             <span>·</span>
             <a href="/oferta" className="hover:text-foreground underline underline-offset-2">Договор-оферта</a>
             <span>·</span>

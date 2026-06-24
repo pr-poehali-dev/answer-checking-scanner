@@ -16,6 +16,7 @@ import SjouTeacherPage from "./pages/SjouTeacherPage";
 import SjouStudentPage from "./pages/SjouStudentPage";
 import SjouParentPage from "./pages/SjouParentPage";
 import UdsPage from "./pages/UdsPage";
+import KnowledgeBasePage from "./pages/KnowledgeBasePage";
 
 const queryClient = new QueryClient();
 
@@ -30,6 +31,7 @@ const App = () => (
           <Route path="/yadisk-callback" element={<YadiskCallback />} />
           <Route path="/oferta" element={<OfertaPage />} />
           <Route path="/privacy" element={<PrivacyPage />} />
+          <Route path="/knowledge-base" element={<KnowledgeBasePage />} />
           <Route path="/sjou" element={<SjouPage />} />
           <Route path="/sjou-operator" element={<SjouOperatorPage />} />
           <Route path="/sjou-cabinet" element={<SjouCabinetPage />} />

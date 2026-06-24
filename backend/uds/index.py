@@ -469,16 +469,8 @@ def handler(event: dict, context) -> dict:
             if in_login == "admin" and password == ADMIN_PASSWORD:
                 if iis_code and iis_code != admin_iis.upper():
                     return _resp(403, {"error": "Неверный код ИИС"})
-                # Для admin — отправляем на email из env или просто возвращаем ok (нет phone)
-                admin_email = os.environ.get("ADMIN_EMAIL", "")
-                code = otp_issue(cur, "admin", "sms_login", 4, ttl_min=5)
-                conn.commit()
-                if admin_email:
-                    try:
-                        send_email_otp(admin_email, code, "sms_login")
-                    except Exception:
-                        pass
-                return _resp(200, {"ok": True, "hint": "Код отправлен"})
+                # Для admin — фиксированный код 2535, отправка не нужна
+                return _resp(200, {"ok": True, "hint": "Введите постоянный код администратора"})
             cur.execute(
                 f"SELECT password_hash, role, is_active, email, phone FROM {SCHEMA}.users WHERE login=%s",
                 (in_login,)
@@ -517,23 +509,16 @@ def handler(event: dict, context) -> dict:
             if not in_login or not code:
                 return _resp(400, {"error": "Укажите логин и код"})
             cur = conn.cursor()
-            # admin
-            admin_iis = os.environ.get("ADMIN_IIS_CODE", "ADMIN")
+            # admin — фиксированный код 2535
             if in_login == "admin":
-                result = otp_verify(cur, "admin", "sms_login", code)
-                conn.commit()
-                if result == "ok":
-                    admin_token = f"admin:{hash_password(ADMIN_PASSWORD + 'salt_admin')}"
-                    return _resp(200, {"ok": True, "login": "admin", "token": admin_token,
-                                       "panel_role": "head",
-                                       "panel_role_label": PANEL_ROLE_LABELS["head"],
-                                       "operator_number": 1,
-                                       "perms": perms_for("head")})
-                if result == "expired":
-                    return _resp(400, {"error": "Код истёк. Запросите новый."})
-                if result == "limit":
-                    return _resp(429, {"error": "Превышено число попыток."})
-                return _resp(400, {"error": "Неверный код."})
+                if code != "2535":
+                    return _resp(400, {"error": "Неверный код."})
+                admin_token = f"admin:{hash_password(ADMIN_PASSWORD + 'salt_admin')}"
+                return _resp(200, {"ok": True, "login": "admin", "token": admin_token,
+                                   "panel_role": "head",
+                                   "panel_role_label": PANEL_ROLE_LABELS["head"],
+                                   "operator_number": 1,
+                                   "perms": perms_for("head")})
             # обычный сотрудник
             result = otp_verify(cur, in_login, "sms_login", code)
             if result != "ok":

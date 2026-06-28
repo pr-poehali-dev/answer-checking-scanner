@@ -19,7 +19,7 @@ export default function LandingFooter({ onLogin, onRegister, onScrollTo }: Landi
                 style={{ background: "hsl(var(--sidebar-primary))" }}>
                 <Icon name="ScanLine" size={14} className="text-white" />
               </div>
-              <span className="font-bold text-sm">АОУСПТ</span>
+              <span className="font-bold text-sm">САОУ</span>
             </div>
             <p className="text-xs text-muted-foreground leading-relaxed">
               Система автоматической проверки работ и генерации учебных материалов для учителей.

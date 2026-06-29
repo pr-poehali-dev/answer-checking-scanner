@@ -1,10 +1,13 @@
-import { useState, useEffect } from "react";
+import { useEffect } from "react";
 import Icon from "@/components/ui/icon";
-import { usePersistedState } from "@/hooks/usePersistedState";
+import { usePersistedState, clearPersistedState } from "@/hooks/usePersistedState";
+import { taskRunner, useTaskState } from "@/lib/taskRunner";
 import { appStore, useAppStore, type WorksheetItem } from "@/store/appStore";
 import { worksheetApi } from "@/lib/api";
 import { yadisk, ROOT_FOLDER } from "@/lib/yadisk";
 import { SUBJECTS } from "../types";
+
+const TASK_KEY = "gen:worksheets";
 
 export const WORKSHEETS_FOLDER = `${ROOT_FOLDER}/Рабочие листы`;
 
@@ -57,10 +60,11 @@ export function WorksheetsForm() {
   const [description, setDescription] = usePersistedState("worksheets:description", "");
   const [tasksCount, setTasksCount] = usePersistedState("worksheets:tasksCount", 6);
   const [withImages, setWithImages] = usePersistedState("worksheets:withImages", true);
-  const [busy, setBusy] = useState(false);
-  const [stage, setStage] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
+  const task = useTaskState(TASK_KEY);
+  const busy = task.running;
+  const stage = task.stage;
+  const error = task.error;
+  const success = task.success;
 
   // Предзаполнение из конспекта (если пришли из раздела «Конспекты») — приоритет над черновиком
   useEffect(() => {
@@ -81,82 +85,90 @@ export function WorksheetsForm() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const generate = async () => {
-    if (!topic.trim()) { setError("Укажите тему"); return; }
+  const generate = () => {
+    if (busy) return;
+    if (!topic.trim()) { taskRunner.run({ key: TASK_KEY, run: async () => { throw new Error("Укажите тему"); } }); return; }
     if (!teacher) return;
-    setError(null);
-    setSuccess(null);
-    setBusy(true);
 
-    try {
-      setStage("ИИ подбирает материал по программе Минпросвещения…");
-      const result = await worksheetApi.generate({
-        subject, classNum,
-        topic: topic.trim(),
-        description: description.trim(),
-        tasksCount, withImages,
-        teacherName: teacher.name,
-        teacherSchool: teacher.school,
-        login: teacher.login,
-      });
+    // Захватываем значения формы на момент запуска
+    const params = {
+      subject, classNum,
+      topic: topic.trim(),
+      description: description.trim(),
+      tasksCount, withImages,
+      teacherName: teacher.name,
+      teacherSchool: teacher.school,
+      login: teacher.login,
+      yadiskToken: teacher.yadiskToken,
+      useYadisk: storageMode === "yadisk" && yadiskConnected && !!teacher.yadiskToken,
+    };
 
-      let yadiskPath: string | null = null;
-      let uploadedToYadisk = false;
+    // Очищаем поля сразу — черновик не мешает следующей генерации
+    setTopic("");
+    setDescription("");
+    clearPersistedState("worksheets:topic");
+    clearPersistedState("worksheets:description");
 
-      if (storageMode === "yadisk" && yadiskConnected && teacher.yadiskToken) {
-        try {
-          setStage("Загружаем на Яндекс.Диск…");
-          await yadisk.ensureFolder(teacher.yadiskToken, WORKSHEETS_FOLDER);
-          const date = new Date().toISOString().slice(0, 10);
-          yadiskPath = `${WORKSHEETS_FOLDER}/${date} ${result.filename}`;
-          await yadisk.uploadBinary(teacher.yadiskToken, yadiskPath, await getDocxBase64(result), true);
-          uploadedToYadisk = true;
-        } catch (e) {
-          console.error("Yadisk upload failed", e);
-          setError(`Файл создан, но не загружен на Я.Диск: ${(e as Error).message}`);
+    taskRunner.run({
+      key: TASK_KEY,
+      run: async (handle) => {
+        handle.setStage("ИИ подбирает материал по программе Минпросвещения…");
+        const result = await worksheetApi.generate({
+          subject: params.subject, classNum: params.classNum,
+          topic: params.topic, description: params.description,
+          tasksCount: params.tasksCount, withImages: params.withImages,
+          teacherName: params.teacherName, teacherSchool: params.teacherSchool,
+          login: params.login,
+        });
+
+        let yadiskPath: string | null = null;
+        let uploadedToYadisk = false;
+
+        if (params.useYadisk && params.yadiskToken) {
+          try {
+            handle.setStage("Загружаем на Яндекс.Диск…");
+            await yadisk.ensureFolder(params.yadiskToken, WORKSHEETS_FOLDER);
+            const date = new Date().toISOString().slice(0, 10);
+            yadiskPath = `${WORKSHEETS_FOLDER}/${date} ${result.filename}`;
+            await yadisk.uploadBinary(params.yadiskToken, yadiskPath, await getDocxBase64(result), true);
+            uploadedToYadisk = true;
+          } catch (e) {
+            console.error("Yadisk upload failed", e);
+          }
         }
-      }
 
-      const item: WorksheetItem = {
-        id: String(Date.now()),
-        title: result.title,
-        subject: result.subject,
-        classNum: result.classNum,
-        topic: result.topic,
-        description: description.trim(),
-        tasksCount: result.tasksCount,
-        imagesAdded: result.imagesAdded,
-        filename: result.filename,
-        size: result.size,
-        yadiskPath,
-        uploadedToYadisk,
-        createdAt: new Date().toISOString(),
-        intro: result.intro,
-        conclusion: result.conclusion,
-        tasks: result.tasks,
-      };
-      appStore.addWorksheet(item);
+        const item: WorksheetItem = {
+          id: String(Date.now()),
+          title: result.title,
+          subject: result.subject,
+          classNum: result.classNum,
+          topic: result.topic,
+          description: params.description,
+          tasksCount: result.tasksCount,
+          imagesAdded: result.imagesAdded,
+          filename: result.filename,
+          size: result.size,
+          yadiskPath,
+          uploadedToYadisk,
+          createdAt: new Date().toISOString(),
+          intro: result.intro,
+          conclusion: result.conclusion,
+          tasks: result.tasks,
+        };
+        appStore.addWorksheet(item);
 
-      if (result.balance_rub !== undefined) {
-        appStore.setAiBalance(Math.round(result.balance_rub * 100));
-      }
+        if (result.balance_rub !== undefined) {
+          appStore.setAiBalance(Math.round(result.balance_rub * 100));
+        }
 
-      downloadWorksheet(result, result.filename);
+        downloadWorksheet(result, result.filename);
 
-      const spentStr = (result.spent_rub ?? 0) > 0 ? ` · Списано: ${result.spent_rub!.toFixed(2)} ₽` : "";
-      const imgStr = result.imagesAdded > 0 ? ` · Добавлено иллюстраций: ${result.imagesAdded}` : "";
-      setSuccess(
-        `Готово! Рабочий лист на ${result.tasksCount} заданий создан.${imgStr}${spentStr} ` +
-        (uploadedToYadisk ? "Файл сохранён на Я.Диск." : "Файл скачан локально.")
-      );
-      setTopic("");
-      setDescription("");
-    } catch (e) {
-      setError((e as Error).message || "Не удалось создать рабочий лист");
-    } finally {
-      setBusy(false);
-      setStage("");
-    }
+        const spentStr = (result.spent_rub ?? 0) > 0 ? ` · Списано: ${result.spent_rub!.toFixed(2)} ₽` : "";
+        const imgStr = result.imagesAdded > 0 ? ` · Добавлено иллюстраций: ${result.imagesAdded}` : "";
+        return `Готово! Рабочий лист на ${result.tasksCount} заданий создан.${imgStr}${spentStr} ` +
+          (uploadedToYadisk ? "Файл сохранён на Я.Диск." : "Файл скачан локально.");
+      },
+    });
   };
 
   return (

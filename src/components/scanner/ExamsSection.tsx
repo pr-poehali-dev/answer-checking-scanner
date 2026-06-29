@@ -1,12 +1,14 @@
 import { useState, useEffect } from "react";
 import Icon from "@/components/ui/icon";
 import { usePersistedState } from "@/hooks/usePersistedState";
+import { taskRunner, useTaskState } from "@/lib/taskRunner";
 import { appStore, useAppStore } from "@/store/appStore";
 import { examApi, type ExamResponse } from "@/lib/api";
 import { downloadDocx } from "./TestsForm";
 import { yadisk, ROOT_FOLDER } from "@/lib/yadisk";
 
 const EXAMS_FOLDER = `${ROOT_FOLDER}/ОГЭ_ЕГЭ`;
+const TASK_KEY = "gen:exams";
 
 const OGE_SUBJECTS_FALLBACK = [
   "Биология", "География", "Иностранный язык", "Информатика",
@@ -40,11 +42,11 @@ export function ExamsSection() {
   const [examType, setExamType] = usePersistedState<ExamType>("exams:examType", "ОГЭ");
   const [subject, setSubject] = usePersistedState("exams:subject", "");
   const [subjects, setSubjects] = useState<string[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [stage, setStage] = useState("");
-  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
+  const task = useTaskState(TASK_KEY);
+  const busy = task.running;
+  const stage = task.stage;
+  const error = task.error;
+  const success = task.success;
   const [lastResult, setLastResult] = useState<ExamResponse | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>(() => {
     try {
@@ -78,89 +80,86 @@ export function ExamsSection() {
     localStorage.setItem("exams_history", JSON.stringify(items.slice(0, 30)));
   };
 
-  const generate = async () => {
-    if (!subject) { setError("Выберите предмет"); return; }
+  const generate = () => {
+    if (busy) return;
+    if (!subject) { taskRunner.run({ key: TASK_KEY, run: async () => { throw new Error("Выберите предмет"); } }); return; }
     if (!teacher) return;
-    setError(null);
-    setSuccess(null);
-    setBusy(true);
+
+    const params = {
+      examType, subject,
+      teacherName: teacher.name,
+      teacherSchool: teacher.school,
+      login: teacher.login,
+      yadiskToken: teacher.yadiskToken,
+      useYadisk: storageMode === "yadisk" && yadiskConnected && !!teacher.yadiskToken,
+    };
+    const historySnapshot = history;
     setLastResult(null);
-    setProgress(null);
 
-    try {
-      const result = await examApi.generate({
-        examType,
-        subject,
-        teacherName: teacher.name,
-        teacherSchool: teacher.school,
-        login: teacher.login,
-      }, (done, total, stageText) => {
-        setStage(stageText);
-        setProgress({ done, total });
-      });
+    taskRunner.run({
+      key: TASK_KEY,
+      run: async (handle) => {
+        const result = await examApi.generate({
+          examType: params.examType,
+          subject: params.subject,
+          teacherName: params.teacherName,
+          teacherSchool: params.teacherSchool,
+          login: params.login,
+        }, (done, total, stageText) => {
+          handle.setStage(total > 1 ? `${stageText} (${done}/${total})` : stageText);
+        });
 
-      setLastResult(result);
+        setLastResult(result);
 
-      let yadiskPath: string | null = null;
+        let yadiskPath: string | null = null;
 
-      // Скачиваем вариант
-      downloadDocx(result.docx_b64, result.filename);
+        downloadDocx(result.docx_b64, result.filename);
+        setTimeout(() => {
+          downloadDocx(result.answers_docx_b64, result.answers_filename);
+        }, 800);
 
-      // Скачиваем ответы
-      setTimeout(() => {
-        downloadDocx(result.answers_docx_b64, result.answers_filename);
-      }, 800);
-
-      // Загрузка на Я.Диск
-      if (storageMode === "yadisk" && yadiskConnected && teacher.yadiskToken) {
-        try {
-          setStage("Загружаем на Яндекс.Диск…");
-          await yadisk.ensureFolder(teacher.yadiskToken, EXAMS_FOLDER);
-          const date = new Date().toISOString().slice(0, 10);
-          yadiskPath = `${EXAMS_FOLDER}/${date}_${result.filename}`;
-          await yadisk.uploadBinary(teacher.yadiskToken, yadiskPath, result.docx_b64, true);
-          const answersPath = `${EXAMS_FOLDER}/${date}_${result.answers_filename}`;
-          await yadisk.uploadBinary(teacher.yadiskToken, answersPath, result.answers_docx_b64, true);
-        } catch {
-          /* не блокируем при ошибке Я.Диск */
+        if (params.useYadisk && params.yadiskToken) {
+          try {
+            handle.setStage("Загружаем на Яндекс.Диск…");
+            await yadisk.ensureFolder(params.yadiskToken, EXAMS_FOLDER);
+            const date = new Date().toISOString().slice(0, 10);
+            yadiskPath = `${EXAMS_FOLDER}/${date}_${result.filename}`;
+            await yadisk.uploadBinary(params.yadiskToken, yadiskPath, result.docx_b64, true);
+            const answersPath = `${EXAMS_FOLDER}/${date}_${result.answers_filename}`;
+            await yadisk.uploadBinary(params.yadiskToken, answersPath, result.answers_docx_b64, true);
+          } catch {
+            /* не блокируем при ошибке Я.Диск */
+          }
         }
-      }
 
-      const item: HistoryItem = {
-        id: String(Date.now()),
-        examType,
-        subject,
-        variantNum: result.variantNum,
-        totalTasks: result.totalTasks,
-        totalPoints: result.totalPoints,
-        filename: result.filename,
-        answers_filename: result.answers_filename,
-        createdAt: new Date().toISOString(),
-        yadiskPath,
-      };
-      saveHistory([item, ...history]);
+        const item: HistoryItem = {
+          id: String(Date.now()),
+          examType: params.examType,
+          subject: params.subject,
+          variantNum: result.variantNum,
+          totalTasks: result.totalTasks,
+          totalPoints: result.totalPoints,
+          filename: result.filename,
+          answers_filename: result.answers_filename,
+          createdAt: new Date().toISOString(),
+          yadiskPath,
+        };
+        saveHistory([item, ...historySnapshot]);
 
-      if (result.balance_rub !== undefined) {
-        appStore.setAiBalance(Math.round(result.balance_rub * 100));
-      }
+        if (result.balance_rub !== undefined) {
+          appStore.setAiBalance(Math.round(result.balance_rub * 100));
+        }
 
-      const spentStr = (result.spent_rub ?? 0) > 0 ? ` · Списано: ${result.spent_rub!.toFixed(2)} ₽` : '';
-      setSuccess(
-        `Вариант ${result.variantNum} готов! ${result.totalTasks} заданий, ${result.totalPoints} баллов.${spentStr} ` +
-        (yadiskPath ? "Сохранён на Я.Диск." : "Скачан локально.")
-      );
-    } catch (e) {
-      setError((e as Error).message || "Не удалось создать вариант");
-    } finally {
-      setBusy(false);
-      setStage("");
-      setProgress(null);
-    }
+        const spentStr = (result.spent_rub ?? 0) > 0 ? ` · Списано: ${result.spent_rub!.toFixed(2)} ₽` : '';
+        return `Вариант ${result.variantNum} готов! ${result.totalTasks} заданий, ${result.totalPoints} баллов.${spentStr} ` +
+          (yadiskPath ? "Сохранён на Я.Диск." : "Скачан локально.");
+      },
+    });
   };
 
   const redownload = (item: HistoryItem) => {
     if (!lastResult || lastResult.variantNum !== item.variantNum) {
-      setError("Перегенерируйте вариант — файл не сохраняется в браузере.");
+      alert("Перегенерируйте вариант — файл не сохраняется в браузере.");
       return;
     }
     downloadDocx(lastResult.docx_b64, lastResult.filename);
@@ -295,27 +294,12 @@ export function ExamsSection() {
 
           {busy && (
             <div className="space-y-2">
-              {progress && progress.total > 1 && (
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs text-muted-foreground">{stage}</span>
-                    <span className="text-xs font-semibold text-purple-700">
-                      {progress.done} / {progress.total}
-                    </span>
-                  </div>
-                  <div className="w-full h-2 bg-purple-100 rounded-full overflow-hidden">
-                    <div
-                      className="h-2 rounded-full transition-all duration-500"
-                      style={{
-                        width: `${Math.round((progress.done / progress.total) * 100)}%`,
-                        background: "hsl(270 60% 45%)",
-                      }}
-                    />
-                  </div>
-                </div>
+              {stage && (
+                <p className="text-xs text-center font-semibold text-purple-700">{stage}</p>
               )}
               <p className="text-xs text-muted-foreground text-center">
-                ИИ генерирует каждое задание по теме кодификатора ФИПИ — это занимает несколько минут
+                ИИ генерирует каждое задание по теме кодификатора ФИПИ — это занимает несколько минут.
+                Можно перейти в другой раздел — генерация продолжится в фоне.
               </p>
             </div>
           )}

@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import Icon from "@/components/ui/icon";
-import { usePersistedState } from "@/hooks/usePersistedState";
+import { usePersistedState, clearPersistedState } from "@/hooks/usePersistedState";
+import { taskRunner, useTaskState } from "@/lib/taskRunner";
 import { appStore, useAppStore, type PresentationItem } from "@/store/appStore";
 import { presentationApi } from "@/lib/api";
 import { yadisk } from "@/lib/yadisk";
@@ -14,6 +15,9 @@ import {
 import { PresentationsFormFields } from "./PresentationsFormFields";
 import { PresentationsProgress } from "./PresentationsProgress";
 
+const TASK_KEY = "gen:presentations";
+const REDESIGN_KEY = "gen:presentations-redesign";
+
 export function PresentationsForm() {
   const { teacher, yadiskConnected, storageMode } = useAppStore();
 
@@ -22,19 +26,19 @@ export function PresentationsForm() {
   const [audience, setAudience]       = usePersistedState("presentations:audience", AUDIENCE_PRESETS[3]);
   const [slidesCount, setSlidesCount] = usePersistedState("presentations:slidesCount", 8);
   const [customDesign, setCustomDesign] = usePersistedState("presentations:customDesign", false);
-  const [busy, setBusy]               = useState(false);
-  const [stage, setStage]             = useState("");
-  const [elapsed, setElapsed]         = useState(0);
-  const [progress, setProgress]       = useState(0);
-  const [error, setError]             = useState<string | null>(null);
-  const [success, setSuccess]         = useState<string | null>(null);
-  const [redesigning, setRedesigning] = useState(false);
+  const task = useTaskState(TASK_KEY);
+  const redesignTask = useTaskState(REDESIGN_KEY);
+  const busy = task.running;
+  const elapsed = task.elapsed;
+  const progress = task.progress;
+  const error = task.error || redesignTask.error;
+  const success = task.success || redesignTask.success;
+  const redesigning = redesignTask.running;
   const [lastDesign, setLastDesign]   = useState<
     { topic: string; rawOutline: object; variant: number; teacherName: string; teacherSchool: string } | null
   >(null);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Прогреваем GigaChat-токен при открытии вкладки — экономим 15-20 сек на генерации
+  // Прогреваем токен при открытии вкладки — экономим 15-20 сек на генерации
   useEffect(() => { presentationApi.warmup(); }, []);
 
   // Предзаполнение из конспекта (если пришли из раздела «Конспекты») — приоритет над черновиком
@@ -50,142 +54,132 @@ export function PresentationsForm() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    if (busy) {
-      setElapsed(0);
-      setProgress(0);
-      timerRef.current = setInterval(() => {
-        setElapsed(s => s + 1);
-        setProgress(p => {
-          if (p < 40) return p + 2.2;
-          if (p < 70) return p + 0.9;
-          if (p < 88) return p + 0.3;
-          return p;
-        });
-      }, 1000);
-    } else {
-      if (timerRef.current) clearInterval(timerRef.current);
-      setElapsed(0);
-      setProgress(0);
-    }
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [busy]);
-
   const autoStage = STAGE_HINTS.slice().reverse().find(([p]) => progress >= p)?.[1] ?? "";
-  const displayStage = stage || autoStage;
+  const displayStage = task.stage || autoStage;
 
-  const generate = async () => {
-    if (!topic.trim()) { setError("Укажите тему урока"); return; }
+  const generate = () => {
+    if (busy) return;
+    if (!topic.trim()) { taskRunner.run({ key: TASK_KEY, run: async () => { throw new Error("Укажите тему урока"); } }); return; }
     if (!teacher) return;
-    setError(null);
-    setSuccess(null);
-    setBusy(true);
 
-    try {
-      const result = await presentationApi.generate(
-        { topic: topic.trim(), description: description.trim(), audience, slidesCount, customDesign,
-          teacherName: teacher.name, teacherSchool: teacher.school, login: teacher.login },
-        (s) => setStage(s),
-      );
+    const params = {
+      topic: topic.trim(), description: description.trim(),
+      audience, slidesCount, customDesign,
+      teacherName: teacher.name, teacherSchool: teacher.school, login: teacher.login,
+      yadiskToken: teacher.yadiskToken,
+      useYadisk: storageMode === "yadisk" && yadiskConnected && !!teacher.yadiskToken,
+    };
 
-      let yadiskPath: string | null = null;
-      let uploadedToYadisk = false;
+    setLastDesign(null);
+    setTopic("");
+    setDescription("");
+    clearPersistedState("presentations:topic");
+    clearPersistedState("presentations:description");
 
-      if (storageMode === "yadisk" && yadiskConnected && teacher.yadiskToken) {
-        try {
-          setStage("Загружаем на Яндекс.Диск…");
-          await yadisk.ensureFolder(teacher.yadiskToken, PRESENTATIONS_FOLDER);
-          const date = new Date().toISOString().slice(0, 10);
-          yadiskPath = `${PRESENTATIONS_FOLDER}/${date} ${result.filename}`;
-          await yadisk.uploadBinary(teacher.yadiskToken, yadiskPath, await getPptxBase64(result), true);
-          uploadedToYadisk = true;
-        } catch (e) {
-          console.error("Yadisk upload failed", e);
-          setError(`Презентация создана, но не загружена на Я.Диск: ${(e as Error).message}`);
+    taskRunner.run({
+      key: TASK_KEY,
+      autoProgress: true,
+      run: async (handle) => {
+        const result = await presentationApi.generate(
+          { topic: params.topic, description: params.description, audience: params.audience,
+            slidesCount: params.slidesCount, customDesign: params.customDesign,
+            teacherName: params.teacherName, teacherSchool: params.teacherSchool, login: params.login },
+          (s) => handle.setStage(s),
+        );
+
+        let yadiskPath: string | null = null;
+        let uploadedToYadisk = false;
+
+        if (params.useYadisk && params.yadiskToken) {
+          try {
+            handle.setStage("Загружаем на Яндекс.Диск…");
+            await yadisk.ensureFolder(params.yadiskToken, PRESENTATIONS_FOLDER);
+            const date = new Date().toISOString().slice(0, 10);
+            yadiskPath = `${PRESENTATIONS_FOLDER}/${date} ${result.filename}`;
+            await yadisk.uploadBinary(params.yadiskToken, yadiskPath, await getPptxBase64(result), true);
+            uploadedToYadisk = true;
+          } catch (e) {
+            console.error("Yadisk upload failed", e);
+          }
         }
-      }
 
-      const item: PresentationItem = {
-        id: String(Date.now()), topic: topic.trim(), description: description.trim(),
-        audience, slidesCount, filename: result.filename, size: result.size,
-        yadiskPath, uploadedToYadisk, createdAt: new Date().toISOString(),
-        outline: result.outline,
-      };
-      if (result.balance_rub !== undefined) {
-        appStore.setAiBalance(Math.round(result.balance_rub * 100));
-      }
+        const item: PresentationItem = {
+          id: String(Date.now()), topic: params.topic, description: params.description,
+          audience: params.audience, slidesCount: params.slidesCount, filename: result.filename, size: result.size,
+          yadiskPath, uploadedToYadisk, createdAt: new Date().toISOString(),
+          outline: result.outline,
+        };
+        if (result.balance_rub !== undefined) {
+          appStore.setAiBalance(Math.round(result.balance_rub * 100));
+        }
 
-      appStore.addPresentation(item);
-      downloadPresentation(result, result.filename);
+        appStore.addPresentation(item);
+        downloadPresentation(result, result.filename);
 
-      // Сохраняем структуру для быстрой пересборки дизайна (только индивидуальный)
-      if (result.rawOutline) {
-        setLastDesign({
-          topic: topic.trim(), rawOutline: result.rawOutline, variant: 1,
-          teacherName: teacher.name, teacherSchool: teacher.school,
-        });
-      } else {
-        setLastDesign(null);
-      }
+        if (result.rawOutline) {
+          setLastDesign({
+            topic: params.topic, rawOutline: result.rawOutline, variant: 1,
+            teacherName: params.teacherName, teacherSchool: params.teacherSchool,
+          });
+        } else {
+          setLastDesign(null);
+        }
 
-      const spentStr = (result.spent_rub ?? 0) > 0 ? ` · Списано: ${result.spent_rub!.toFixed(2)} ₽` : '';
-      setSuccess(uploadedToYadisk
-        ? `Готово! Презентация сохранена на Я.Диск и скачана.${spentStr}`
-        : yadiskConnected
-        ? `Презентация скачана.${spentStr}`
-        : `Презентация скачана.${spentStr}`);
-      setTopic("");
-      setDescription("");
-    } catch (e) {
-      setError((e as Error).message || "Не удалось создать презентацию");
-    } finally {
-      setBusy(false);
-      setStage("");
-    }
+        const spentStr = (result.spent_rub ?? 0) > 0 ? ` · Списано: ${result.spent_rub!.toFixed(2)} ₽` : '';
+        return uploadedToYadisk
+          ? `Готово! Презентация сохранена на Я.Диск и скачана.${spentStr}`
+          : `Презентация скачана.${spentStr}`;
+      },
+    });
   };
 
-  const regenerateDesign = async () => {
-    if (!lastDesign || !teacher) return;
-    setError(null);
-    setSuccess(null);
-    setRedesigning(true);
-    try {
-      const result = await presentationApi.redesign({
-        topic: lastDesign.topic,
-        teacherName: lastDesign.teacherName,
-        teacherSchool: lastDesign.teacherSchool,
-        rawOutline: lastDesign.rawOutline,
-        designVariant: lastDesign.variant,
-      });
+  const regenerateDesign = () => {
+    if (!lastDesign || !teacher || redesigning) return;
+    const design = lastDesign;
+    const params = {
+      audience, slidesCount,
+      yadiskToken: teacher.yadiskToken,
+      useYadisk: storageMode === "yadisk" && yadiskConnected && !!teacher.yadiskToken,
+    };
 
-      let yadiskPath: string | null = null;
-      let uploadedToYadisk = false;
-      if (storageMode === "yadisk" && yadiskConnected && teacher.yadiskToken) {
-        try {
-          await yadisk.ensureFolder(teacher.yadiskToken, PRESENTATIONS_FOLDER);
-          const date = new Date().toISOString().slice(0, 10);
-          yadiskPath = `${PRESENTATIONS_FOLDER}/${date} ${result.filename}`;
-          await yadisk.uploadBinary(teacher.yadiskToken, yadiskPath, await getPptxBase64(result), true);
-          uploadedToYadisk = true;
-        } catch (e) {
-          console.error("Yadisk upload failed", e);
+    taskRunner.run({
+      key: REDESIGN_KEY,
+      autoProgress: true,
+      run: async (handle) => {
+        handle.setStage("Создаём новый дизайн…");
+        const result = await presentationApi.redesign({
+          topic: design.topic,
+          teacherName: design.teacherName,
+          teacherSchool: design.teacherSchool,
+          rawOutline: design.rawOutline,
+          designVariant: design.variant,
+        });
+
+        let yadiskPath: string | null = null;
+        let uploadedToYadisk = false;
+        if (params.useYadisk && params.yadiskToken) {
+          try {
+            await yadisk.ensureFolder(params.yadiskToken, PRESENTATIONS_FOLDER);
+            const date = new Date().toISOString().slice(0, 10);
+            yadiskPath = `${PRESENTATIONS_FOLDER}/${date} ${result.filename}`;
+            await yadisk.uploadBinary(params.yadiskToken, yadiskPath, await getPptxBase64(result), true);
+            uploadedToYadisk = true;
+          } catch (e) {
+            console.error("Yadisk upload failed", e);
+          }
         }
-      }
 
-      appStore.addPresentation({
-        id: String(Date.now()), topic: lastDesign.topic, description: "",
-        audience, slidesCount, filename: result.filename, size: result.size,
-        yadiskPath, uploadedToYadisk, createdAt: new Date().toISOString(),
-        outline: result.outline,
-      });
-      downloadPresentation(result, result.filename);
-      setLastDesign({ ...lastDesign, variant: lastDesign.variant + 1 });
-      setSuccess("Готов новый вариант дизайна — файл скачан.");
-    } catch (e) {
-      setError((e as Error).message || "Не удалось обновить дизайн");
-    } finally {
-      setRedesigning(false);
-    }
+        appStore.addPresentation({
+          id: String(Date.now()), topic: design.topic, description: "",
+          audience: params.audience, slidesCount: params.slidesCount, filename: result.filename, size: result.size,
+          yadiskPath, uploadedToYadisk, createdAt: new Date().toISOString(),
+          outline: result.outline,
+        });
+        downloadPresentation(result, result.filename);
+        setLastDesign({ ...design, variant: design.variant + 1 });
+        return "Готов новый вариант дизайна — файл скачан.";
+      },
+    });
   };
 
   return (

@@ -1,11 +1,14 @@
-import { useState, useRef } from "react";
+import { useState } from "react";
 import Icon from "@/components/ui/icon";
-import { usePersistedState } from "@/hooks/usePersistedState";
+import { usePersistedState, clearPersistedState } from "@/hooks/usePersistedState";
+import { taskRunner, useTaskState } from "@/lib/taskRunner";
 import { appStore, useAppStore, type SynopsisItem } from "@/store/appStore";
 import { synopsisApi } from "@/lib/api";
 import { SUBJECTS } from "./types";
 import { SynopsisForm } from "./SynopsisForm";
 import { SynopsisRow } from "./SynopsisRow";
+
+const TASK_KEY = "gen:synopsis";
 
 const STAGE_MESSAGES = [
   "ИИ изучает программу Минпросвещения РФ по теме…",
@@ -23,84 +26,85 @@ export function SynopsisSection() {
   const [topic, setTopic] = usePersistedState("synopsis:topic", "");
   const [description, setDescription] = usePersistedState("synopsis:description", "");
 
-  const [busy, setBusy] = useState(false);
-  const [stageIdx, setStageIdx] = useState(0);
-  const [stage, setStage] = useState("");
-  const [error, setError] = useState<string | null>(null);
-
+  const task = useTaskState(TASK_KEY);
+  const busy = task.running;
+  const stage = task.stage;
+  const error = task.error;
+  const stageIdx = Math.max(0, STAGE_MESSAGES.indexOf(stage));
   const [created, setCreated] = useState<SynopsisItem | null>(null);
 
-  const stageTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const startStageRotation = () => {
-    setStageIdx(0);
-    setStage(STAGE_MESSAGES[0]);
-    let idx = 0;
-    stageTimer.current = setInterval(() => {
-      idx = Math.min(idx + 1, STAGE_MESSAGES.length - 1);
-      setStageIdx(idx);
-      setStage(STAGE_MESSAGES[idx]);
-    }, 70_000);
-  };
-
-  const stopStageRotation = () => {
-    if (stageTimer.current) clearInterval(stageTimer.current);
-    stageTimer.current = null;
-  };
-
-  const generate = async () => {
-    if (!topic.trim()) { setError("Укажите тему урока"); return; }
+  const generate = () => {
+    if (busy) return;
+    if (!topic.trim()) { taskRunner.run({ key: TASK_KEY, run: async () => { throw new Error("Укажите тему урока"); } }); return; }
     if (!teacher) return;
 
-    setError(null);
+    const params = {
+      subject, classNum,
+      topic: topic.trim(),
+      description: description.trim(),
+      teacherName: teacher.name,
+      teacherSchool: teacher.school,
+      login: teacher.login,
+    };
+
     setCreated(null);
-    setBusy(true);
-    startStageRotation();
+    setTopic("");
+    setDescription("");
+    clearPersistedState("synopsis:topic");
+    clearPersistedState("synopsis:description");
 
-    try {
-      const result = await synopsisApi.generate(
-        {
-          subject,
-          class_num: classNum,
-          topic: topic.trim(),
-          description: description.trim(),
-          teacher_name: teacher.name,
-          teacher_school: teacher.school,
-          login: teacher.login,
-        },
-        (attempt) => setStage(`Повторная попытка ${attempt} из 3 — сервис занят, ждём…`),
-      );
+    taskRunner.run({
+      key: TASK_KEY,
+      run: async (handle) => {
+        // Ротация поясняющих стадий
+        handle.setStage(STAGE_MESSAGES[0]);
+        let idx = 0;
+        const rot = setInterval(() => {
+          idx = Math.min(idx + 1, STAGE_MESSAGES.length - 1);
+          handle.setStage(STAGE_MESSAGES[idx]);
+        }, 70_000);
 
-      const item: SynopsisItem = {
-        id: String(Date.now()),
-        subject,
-        classNum,
-        topic: topic.trim(),
-        description: description.trim(),
-        text: result.text,
-        wordCount: result.word_count,
-        createdAt: new Date().toISOString(),
-        docxB64: result.docx_b64,
-        filename: result.filename,
-        spentRub: result.spent_rub,
-        balanceRub: result.balance_rub,
-      };
+        try {
+          const result = await synopsisApi.generate(
+            {
+              subject: params.subject,
+              class_num: params.classNum,
+              topic: params.topic,
+              description: params.description,
+              teacher_name: params.teacherName,
+              teacher_school: params.teacherSchool,
+              login: params.login,
+            },
+            (attempt) => handle.setStage(`Повторная попытка ${attempt} из 3 — сервис занят, ждём…`),
+          );
 
-      if (result.balance_rub !== undefined) {
-        appStore.setAiBalance(Math.round(result.balance_rub * 100));
-      }
+          const item: SynopsisItem = {
+            id: String(Date.now()),
+            subject: params.subject,
+            classNum: params.classNum,
+            topic: params.topic,
+            description: params.description,
+            text: result.text,
+            wordCount: result.word_count,
+            createdAt: new Date().toISOString(),
+            docxB64: result.docx_b64,
+            filename: result.filename,
+            spentRub: result.spent_rub,
+            balanceRub: result.balance_rub,
+          };
 
-      appStore.addSynopsis(item);
-      setCreated(item);
-      setTopic("");
-      setDescription("");
-    } catch (e) {
-      setError((e as Error).message || "Не удалось создать конспект");
-    } finally {
-      stopStageRotation();
-      setBusy(false);
-      setStage("");
-    }
+          if (result.balance_rub !== undefined) {
+            appStore.setAiBalance(Math.round(result.balance_rub * 100));
+          }
+
+          appStore.addSynopsis(item);
+          setCreated(item);
+          return `Готово! Конспект «${params.topic}» создан и добавлен в историю.`;
+        } finally {
+          clearInterval(rot);
+        }
+      },
+    });
   };
 
   const goToPresentation = (item: SynopsisItem) => {

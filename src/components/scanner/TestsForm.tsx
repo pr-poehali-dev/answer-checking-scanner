@@ -1,12 +1,15 @@
-import { useState, useEffect } from "react";
+import { useEffect } from "react";
 import Icon from "@/components/ui/icon";
 import { usePersistedState, clearPersistedState } from "@/hooks/usePersistedState";
+import { taskRunner, useTaskState } from "@/lib/taskRunner";
 import { appStore, useAppStore, type GeneratedTestItem, type Work } from "@/store/appStore";
 import { testApi, type WorkTypeName } from "@/lib/api";
 import { yadisk, ROOT_FOLDER } from "@/lib/yadisk";
 import { SUBJECTS } from "./types";
 
 export const TESTS_FOLDER = `${ROOT_FOLDER}/Тесты`;
+
+const TASK_KEY = "gen:tests";
 
 export const WORK_TYPES: { value: WorkTypeName; label: string; icon: string; desc: string }[] = [
   { value: "Тест", label: "Тест", icon: "ListChecks", desc: "Короткая проверка по теме" },
@@ -44,10 +47,11 @@ export function TestsForm() {
   const [description, setDescription] = usePersistedState("tests:description", "");
   const [part1Count, setPart1Count] = usePersistedState("tests:part1Count", 10);
   const [part2Count, setPart2Count] = usePersistedState("tests:part2Count", 2);
-  const [busy, setBusy] = useState(false);
-  const [stage, setStage] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
+  const task = useTaskState(TASK_KEY);
+  const busy = task.running;
+  const stage = task.stage;
+  const error = task.error;
+  const success = task.success;
 
   // Предзаполнение из конспекта (если пришли из раздела «Конспекты») — имеет приоритет над черновиком
   useEffect(() => {
@@ -68,102 +72,107 @@ export function TestsForm() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const generate = async () => {
-    if (!topic.trim()) { setError("Укажите тему"); return; }
+  const generate = () => {
+    if (busy) return;
+    if (!topic.trim()) { taskRunner.run({ key: TASK_KEY, run: async () => { throw new Error("Укажите тему"); } }); return; }
     if (!teacher) return;
-    if (part1Count + part2Count === 0) { setError("Укажите хотя бы один вопрос"); return; }
-    setError(null);
-    setSuccess(null);
-    setBusy(true);
+    if (part1Count + part2Count === 0) { taskRunner.run({ key: TASK_KEY, run: async () => { throw new Error("Укажите хотя бы один вопрос"); } }); return; }
 
-    try {
-      setStage("ИИ составляет вопросы…");
-      const result = await testApi.generate({
-        workType, subject, classNum,
-        topic: topic.trim(),
-        description: description.trim(),
-        part1Count, part2Count,
-        teacherName: teacher.name,
-        teacherSchool: teacher.school,
-        login: teacher.login,
-      });
+    const params = {
+      workType, subject, classNum, classLetter,
+      topic: topic.trim(),
+      description: description.trim(),
+      part1Count, part2Count,
+      teacherName: teacher.name,
+      teacherSchool: teacher.school,
+      login: teacher.login,
+      yadiskToken: teacher.yadiskToken,
+      useYadisk: storageMode === "yadisk" && yadiskConnected && !!teacher.yadiskToken,
+    };
 
-      let yadiskPath: string | null = null;
-      let uploadedToYadisk = false;
+    setTopic("");
+    setDescription("");
+    clearPersistedState("tests:topic");
+    clearPersistedState("tests:description");
 
-      if (storageMode === "yadisk" && yadiskConnected && teacher.yadiskToken) {
-        try {
-          setStage("Загружаем на Яндекс.Диск…");
-          await yadisk.ensureFolder(teacher.yadiskToken, TESTS_FOLDER);
-          const date = new Date().toISOString().slice(0, 10);
-          yadiskPath = `${TESTS_FOLDER}/${date} ${result.filename}`;
-          await yadisk.uploadBinary(teacher.yadiskToken, yadiskPath, result.docx_b64, true);
-          uploadedToYadisk = true;
-        } catch (e) {
-          console.error("Yadisk upload failed", e);
-          setError(`Файл создан, но не загружен на Я.Диск: ${(e as Error).message}`);
+    taskRunner.run({
+      key: TASK_KEY,
+      run: async (handle) => {
+        handle.setStage("ИИ составляет вопросы…");
+        const result = await testApi.generate({
+          workType: params.workType, subject: params.subject, classNum: params.classNum,
+          topic: params.topic, description: params.description,
+          part1Count: params.part1Count, part2Count: params.part2Count,
+          teacherName: params.teacherName, teacherSchool: params.teacherSchool,
+          login: params.login,
+        });
+
+        let yadiskPath: string | null = null;
+        let uploadedToYadisk = false;
+
+        if (params.useYadisk && params.yadiskToken) {
+          try {
+            handle.setStage("Загружаем на Яндекс.Диск…");
+            await yadisk.ensureFolder(params.yadiskToken, TESTS_FOLDER);
+            const date = new Date().toISOString().slice(0, 10);
+            yadiskPath = `${TESTS_FOLDER}/${date} ${result.filename}`;
+            await yadisk.uploadBinary(params.yadiskToken, yadiskPath, result.docx_b64, true);
+            uploadedToYadisk = true;
+          } catch (e) {
+            console.error("Yadisk upload failed", e);
+          }
         }
-      }
 
-      // Автоматически создаём работу в разделе «Работы»
-      const newWork: Work = {
-        id: result.workId,
-        type: result.workType,
-        subject: result.subject,
-        classNum: result.classNum,
-        classLetter,
-        date: new Date().toISOString().slice(0, 10),
-        totalQuestions: result.totalQuestions,
-        part1Count: result.part1Count,
-        part2Count: result.part2Count,
-        answerKey: result.answerKey,
-        gradeScale: result.gradeScale,
-        maxScore: result.maxScore,
-        topic: result.topic,
-        generatedByAi: true,
-      };
-      appStore.addWork(newWork);
+        // Автоматически создаём работу в разделе «Работы»
+        const newWork: Work = {
+          id: result.workId,
+          type: result.workType,
+          subject: result.subject,
+          classNum: result.classNum,
+          classLetter: params.classLetter,
+          date: new Date().toISOString().slice(0, 10),
+          totalQuestions: result.totalQuestions,
+          part1Count: result.part1Count,
+          part2Count: result.part2Count,
+          answerKey: result.answerKey,
+          gradeScale: result.gradeScale,
+          maxScore: result.maxScore,
+          topic: result.topic,
+          generatedByAi: true,
+        };
+        appStore.addWork(newWork);
 
-      // Сохраняем в историю генераций
-      const item: GeneratedTestItem = {
-        id: String(Date.now()),
-        workId: result.workId,
-        workType: result.workType,
-        subject: result.subject,
-        classNum: result.classNum,
-        topic: result.topic,
-        description: description.trim(),
-        part1Count: result.part1Count,
-        part2Count: result.part2Count,
-        filename: result.filename,
-        size: result.size,
-        yadiskPath,
-        uploadedToYadisk,
-        createdAt: new Date().toISOString(),
-        questions: result.questions,
-      };
-      appStore.addGeneratedTest(item);
+        // Сохраняем в историю генераций
+        const item: GeneratedTestItem = {
+          id: String(Date.now()),
+          workId: result.workId,
+          workType: result.workType,
+          subject: result.subject,
+          classNum: result.classNum,
+          topic: result.topic,
+          description: params.description,
+          part1Count: result.part1Count,
+          part2Count: result.part2Count,
+          filename: result.filename,
+          size: result.size,
+          yadiskPath,
+          uploadedToYadisk,
+          createdAt: new Date().toISOString(),
+          questions: result.questions,
+        };
+        appStore.addGeneratedTest(item);
 
-      if (result.balance_rub !== undefined) {
-        appStore.setAiBalance(Math.round(result.balance_rub * 100));
-      }
+        if (result.balance_rub !== undefined) {
+          appStore.setAiBalance(Math.round(result.balance_rub * 100));
+        }
 
-      // Скачиваем файл
-      downloadDocx(result.docx_b64, result.filename);
+        downloadDocx(result.docx_b64, result.filename);
 
-      const spentStr = (result.spent_rub ?? 0) > 0 ? ` · Списано: ${result.spent_rub!.toFixed(2)} ₽` : '';
-      setSuccess(
-        `Готово! Работа №${result.workId} добавлена в раздел «Работы».${spentStr} ` +
-        (uploadedToYadisk ? `Файл сохранён на Я.Диск.` : `Файл скачан локально.`)
-      );
-      setTopic("");
-      setDescription("");
-    } catch (e) {
-      setError((e as Error).message || "Не удалось создать работу");
-    } finally {
-      setBusy(false);
-      setStage("");
-    }
+        const spentStr = (result.spent_rub ?? 0) > 0 ? ` · Списано: ${result.spent_rub!.toFixed(2)} ₽` : '';
+        return `Готово! Работа №${result.workId} добавлена в раздел «Работы».${spentStr} ` +
+          (uploadedToYadisk ? `Файл сохранён на Я.Диск.` : `Файл скачан локально.`);
+      },
+    });
   };
 
   return (

@@ -447,7 +447,7 @@ def _add_answer_line(doc, color_hex: str = "AAB2BD", count: int = 1):
         pf.space_after = Pt(10)
         # Таб-стоп у правого поля с заполнением подчёркиванием
         tab_stops = pf.tab_stops
-        tab_stops.add_tab_stop(text_width, WD_TAB_ALIGNMENT.RIGHT, WD_TAB_LEADER.UNDERSCORE)
+        tab_stops.add_tab_stop(text_width, WD_TAB_ALIGNMENT.RIGHT, WD_TAB_LEADER.UNDERSCORES)
         run = p.add_run("\t")
         run.font.size = Pt(12)
         run.font.color.rgb = RGBColor.from_string(color_hex)

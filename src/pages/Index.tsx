@@ -25,6 +25,7 @@ import InstitutionLoginPage from "@/pages/InstitutionLoginPage";
 import InstitutionDashboard from "@/pages/InstitutionDashboard";
 import SubscriptionGate from "@/components/SubscriptionGate";
 import YadiskRequiredGate from "@/components/YadiskRequiredGate";
+import StorageModeGate from "@/components/StorageModeGate";
 import CompanyFooter from "@/components/CompanyFooter";
 import TesterLogger from "@/components/TesterLogger";
 import { useAppStore, appStore } from "@/store/appStore";
@@ -94,7 +95,7 @@ export default function Index() {
   const [ouUser, setOuUser]         = useState<OUUser | null>(() => loadOUSession());
   const [hasInstitution, setHasInstitution] = useState(false);
   const [showTokensModal, setShowTokensModal] = useState(false);
-  const { teacher, yadiskConnected, maintenanceSections, hiddenSections } = useAppStore();
+  const { teacher, yadiskConnected, storageMode, maintenanceSections, hiddenSections } = useAppStore();
   const ActiveSection = SECTION_COMPONENTS[active];
 
   useEffect(() => {
@@ -188,10 +189,13 @@ export default function Index() {
   const isTester = teacher.role === "tester";
   const isAdminInLK = teacher.role === "admin";
 
-  // Тестер и admin — обходят проверки подписки и Я.Диска
+  // Тестер и admin — обходят проверки подписки и хранилища
   if (!isTester && !isAdminInLK) {
     if (!teacher.subscriptionActive) return <SubscriptionGate />;
-    if (!yadiskConnected) return <YadiskRequiredGate />;
+    // Обязательный выбор способа хранения при первичном входе
+    if (!storageMode) return <StorageModeGate />;
+    // Я.Диск требуется только если выбран режим «yadisk»
+    if (storageMode === "yadisk" && !yadiskConnected) return <YadiskRequiredGate />;
   }
 
   // Раздел на техработах — только тестер проходит, остальные видят заглушку

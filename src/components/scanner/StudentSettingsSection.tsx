@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import Icon from "@/components/ui/icon";
 import { ProfileCard } from "./ProfileCard";
 import { YadiskCard } from "./YadiskCard";
+import { StorageModeCard } from "./StorageModeCard";
 import { useAppStore } from "@/store/appStore";
 import { studentLinkApi } from "@/lib/api";
 
@@ -96,11 +97,13 @@ function StudentBindCard() {
 }
 
 export function StudentSettingsSection() {
+  const { storageMode } = useAppStore();
   return (
     <div className="animate-slide-up space-y-6">
       <StudentBindCard />
       <ProfileCard />
-      <YadiskCard />
+      <StorageModeCard />
+      {storageMode === "yadisk" && <YadiskCard />}
     </div>
   );
 }

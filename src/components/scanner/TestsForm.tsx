@@ -34,7 +34,7 @@ export function downloadDocx(b64: string, filename: string) {
 }
 
 export function TestsForm() {
-  const { teacher, yadiskConnected } = useAppStore();
+  const { teacher, yadiskConnected, storageMode } = useAppStore();
 
   const [workType, setWorkType] = usePersistedState<WorkTypeName>("tests:workType", "Тест");
   const [subject, setSubject] = usePersistedState<string>("tests:subject", SUBJECTS[0]);
@@ -91,7 +91,7 @@ export function TestsForm() {
       let yadiskPath: string | null = null;
       let uploadedToYadisk = false;
 
-      if (yadiskConnected && teacher.yadiskToken) {
+      if (storageMode === "yadisk" && yadiskConnected && teacher.yadiskToken) {
         try {
           setStage("Загружаем на Яндекс.Диск…");
           await yadisk.ensureFolder(teacher.yadiskToken, TESTS_FOLDER);

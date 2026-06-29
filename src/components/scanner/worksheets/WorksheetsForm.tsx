@@ -49,7 +49,7 @@ async function getDocxBase64(result: { docx_url?: string; docx_b64?: string }): 
 }
 
 export function WorksheetsForm() {
-  const { teacher, yadiskConnected } = useAppStore();
+  const { teacher, yadiskConnected, storageMode } = useAppStore();
 
   const [subject, setSubject] = usePersistedState<string>("worksheets:subject", SUBJECTS[0]);
   const [classNum, setClassNum] = usePersistedState("worksheets:classNum", 7);
@@ -103,7 +103,7 @@ export function WorksheetsForm() {
       let yadiskPath: string | null = null;
       let uploadedToYadisk = false;
 
-      if (yadiskConnected && teacher.yadiskToken) {
+      if (storageMode === "yadisk" && yadiskConnected && teacher.yadiskToken) {
         try {
           setStage("Загружаем на Яндекс.Диск…");
           await yadisk.ensureFolder(teacher.yadiskToken, WORKSHEETS_FOLDER);

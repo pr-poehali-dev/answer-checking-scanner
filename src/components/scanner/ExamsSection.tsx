@@ -35,7 +35,7 @@ interface HistoryItem {
 }
 
 export function ExamsSection() {
-  const { teacher, yadiskConnected } = useAppStore();
+  const { teacher, yadiskConnected, storageMode } = useAppStore();
 
   const [examType, setExamType] = usePersistedState<ExamType>("exams:examType", "ОГЭ");
   const [subject, setSubject] = usePersistedState("exams:subject", "");
@@ -112,7 +112,7 @@ export function ExamsSection() {
       }, 800);
 
       // Загрузка на Я.Диск
-      if (yadiskConnected && teacher.yadiskToken) {
+      if (storageMode === "yadisk" && yadiskConnected && teacher.yadiskToken) {
         try {
           setStage("Загружаем на Яндекс.Диск…");
           await yadisk.ensureFolder(teacher.yadiskToken, EXAMS_FOLDER);

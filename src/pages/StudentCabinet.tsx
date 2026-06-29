@@ -14,6 +14,7 @@ import { StudentPresentationsSection } from "@/components/scanner/StudentPresent
 import TokensModal from "@/components/TokensModal";
 import SubscriptionGate from "@/components/SubscriptionGate";
 import YadiskRequiredGate from "@/components/YadiskRequiredGate";
+import StorageModeGate from "@/components/StorageModeGate";
 import CompanyFooter from "@/components/CompanyFooter";
 import { useAppStore, appStore } from "@/store/appStore";
 
@@ -30,7 +31,7 @@ const SECTION_COMPONENTS: Partial<Record<Section, React.FC>> = {
 };
 
 export default function StudentCabinet() {
-  const { teacher, yadiskConnected, hiddenSections } = useAppStore();
+  const { teacher, yadiskConnected, storageMode, hiddenSections } = useAppStore();
   const [active, setActive] = usePersistedState<Section>("student:active-section", "myResults");
   const [sidebarOpen, setSidebar] = useState(false);
   const [showTokensModal, setShowTokensModal] = useState(false);
@@ -69,7 +70,8 @@ export default function StudentCabinet() {
   if (!teacher) return null;
 
   if (!teacher.subscriptionActive) return <SubscriptionGate />;
-  if (!yadiskConnected) return <YadiskRequiredGate />;
+  if (!storageMode) return <StorageModeGate />;
+  if (storageMode === "yadisk" && !yadiskConnected) return <YadiskRequiredGate />;
 
   const ActiveSection = SECTION_COMPONENTS[active] || ChatSection;
   const navigate = (s: Section) => { setActive(s); setSidebar(false); };

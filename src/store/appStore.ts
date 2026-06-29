@@ -33,6 +33,24 @@ function clearSession() {
   try { localStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
 }
 
+// ── Способ хранения документов (Я.Диск / устройство) ────────────────────────
+// Хранится отдельно для каждого пользователя (по логину), чтобы выбор сохранялся.
+export type StorageMode = "yadisk" | "device";
+const STORAGE_MODE_PREFIX = "aousp_storage_mode_";
+
+function loadStorageMode(login: string): StorageMode | null {
+  if (!login) return null;
+  try {
+    const v = localStorage.getItem(STORAGE_MODE_PREFIX + login);
+    return v === "yadisk" || v === "device" ? v : null;
+  } catch { return null; }
+}
+
+function saveStorageMode(login: string, mode: StorageMode) {
+  if (!login) return;
+  try { localStorage.setItem(STORAGE_MODE_PREFIX + login, mode); } catch { /* ignore */ }
+}
+
 function loadSession(): Teacher | null {
   try {
     const raw = localStorage.getItem(SESSION_KEY);
@@ -249,6 +267,7 @@ export type AppState = {
   yadiskUser: YadiskUser | null;
   yadiskSyncing: boolean;
   yadiskLastSync: string | null;
+  storageMode: StorageMode | null;
   maintenanceSections: string[];
   hiddenSections: { teacher: string[]; student: string[] };
 };
@@ -269,6 +288,7 @@ let state: AppState = {
   yadiskUser: null,
   yadiskSyncing: false,
   yadiskLastSync: null,
+  storageMode: loadStorageMode(_restoredTeacher?.login || ""),
   maintenanceSections: [],
   hiddenSections: { teacher: [], student: [] },
 };
@@ -315,7 +335,7 @@ export const appStore = {
         aiTokensKopecks: (user as unknown as { ai_balance_kopecks?: number }).ai_balance_kopecks || 0,
       };
       saveSession(newTeacher);
-      state = { ...state, teacher: newTeacher };
+      state = { ...state, teacher: newTeacher, storageMode: loadStorageMode(newTeacher.login) };
       notify();
       if (user.role === "teacher" || user.role === "student") {
         // Сбрасываем Я.Диск-состояние от предыдущего пользователя (защита от смешения аккаунтов)
@@ -365,7 +385,7 @@ export const appStore = {
         aiTokensKopecks: 0,
       };
       saveSession(signupTeacher);
-      state = { ...state, teacher: signupTeacher };
+      state = { ...state, teacher: signupTeacher, storageMode: loadStorageMode(signupTeacher.login) };
       notify();
       return { ok: true, role: user.role, login: user.login };
     } catch (e) {
@@ -440,6 +460,7 @@ export const appStore = {
       yadiskUser: null,
       yadiskSyncing: false,
       yadiskLastSync: null,
+      storageMode: null,
       students: [],
       works: [],
       results: [],
@@ -448,6 +469,14 @@ export const appStore = {
       worksheets: [],
       synopses: [],
     };
+    notify();
+  },
+
+  /** Устанавливает способ хранения документов и запоминает выбор для пользователя. */
+  setStorageMode: (mode: StorageMode) => {
+    const login = state.teacher?.login || "";
+    saveStorageMode(login, mode);
+    state = { ...state, storageMode: mode };
     notify();
   },
 

@@ -15,7 +15,7 @@ import { PresentationsFormFields } from "./PresentationsFormFields";
 import { PresentationsProgress } from "./PresentationsProgress";
 
 export function PresentationsForm() {
-  const { teacher, yadiskConnected } = useAppStore();
+  const { teacher, yadiskConnected, storageMode } = useAppStore();
 
   const [topic, setTopic]             = usePersistedState("presentations:topic", "");
   const [description, setDescription] = usePersistedState("presentations:description", "");
@@ -91,7 +91,7 @@ export function PresentationsForm() {
       let yadiskPath: string | null = null;
       let uploadedToYadisk = false;
 
-      if (yadiskConnected && teacher.yadiskToken) {
+      if (storageMode === "yadisk" && yadiskConnected && teacher.yadiskToken) {
         try {
           setStage("Загружаем на Яндекс.Диск…");
           await yadisk.ensureFolder(teacher.yadiskToken, PRESENTATIONS_FOLDER);
@@ -160,7 +160,7 @@ export function PresentationsForm() {
 
       let yadiskPath: string | null = null;
       let uploadedToYadisk = false;
-      if (yadiskConnected && teacher.yadiskToken) {
+      if (storageMode === "yadisk" && yadiskConnected && teacher.yadiskToken) {
         try {
           await yadisk.ensureFolder(teacher.yadiskToken, PRESENTATIONS_FOLDER);
           const date = new Date().toISOString().slice(0, 10);

@@ -124,6 +124,7 @@ export function WorksheetsForm() {
         uploadedToYadisk,
         createdAt: new Date().toISOString(),
         intro: result.intro,
+        conclusion: result.conclusion,
         tasks: result.tasks,
       };
       appStore.addWorksheet(item);

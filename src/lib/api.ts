@@ -1057,6 +1057,7 @@ export interface WorksheetResponse {
   imagesAdded: number;
   tasks: WorksheetTaskApi[];
   intro: string;
+  conclusion?: string;
   spent_rub?: number;
   balance_rub?: number;
 }

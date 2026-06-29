@@ -161,6 +161,12 @@ export function WorksheetCard({ item }: { item: WorksheetItem }) {
               </div>
             ))}
           </div>
+          {item.conclusion && (
+            <div className="px-3 py-2 border-t border-border" style={{ background: "#1B4F9C08" }}>
+              <p className="text-[10px] font-bold mb-0.5" style={{ color: "#1B4F9C" }}>Вывод</p>
+              <p className="text-xs text-muted-foreground italic">{item.conclusion}</p>
+            </div>
+          )}
         </div>
       )}
     </div>

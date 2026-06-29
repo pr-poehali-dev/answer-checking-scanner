@@ -232,6 +232,7 @@ export interface WorksheetItem {
   uploadedToYadisk: boolean;
   createdAt: string;
   intro: string;
+  conclusion?: string;
   tasks: WorksheetTask[];
 }
 

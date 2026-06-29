@@ -78,8 +78,8 @@ export function ChatSection() {
             <Icon name="Sparkles" size={18} className="text-white" />
           </div>
           <div>
-            <h2 className="font-semibold text-gray-900 text-sm">GigaChat</h2>
-            <p className="text-xs text-gray-400">Сбер ИИ · отвечает на любые вопросы</p>
+            <h2 className="font-semibold text-gray-900 text-sm">Нэм-Чат</h2>
+            <p className="text-xs text-gray-400">ИИ · отвечает на любые вопросы</p>
           </div>
         </div>
         {messages.length > 0 && (
@@ -198,7 +198,7 @@ export function ChatSection() {
             <Icon name="Send" size={14} className="text-white" />
           </button>
         </div>
-        <p className="text-center text-[10px] text-gray-300 mt-1.5">GigaChat · Сбер · бесплатно</p>
+        <p className="text-center text-[10px] text-gray-300 mt-1.5">Нэм-Чат · бесплатно</p>
       </div>
     </div>
   );

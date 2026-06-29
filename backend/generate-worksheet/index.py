@@ -433,6 +433,24 @@ def _no_space(p):
     p.paragraph_format.space_after = Pt(0)
 
 
+def _add_answer_line(doc, color_hex: str = "AAB2BD"):
+    """Добавляет ровную линию для записи ответа — нижняя граница пустого абзаца.
+    Линия всегда на всю ширину текста, не переносится и не рвётся."""
+    p = doc.add_paragraph()
+    p.paragraph_format.space_before = Pt(0)
+    p.paragraph_format.space_after = Pt(10)
+    p_pr = p._p.get_or_add_pPr()
+    p_bdr = OxmlElement("w:pBdr")
+    bottom = OxmlElement("w:bottom")
+    bottom.set(qn("w:val"), "single")
+    bottom.set(qn("w:sz"), "6")
+    bottom.set(qn("w:space"), "1")
+    bottom.set(qn("w:color"), color_hex)
+    p_bdr.append(bottom)
+    p_pr.append(p_bdr)
+    return p
+
+
 def _add_data_table(doc, tbl: dict):
     """Рисует таблицу-приложение с данными: тёмная шапка + строки данных."""
     headers = tbl["headers"]
@@ -596,9 +614,7 @@ def build_docx(content: dict, subject: str, class_num: int, topic: str,
 
         # Линии для ответа
         for _ in range(t.get("answer_lines", 0)):
-            lp = doc.add_paragraph("_" * 92)
-            _no_space(lp)
-            lp.paragraph_format.space_after = Pt(2)
+            _add_answer_line(doc)
 
     # ── Итоговый блок «Вывод» ──
     concl_head = doc.add_paragraph()
@@ -619,9 +635,7 @@ def build_docx(content: dict, subject: str, class_num: int, topic: str,
         rcp.font.color.rgb = RGBColor(0x44, 0x55, 0x66)
 
     for _ in range(3):
-        lp = doc.add_paragraph("_" * 92)
-        _no_space(lp)
-        lp.paragraph_format.space_after = Pt(2)
+        _add_answer_line(doc)
 
     # ── Подвал: подпись учителя (если указана) ──
     if teacher_name:

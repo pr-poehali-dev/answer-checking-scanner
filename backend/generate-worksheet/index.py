@@ -266,7 +266,7 @@ def generate_worksheet_content(subject: str, class_num: int, topic: str,
         "- В \"content\" клади текст-источник, набор фактов, условие или ряд данных для анализа. "
         "В нём не должно быть прямого ответа на вопрос. Иначе оставь пустым.\n"
         "- Приложение и вопрос взаимосвязаны: вопрос задаётся по приложенным данным, но требует размышления.\n"
-        "- answer_lines — сколько пустых линий оставить для развёрнутого ответа (2-6, для устных 0)\n"
+        "- answer_lines — сколько пустых линий оставить для развёрнутого ответа (минимум 5, до 10)\n"
         "- conclusion — обязательный итоговый блок: ученик по нему сам формулирует вывод практической работы.\n"
         "- Задания идут логически: от наблюдения и анализа к обобщению и выводу.\n"
         + img_rule +
@@ -293,16 +293,16 @@ def generate_worksheet_content(subject: str, class_num: int, topic: str,
         if not instr:
             continue
         try:
-            lines = int(t.get("answer_lines", 3))
+            lines = int(t.get("answer_lines", 5))
         except (TypeError, ValueError):
-            lines = 3
+            lines = 5
         clean.append({
             "number": i,
             "type": (t.get("type") or "Задание").strip(),
             "instruction": instr,
             "content": (t.get("content") or "").strip(),
             "table": _clean_table(t.get("table")),
-            "answer_lines": max(0, min(lines, 8)),
+            "answer_lines": max(5, min(lines, 10)),
             "image_query": (t.get("image_query") or "").strip() if with_images else "",
         })
     if not clean:

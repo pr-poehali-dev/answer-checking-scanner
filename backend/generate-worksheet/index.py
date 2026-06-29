@@ -26,7 +26,7 @@ AUTH_URL = os.environ.get("AUTH_FUNCTION_URL", "https://functions.poehali.dev/b0
 
 from docx import Document
 from docx.shared import Pt, Cm, RGBColor, Mm, Emu
-from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT, WD_TAB_LEADER
 from docx.enum.section import WD_SECTION
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
@@ -433,26 +433,25 @@ def _no_space(p):
     p.paragraph_format.space_after = Pt(0)
 
 
-def _add_answer_line(doc, color_hex: str = "AAB2BD"):
-    """Добавляет ровную линию для записи ответа — нижняя граница абзаца с реальной
-    высотой строки. Каждая линия отдельная, есть место писать, линии не сливаются."""
-    p = doc.add_paragraph()
-    # Неразрывный пробел даёт абзацу реальную высоту строки (иначе Word схлопывает пустые)
-    run = p.add_run("\u00A0")
-    run.font.size = Pt(12)
-    p.paragraph_format.space_before = Pt(0)
-    p.paragraph_format.space_after = Pt(6)
-    p.paragraph_format.line_spacing = Pt(20)
-    p_pr = p._p.get_or_add_pPr()
-    p_bdr = OxmlElement("w:pBdr")
-    bottom = OxmlElement("w:bottom")
-    bottom.set(qn("w:val"), "single")
-    bottom.set(qn("w:sz"), "6")
-    bottom.set(qn("w:space"), "1")
-    bottom.set(qn("w:color"), color_hex)
-    p_bdr.append(bottom)
-    p_pr.append(p_bdr)
-    return p
+def _add_answer_line(doc, color_hex: str = "AAB2BD", count: int = 1):
+    """Добавляет `count` отдельных строк для записи ответа.
+    Каждая строка — отдельный абзац с табуляцией-заполнителем подчёркиванием
+    до правого поля. Линии всегда видны, ровные, не сливаются между собой."""
+    # Ширина текста = ширина страницы минус поля
+    section = doc.sections[0]
+    text_width = section.page_width - section.left_margin - section.right_margin
+    for _ in range(max(1, count)):
+        p = doc.add_paragraph()
+        pf = p.paragraph_format
+        pf.space_before = Pt(0)
+        pf.space_after = Pt(10)
+        # Таб-стоп у правого поля с заполнением подчёркиванием
+        tab_stops = pf.tab_stops
+        tab_stops.add_tab_stop(text_width, WD_TAB_ALIGNMENT.RIGHT, WD_TAB_LEADER.UNDERSCORE)
+        run = p.add_run("\t")
+        run.font.size = Pt(12)
+        run.font.color.rgb = RGBColor.from_string(color_hex)
+    return None
 
 
 def _add_data_table(doc, tbl: dict):
@@ -616,9 +615,8 @@ def build_docx(content: dict, subject: str, class_num: int, topic: str,
             except Exception:
                 pass
 
-        # Линии для ответа
-        for _ in range(t.get("answer_lines", 0)):
-            _add_answer_line(doc)
+        # Линии для ответа (минимум 5 на задание)
+        _add_answer_line(doc, count=max(5, int(t.get("answer_lines", 5))))
 
     # ── Итоговый блок «Вывод» ──
     concl_head = doc.add_paragraph()
@@ -638,8 +636,7 @@ def build_docx(content: dict, subject: str, class_num: int, topic: str,
         rcp.font.size = Pt(11)
         rcp.font.color.rgb = RGBColor(0x44, 0x55, 0x66)
 
-    for _ in range(3):
-        _add_answer_line(doc)
+    _add_answer_line(doc, count=3)
 
     # ── Подвал: подпись учителя (если указана) ──
     if teacher_name:

@@ -26,7 +26,7 @@ AUTH_URL = os.environ.get("AUTH_FUNCTION_URL", "https://functions.poehali.dev/b0
 
 from docx import Document
 from docx.shared import Pt, Cm, RGBColor, Mm, Emu
-from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT, WD_TAB_LEADER
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.section import WD_SECTION
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
@@ -435,19 +435,26 @@ def _no_space(p):
 
 def _add_answer_line(doc, color_hex: str = "AAB2BD", count: int = 1):
     """Добавляет `count` отдельных строк для записи ответа.
-    Каждая строка — отдельный абзац с табуляцией-заполнителем подчёркиванием
-    до правого поля. Линии всегда видны, ровные, не сливаются между собой."""
-    # Ширина текста = ширина страницы минус поля
+    Каждая строка — отдельный абзац с табом до правого поля и заполнителем
+    подчёркиванием (XML-лидер underscore). Линии всегда видны и не сливаются."""
+    # Ширина текста (в twips) = ширина страницы минус поля
     section = doc.sections[0]
     text_width = section.page_width - section.left_margin - section.right_margin
+    tab_pos_twips = int(text_width / 635)  # 1 twip = 635 EMU
     for _ in range(max(1, count)):
         p = doc.add_paragraph()
         pf = p.paragraph_format
         pf.space_before = Pt(0)
         pf.space_after = Pt(10)
-        # Таб-стоп у правого поля с заполнением подчёркиванием
-        tab_stops = pf.tab_stops
-        tab_stops.add_tab_stop(text_width, WD_TAB_ALIGNMENT.RIGHT, WD_TAB_LEADER.UNDERSCORES)
+        # Таб-стоп у правого поля с заполнением подчёркиванием — задаём напрямую в XML
+        p_pr = p._p.get_or_add_pPr()
+        tabs = OxmlElement("w:tabs")
+        tab = OxmlElement("w:tab")
+        tab.set(qn("w:val"), "right")
+        tab.set(qn("w:leader"), "underscore")
+        tab.set(qn("w:pos"), str(tab_pos_twips))
+        tabs.append(tab)
+        p_pr.append(tabs)
         run = p.add_run("\t")
         run.font.size = Pt(12)
         run.font.color.rgb = RGBColor.from_string(color_hex)

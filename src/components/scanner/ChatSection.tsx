@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import Icon from "@/components/ui/icon";
+import { usePersistedState } from "@/hooks/usePersistedState";
 
 interface Message {
   role: "user" | "assistant";
@@ -16,8 +17,8 @@ const SUGGESTED = [
 ];
 
 export function ChatSection() {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState("");
+  const [messages, setMessages] = usePersistedState<Message[]>("chat:messages", []);
+  const [input, setInput] = usePersistedState("chat:input", "");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);

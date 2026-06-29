@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import Icon from "@/components/ui/icon";
+import { usePersistedState } from "@/hooks/usePersistedState";
 import { appStore, useAppStore } from "@/store/appStore";
 import { examApi, type ExamResponse } from "@/lib/api";
 import { downloadDocx } from "./TestsForm";
@@ -36,8 +37,8 @@ interface HistoryItem {
 export function ExamsSection() {
   const { teacher, yadiskConnected } = useAppStore();
 
-  const [examType, setExamType] = useState<ExamType>("ОГЭ");
-  const [subject, setSubject] = useState("");
+  const [examType, setExamType] = usePersistedState<ExamType>("exams:examType", "ОГЭ");
+  const [subject, setSubject] = usePersistedState("exams:subject", "");
   const [subjects, setSubjects] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [stage, setStage] = useState("");
@@ -56,16 +57,20 @@ export function ExamsSection() {
   // Загружаем список предметов при смене типа экзамена
   useEffect(() => {
     const fallback = examType === "ОГЭ" ? OGE_SUBJECTS_FALLBACK : EGE_SUBJECTS_FALLBACK;
+    // Сохраняем выбранный предмет, если он есть в новом списке (восстановление черновика)
+    const keepIfValid = (list: string[]) =>
+      setSubject(prev => (prev && list.includes(prev) ? prev : list[0]));
     setSubjects(fallback);
-    setSubject(fallback[0]);
+    keepIfValid(fallback);
     examApi.getSubjects(examType)
       .then(list => {
         if (list.length) {
           setSubjects(list);
-          setSubject(list[0]);
+          keepIfValid(list);
         }
       })
       .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [examType]);
 
   const saveHistory = (items: HistoryItem[]) => {

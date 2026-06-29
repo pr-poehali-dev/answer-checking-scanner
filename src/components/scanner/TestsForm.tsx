@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Icon from "@/components/ui/icon";
+import { usePersistedState, clearPersistedState } from "@/hooks/usePersistedState";
 import { appStore, useAppStore, type GeneratedTestItem, type Work } from "@/store/appStore";
 import { testApi, type WorkTypeName } from "@/lib/api";
 import { yadisk, ROOT_FOLDER } from "@/lib/yadisk";
@@ -35,30 +36,37 @@ export function downloadDocx(b64: string, filename: string) {
 export function TestsForm() {
   const { teacher, yadiskConnected } = useAppStore();
 
-  // Предзаполнение из конспекта (если пришли из раздела «Конспекты»)
-  const synTopic = sessionStorage.getItem("synopsis_test_topic") || "";
-  const synSubject = sessionStorage.getItem("synopsis_test_subject") || "";
-  const synClass = Number(sessionStorage.getItem("synopsis_test_class") || "0");
-  const synDesc = sessionStorage.getItem("synopsis_test_description") || "";
-  if (synTopic) {
-    sessionStorage.removeItem("synopsis_test_topic");
-    sessionStorage.removeItem("synopsis_test_subject");
-    sessionStorage.removeItem("synopsis_test_class");
-    sessionStorage.removeItem("synopsis_test_description");
-  }
-
-  const [workType, setWorkType] = useState<WorkTypeName>("Тест");
-  const [subject, setSubject] = useState<string>(synSubject || SUBJECTS[0]);
-  const [classNum, setClassNum] = useState(synClass || 7);
-  const [classLetter, setClassLetter] = useState("А");
-  const [topic, setTopic] = useState(synTopic);
-  const [description, setDescription] = useState(synDesc);
-  const [part1Count, setPart1Count] = useState(10);
-  const [part2Count, setPart2Count] = useState(2);
+  const [workType, setWorkType] = usePersistedState<WorkTypeName>("tests:workType", "Тест");
+  const [subject, setSubject] = usePersistedState<string>("tests:subject", SUBJECTS[0]);
+  const [classNum, setClassNum] = usePersistedState("tests:classNum", 7);
+  const [classLetter, setClassLetter] = usePersistedState("tests:classLetter", "А");
+  const [topic, setTopic] = usePersistedState("tests:topic", "");
+  const [description, setDescription] = usePersistedState("tests:description", "");
+  const [part1Count, setPart1Count] = usePersistedState("tests:part1Count", 10);
+  const [part2Count, setPart2Count] = usePersistedState("tests:part2Count", 2);
   const [busy, setBusy] = useState(false);
   const [stage, setStage] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  // Предзаполнение из конспекта (если пришли из раздела «Конспекты») — имеет приоритет над черновиком
+  useEffect(() => {
+    const synTopic = sessionStorage.getItem("synopsis_test_topic") || "";
+    const synSubject = sessionStorage.getItem("synopsis_test_subject") || "";
+    const synClass = Number(sessionStorage.getItem("synopsis_test_class") || "0");
+    const synDesc = sessionStorage.getItem("synopsis_test_description") || "";
+    if (synTopic) {
+      setTopic(synTopic);
+      if (synSubject) setSubject(synSubject);
+      if (synClass) setClassNum(synClass);
+      setDescription(synDesc);
+      sessionStorage.removeItem("synopsis_test_topic");
+      sessionStorage.removeItem("synopsis_test_subject");
+      sessionStorage.removeItem("synopsis_test_class");
+      sessionStorage.removeItem("synopsis_test_description");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const generate = async () => {
     if (!topic.trim()) { setError("Укажите тему"); return; }

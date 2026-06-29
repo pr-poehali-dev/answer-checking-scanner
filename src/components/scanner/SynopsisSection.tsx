@@ -1,5 +1,6 @@
 import { useState, useRef } from "react";
 import Icon from "@/components/ui/icon";
+import { usePersistedState } from "@/hooks/usePersistedState";
 import { appStore, useAppStore, type SynopsisItem } from "@/store/appStore";
 import { synopsisApi } from "@/lib/api";
 import { SUBJECTS } from "./types";
@@ -17,10 +18,10 @@ const STAGE_MESSAGES = [
 export function SynopsisSection() {
   const { teacher, synopses } = useAppStore();
 
-  const [subject, setSubject] = useState(SUBJECTS[0]);
-  const [classNum, setClassNum] = useState(9);
-  const [topic, setTopic] = useState("");
-  const [description, setDescription] = useState("");
+  const [subject, setSubject] = usePersistedState("synopsis:subject", SUBJECTS[0]);
+  const [classNum, setClassNum] = usePersistedState("synopsis:classNum", 9);
+  const [topic, setTopic] = usePersistedState("synopsis:topic", "");
+  const [description, setDescription] = usePersistedState("synopsis:description", "");
 
   const [busy, setBusy] = useState(false);
   const [stageIdx, setStageIdx] = useState(0);

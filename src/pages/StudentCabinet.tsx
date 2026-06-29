@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import Icon from "@/components/ui/icon";
+import { usePersistedState } from "@/hooks/usePersistedState";
 import { Section, STUDENT_NAV_ITEMS, SECTION_TITLES } from "@/components/scanner/types";
 import { StudentSettingsSection } from "@/components/scanner/StudentSettingsSection";
 import { StudentResultsSection } from "@/components/scanner/StudentResultsSection";
@@ -30,7 +31,7 @@ const SECTION_COMPONENTS: Partial<Record<Section, React.FC>> = {
 
 export default function StudentCabinet() {
   const { teacher, yadiskConnected, hiddenSections } = useAppStore();
-  const [active, setActive] = useState<Section>("myResults");
+  const [active, setActive] = usePersistedState<Section>("student:active-section", "myResults");
   const [sidebarOpen, setSidebar] = useState(false);
   const [showTokensModal, setShowTokensModal] = useState(false);
 

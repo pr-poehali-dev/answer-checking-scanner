@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import Icon from "@/components/ui/icon";
+import { usePersistedState } from "@/hooks/usePersistedState";
 import { supportApi, type SupportTicket, type SupportMessage } from "@/lib/api";
 import { useAppStore } from "@/store/appStore";
 
@@ -36,10 +37,10 @@ export function SupportSection() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
 
-  // Форма нового обращения
-  const [section, setSection] = useState("other");
-  const [subject, setSubject] = useState("");
-  const [firstMsg, setFirstMsg] = useState("");
+  // Форма нового обращения (черновик сохраняется между разделами)
+  const [section, setSection] = usePersistedState("support:section", "other");
+  const [subject, setSubject] = usePersistedState("support:subject", "");
+  const [firstMsg, setFirstMsg] = usePersistedState("support:firstMsg", "");
 
   // Ввод сообщения в чате
   const [msgInput, setMsgInput] = useState("");

@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Icon from "@/components/ui/icon";
+import { usePersistedState } from "@/hooks/usePersistedState";
 import { appStore, useAppStore, type WorksheetItem } from "@/store/appStore";
 import { worksheetApi } from "@/lib/api";
 import { yadisk, ROOT_FOLDER } from "@/lib/yadisk";
@@ -50,28 +51,35 @@ async function getDocxBase64(result: { docx_url?: string; docx_b64?: string }): 
 export function WorksheetsForm() {
   const { teacher, yadiskConnected } = useAppStore();
 
-  // Предзаполнение из конспекта (если пришли из раздела «Конспекты»)
-  const synTopic = sessionStorage.getItem("synopsis_worksheet_topic") || "";
-  const synSubject = sessionStorage.getItem("synopsis_worksheet_subject") || "";
-  const synClass = Number(sessionStorage.getItem("synopsis_worksheet_class") || "0");
-  const synDesc = sessionStorage.getItem("synopsis_worksheet_description") || "";
-  if (synTopic) {
-    sessionStorage.removeItem("synopsis_worksheet_topic");
-    sessionStorage.removeItem("synopsis_worksheet_subject");
-    sessionStorage.removeItem("synopsis_worksheet_class");
-    sessionStorage.removeItem("synopsis_worksheet_description");
-  }
-
-  const [subject, setSubject] = useState<string>(synSubject || SUBJECTS[0]);
-  const [classNum, setClassNum] = useState(synClass || 7);
-  const [topic, setTopic] = useState(synTopic);
-  const [description, setDescription] = useState(synDesc);
-  const [tasksCount, setTasksCount] = useState(6);
-  const [withImages, setWithImages] = useState(true);
+  const [subject, setSubject] = usePersistedState<string>("worksheets:subject", SUBJECTS[0]);
+  const [classNum, setClassNum] = usePersistedState("worksheets:classNum", 7);
+  const [topic, setTopic] = usePersistedState("worksheets:topic", "");
+  const [description, setDescription] = usePersistedState("worksheets:description", "");
+  const [tasksCount, setTasksCount] = usePersistedState("worksheets:tasksCount", 6);
+  const [withImages, setWithImages] = usePersistedState("worksheets:withImages", true);
   const [busy, setBusy] = useState(false);
   const [stage, setStage] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  // Предзаполнение из конспекта (если пришли из раздела «Конспекты») — приоритет над черновиком
+  useEffect(() => {
+    const synTopic = sessionStorage.getItem("synopsis_worksheet_topic") || "";
+    const synSubject = sessionStorage.getItem("synopsis_worksheet_subject") || "";
+    const synClass = Number(sessionStorage.getItem("synopsis_worksheet_class") || "0");
+    const synDesc = sessionStorage.getItem("synopsis_worksheet_description") || "";
+    if (synTopic) {
+      setTopic(synTopic);
+      if (synSubject) setSubject(synSubject);
+      if (synClass) setClassNum(synClass);
+      setDescription(synDesc);
+      sessionStorage.removeItem("synopsis_worksheet_topic");
+      sessionStorage.removeItem("synopsis_worksheet_subject");
+      sessionStorage.removeItem("synopsis_worksheet_class");
+      sessionStorage.removeItem("synopsis_worksheet_description");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const generate = async () => {
     if (!topic.trim()) { setError("Укажите тему"); return; }

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import Icon from "@/components/ui/icon";
+import { usePersistedState, clearPersistedState } from "@/hooks/usePersistedState";
 import { appStore, useAppStore, Work, WorkType, GradeScale } from "@/store/appStore";
 import { WORK_TYPES, SUBJECTS } from "./types";
 import { BlankGenerator } from "./BlankGenerator";
@@ -38,19 +39,26 @@ interface WorkFormProps {
 }
 
 function WorkForm({ onSave, onCancel }: WorkFormProps) {
-  const [type, setType] = useState<WorkType>("Проверочная работа");
-  const [subject, setSubject] = useState("Русский язык");
-  const [classNum, setClassNum] = useState(9);
-  const [classLetter, setClassLetter] = useState("А");
+  const [type, setType] = usePersistedState<WorkType>("works:type", "Проверочная работа");
+  const [subject, setSubject] = usePersistedState("works:subject", "Русский язык");
+  const [classNum, setClassNum] = usePersistedState("works:classNum", 9);
+  const [classLetter, setClassLetter] = usePersistedState("works:classLetter", "А");
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
-  const [part1Count, setPart1Count] = useState(20);
-  const [part2Count, setPart2Count] = useState(5);
-  const [answerKey, setAnswerKey] = useState("");
-  const [scale, setScale] = useState<GradeScale>({ ...DEFAULT_SCALE });
+  const [part1Count, setPart1Count] = usePersistedState("works:part1Count", 20);
+  const [part2Count, setPart2Count] = usePersistedState("works:part2Count", 5);
+  const [answerKey, setAnswerKey] = usePersistedState("works:answerKey", "");
+  const [scale, setScale] = usePersistedState<GradeScale>("works:scale", { ...DEFAULT_SCALE });
   const id = appStore.generateWorkId();
   const total = part1Count + part2Count;
 
+  const clearDraft = () => {
+    ["works:type", "works:subject", "works:classNum", "works:classLetter",
+     "works:part1Count", "works:part2Count", "works:answerKey", "works:scale"]
+      .forEach(clearPersistedState);
+  };
+
   const handleSave = () => {
+    clearDraft();
     onSave({
       id,
       type,

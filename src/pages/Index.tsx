@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import Icon from "@/components/ui/icon";
+import { usePersistedState } from "@/hooks/usePersistedState";
 import { Section, NAV_ITEMS, SECTION_TITLES } from "@/components/scanner/types";
 import { UploadSection } from "@/components/scanner/SectionsA";
 import { ResultsSection, SettingsSection } from "@/components/scanner/SectionsB";
@@ -87,7 +88,7 @@ const MOBILE_NAV: { id: Section; label: string; icon: string }[] = [
 ];
 
 export default function Index() {
-  const [active, setActive]         = useState<Section>("works");
+  const [active, setActive]         = usePersistedState<Section>("teacher:active-section", "works");
   const [sidebarOpen, setSidebar]   = useState(false);
   const [authMode, setAuthMode]     = useState<"landing" | "login" | "signup" | "ou-login" | "ou-register">("landing");
   const [ouUser, setOuUser]         = useState<OUUser | null>(() => loadOUSession());

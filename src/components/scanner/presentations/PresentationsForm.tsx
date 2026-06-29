@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import Icon from "@/components/ui/icon";
+import { usePersistedState } from "@/hooks/usePersistedState";
 import { appStore, useAppStore, type PresentationItem } from "@/store/appStore";
 import { presentationApi } from "@/lib/api";
 import { yadisk, ROOT_FOLDER } from "@/lib/yadisk";
@@ -76,18 +77,11 @@ const STAGE_HINTS: [number, string][] = [
 export function PresentationsForm() {
   const { teacher, yadiskConnected } = useAppStore();
 
-  const synopsisTopic = sessionStorage.getItem("synopsis_topic") || "";
-  const synopsisDesc  = sessionStorage.getItem("synopsis_description") || "";
-  if (synopsisTopic) {
-    sessionStorage.removeItem("synopsis_topic");
-    sessionStorage.removeItem("synopsis_description");
-  }
-
-  const [topic, setTopic]             = useState(synopsisTopic);
-  const [description, setDescription] = useState(synopsisDesc);
-  const [audience, setAudience]       = useState(AUDIENCE_PRESETS[3]);
-  const [slidesCount, setSlidesCount] = useState(8);
-  const [customDesign, setCustomDesign] = useState(false);
+  const [topic, setTopic]             = usePersistedState("presentations:topic", "");
+  const [description, setDescription] = usePersistedState("presentations:description", "");
+  const [audience, setAudience]       = usePersistedState("presentations:audience", AUDIENCE_PRESETS[3]);
+  const [slidesCount, setSlidesCount] = usePersistedState("presentations:slidesCount", 8);
+  const [customDesign, setCustomDesign] = usePersistedState("presentations:customDesign", false);
   const [busy, setBusy]               = useState(false);
   const [stage, setStage]             = useState("");
   const [elapsed, setElapsed]         = useState(0);
@@ -102,6 +96,19 @@ export function PresentationsForm() {
 
   // Прогреваем GigaChat-токен при открытии вкладки — экономим 15-20 сек на генерации
   useEffect(() => { presentationApi.warmup(); }, []);
+
+  // Предзаполнение из конспекта (если пришли из раздела «Конспекты») — приоритет над черновиком
+  useEffect(() => {
+    const synopsisTopic = sessionStorage.getItem("synopsis_topic") || "";
+    const synopsisDesc = sessionStorage.getItem("synopsis_description") || "";
+    if (synopsisTopic) {
+      setTopic(synopsisTopic);
+      setDescription(synopsisDesc);
+      sessionStorage.removeItem("synopsis_topic");
+      sessionStorage.removeItem("synopsis_description");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (busy) {

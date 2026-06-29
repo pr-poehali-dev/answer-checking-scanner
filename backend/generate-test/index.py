@@ -1,5 +1,5 @@
 """
-Генерация контрольной/проверочной работы или теста через GigaChat в .docx.
+Генерация контрольной/проверочной работы или теста через ИИ-движок в .docx.
 POST / body: {
   workType: "Тест" | "Проверочная работа" | "Контрольная работа",
   subject, classNum, topic, description?,
@@ -75,13 +75,13 @@ def _resp(status: int, body: dict) -> dict:
     }
 
 
-# ─── YANDEXGPT API ────────────────────────────────────────────────────────────
+# ─── ИИ API ───────────────────────────────────────────────────────────────────
 
 YANDEX_GPT_URL = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
 
 
-def gigachat_chat(messages: list, max_tokens: int = 2400, temperature: float = 0.4,
-                  req_timeout: int = 60, max_retries: int = 3) -> tuple[str, int]:
+def ai_chat(messages: list, max_tokens: int = 2400, temperature: float = 0.4,
+            req_timeout: int = 60, max_retries: int = 3) -> tuple[str, int]:
     api_key = os.environ.get("YANDEXGPT_API_KEY", "").strip()
     folder_id = os.environ.get("YANDEXGPT_FOLDER_ID", "").strip()
     if not api_key or not folder_id:
@@ -113,25 +113,25 @@ def gigachat_chat(messages: list, max_tokens: int = 2400, temperature: float = 0
                 body = json.loads(r.read().decode())
             alternatives = (body.get("result") or {}).get("alternatives") or []
             if not alternatives:
-                raise RuntimeError(f"YandexGPT пустой ответ: {body}")
+                raise RuntimeError(f"ИИ API пустой ответ: {body}")
             text = alternatives[0].get("message", {}).get("text", "").strip()
             if not text:
-                raise RuntimeError("YandexGPT вернул пустой текст")
+                raise RuntimeError("ИИ API вернул пустой текст")
             usage = (body.get("result") or {}).get("usage") or {}
             tokens_used = int(usage.get("totalTokens") or usage.get("completionTokens") or 0)
             return text, tokens_used
         except urllib.error.HTTPError as e:
             err_text = e.read().decode(errors="ignore")[:300]
             if e.code in (401, 403):
-                raise RuntimeError(f"YandexGPT auth error {e.code}: {err_text}")
-            last_err = RuntimeError(f"YandexGPT HTTP {e.code}: {err_text}")
+                raise RuntimeError(f"ИИ API auth error {e.code}: {err_text}")
+            last_err = RuntimeError(f"ИИ API HTTP {e.code}: {err_text}")
             if attempt < max_retries:
                 time.sleep(2.0)
         except Exception as e:
-            last_err = RuntimeError(f"YandexGPT недоступен: {e}")
+            last_err = RuntimeError(f"ИИ API недоступен: {e}")
             if attempt < max_retries:
                 time.sleep(2.0)
-    raise last_err or RuntimeError("YandexGPT: не удалось получить ответ")
+    raise last_err or RuntimeError("ИИ API: не удалось получить ответ")
 
 
 def extract_json(text: str) -> dict:
@@ -181,7 +181,7 @@ def _generate_part1(work_type: str, subject: str, class_num: int, topic: str, de
         f"- Вопросы разнообразные, проверяющие понимание темы"
     )
     max_tok = min(180 * count + 500, 3200)
-    raw, _tok = gigachat_chat(
+    raw, _tok = ai_chat(
         [{"role": "system", "content": system}, {"role": "user", "content": user}],
         max_tokens=max_tok,
         temperature=0.5,
@@ -250,7 +250,7 @@ def _generate_part2(work_type: str, subject: str, class_num: int, topic: str, de
         f"РОВНО {count} элементов. Вопросы разнообразные."
     )
     max_tok = min(140 * count + 400, 3000)
-    raw, _tok = gigachat_chat(
+    raw, _tok = ai_chat(
         [{"role": "system", "content": system}, {"role": "user", "content": user}],
         max_tokens=max_tok,
         temperature=0.5,

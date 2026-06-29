@@ -17,6 +17,8 @@ import json
 import os
 import re
 import hashlib
+import hmac
+import secrets
 import psycopg2
 from datetime import datetime, timedelta
 
@@ -24,23 +26,140 @@ CORS = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, X-Authorization",
+    # Защитные заголовки: запрет встраивания, XSS-фильтр, скрытие сервера
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "X-XSS-Protection": "1; mode=block",
+    "Referrer-Policy": "no-referrer",
 }
 
 SCHEMA = os.environ.get("MAIN_DB_SCHEMA", "t_p31556921_answer_checking_scan")
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin2026")
+# Пароль администратора — только из переменной окружения, без дефолта
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
+
+# Секрет для подписи токенов — из переменной окружения
+TOKEN_SECRET = os.environ.get("TOKEN_SECRET", "")
+
+# Лимит неудачных попыток входа (rate-limit по логину)
+LOGIN_FAIL_LIMIT = 10
+LOGIN_FAIL_WINDOW_MIN = 15
 
 
 def get_conn():
     return psycopg2.connect(os.environ["DATABASE_URL"])
 
 
-def hash_password(password: str) -> str:
-    return hashlib.sha256(password.encode()).hexdigest()
+def _resp(status: int, body: dict) -> dict:
+    return {
+        "statusCode": status,
+        "headers": {**CORS, "Content-Type": "application/json"},
+        "body": json.dumps(body, ensure_ascii=False),
+        "isBase64Encoded": False,
+    }
+
+
+# ── Хеширование паролей (pbkdf2 + per-user salt) ─────────────────────────────
+# Формат хранения: "pbkdf2$<salt_hex>$<hash_hex>" — совместим с обновлением налету.
+# Старые sha256-хеши (без "$") продолжают работать до смены пароля пользователем.
+
+_PBKDF2_ITER = 260_000
+_PBKDF2_ALG = "sha256"
+
+
+def hash_password(password: str, salt_hex: str | None = None) -> str:
+    """Возвращает pbkdf2-хеш в формате 'pbkdf2$salt$hash'."""
+    if salt_hex is None:
+        salt_hex = secrets.token_hex(16)
+    dk = hashlib.pbkdf2_hmac(
+        _PBKDF2_ALG,
+        password.encode("utf-8"),
+        bytes.fromhex(salt_hex),
+        _PBKDF2_ITER,
+    )
+    return f"pbkdf2${salt_hex}${dk.hex()}"
+
+
+def verify_password(password: str, stored_hash: str) -> bool:
+    """Проверяет пароль против pbkdf2 или старого sha256 (для плавной миграции)."""
+    if not password or not stored_hash:
+        return False
+    if stored_hash.startswith("pbkdf2$"):
+        try:
+            _, salt_hex, expected = stored_hash.split("$")
+        except ValueError:
+            return False
+        new_hash = hash_password(password, salt_hex)
+        _, _, computed = new_hash.split("$")
+        return hmac.compare_digest(expected, computed)
+    # Обратная совместимость: sha256 без соли
+    return hmac.compare_digest(stored_hash, hashlib.sha256(password.encode()).hexdigest())
+
+
+def _make_token(role: str, login: str, password_hash_snippet: str) -> str:
+    """Генерирует сессионный токен: prefix:login:hmac(login+hash_snippet)."""
+    if not TOKEN_SECRET:
+        # Если секрет не задан — fallback на прежний формат (не меняем поведение)
+        return f"{role}:{hashlib.sha256((login + password_hash_snippet + 'salt').encode()).hexdigest()}"
+    sig = hmac.new(
+        TOKEN_SECRET.encode(),
+        f"{role}:{login}:{password_hash_snippet}".encode(),
+        "sha256",
+    ).hexdigest()
+    return f"{role}:{login}:{sig}"
+
+
+def _verify_token(token: str, expected_role: str, login: str, stored_hash: str) -> bool:
+    """Проверяет, что токен принадлежит пользователю с данным логином."""
+    if not token:
+        return False
+    if not TOKEN_SECRET:
+        # Старый формат — принимаем если role совпадает
+        return token.startswith(f"{expected_role}:")
+    expected = _make_token(expected_role, login, stored_hash)
+    return hmac.compare_digest(token, expected)
 
 
 def check_admin_token(headers: dict) -> bool:
+    """Проверяет, что заголовок X-Authorization содержит действительный admin-токен."""
     token = headers.get("x-authorization", "")
-    return token.startswith("admin:")
+    if not token.startswith("admin:"):
+        return False
+    if not ADMIN_PASSWORD:
+        return False
+    # Верифицируем HMAC-подпись admin-токена
+    expected = _make_token("admin", "admin", hashlib.sha256(ADMIN_PASSWORD.encode()).hexdigest())
+    return hmac.compare_digest(token, expected)
+
+
+# ── Rate-limit входа: считаем неудачи в БД ────────────────────────────────────
+
+def _check_rate_limit(cur, login_key: str) -> bool:
+    """Возвращает True если лимит превышен. login_key — логин или email."""
+    window_start = datetime.utcnow() - timedelta(minutes=LOGIN_FAIL_WINDOW_MIN)
+    cur.execute(
+        f"""SELECT COUNT(*) FROM {SCHEMA}.login_attempts
+            WHERE login_key = %s AND success = FALSE AND created_at > %s""",
+        (login_key[:128], window_start),
+    )
+    row = cur.fetchone()
+    return row and row[0] >= LOGIN_FAIL_LIMIT
+
+
+def _record_attempt(cur, login_key: str, success: bool):
+    """Записываем попытку входа."""
+    cur.execute(
+        f"""INSERT INTO {SCHEMA}.login_attempts (login_key, success, created_at)
+            VALUES (%s, %s, NOW())""",
+        (login_key[:128], success),
+    )
+
+
+def _clear_attempts(cur, login_key: str):
+    """Очищаем счётчик после успешного входа."""
+    cur.execute(
+        f"DELETE FROM {SCHEMA}.login_attempts WHERE login_key = %s",
+        (login_key[:128],),
+    )
 
 
 # ── Транслитерация для генерации логина ────────────────────────────────────
@@ -184,17 +303,18 @@ def handler(event: dict, context) -> dict:
 
         if not first_name or not last_name:
             return _resp(400, {"error": "Укажите имя и фамилию"})
+        if len(first_name) > 64 or len(last_name) > 64:
+            return _resp(400, {"error": "Слишком длинное имя или фамилия"})
         if not is_valid_email(email):
             return _resp(400, {"error": "Некорректный email"})
-        if len(password) < 6:
-            return _resp(400, {"error": "Пароль должен быть не менее 6 символов"})
+        if len(password) < 8:
+            return _resp(400, {"error": "Пароль должен быть не менее 8 символов"})
 
         full_name = f"{last_name} {first_name}"
 
         conn = get_conn()
         try:
             cur = conn.cursor()
-            # Проверка уникальности email
             cur.execute(
                 f"SELECT 1 FROM {SCHEMA}.users WHERE LOWER(email) = %s",
                 (email,)
@@ -203,31 +323,25 @@ def handler(event: dict, context) -> dict:
                 return _resp(409, {"error": "Этот email уже зарегистрирован"})
 
             login = generate_login(first_name, last_name, cur)
-            token = f"{role}:{hash_password(login + password + 'salt')}"
-            token_hash = hash_password(token)
+            pw_hash = hash_password(password)          # pbkdf2 + соль
+            token = _make_token(role, login, pw_hash)
+            token_hash = hashlib.sha256(token.encode()).hexdigest()
             cur.execute(
                 f"""INSERT INTO {SCHEMA}.users
-                    (login, password_hash, full_name, first_name, last_name, email, school, role, created_by, subscription_status, auth_token_hash, study_group)
+                    (login, password_hash, full_name, first_name, last_name, email, school, role,
+                     created_by, subscription_status, auth_token_hash, study_group)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'self', 'none', %s, %s) RETURNING id""",
-                (login, hash_password(password), full_name, first_name, last_name, email, school, role, token_hash, study_group or None)
+                (login, pw_hash, full_name, first_name, last_name, email, school, role,
+                 token_hash, study_group or None)
             )
             conn.commit()
             user_id = cur.fetchone()[0]
             return _resp(200, {
-                "success": True,
-                "id": user_id,
-                "login": login,
-                "role": role,
-                "full_name": full_name,
-                "first_name": first_name,
-                "last_name": last_name,
-                "email": email,
-                "school": school,
-                "study_group": study_group,
-                "token": token,
-                "subscription_status": "none",
-                "subscription_active": False,
-                "subscription_until": None,
+                "success": True, "id": user_id, "login": login, "role": role,
+                "full_name": full_name, "first_name": first_name, "last_name": last_name,
+                "email": email, "school": school, "study_group": study_group,
+                "token": token, "subscription_status": "none",
+                "subscription_active": False, "subscription_until": None,
             })
         except psycopg2.errors.UniqueViolation:
             conn.rollback()
@@ -242,24 +356,33 @@ def handler(event: dict, context) -> dict:
 
         if not login_or_email or not password:
             return _resp(400, {"error": "Введите логин/email и пароль"})
+        if len(login_or_email) > 256 or len(password) > 256:
+            return _resp(400, {"error": "Слишком длинные данные"})
 
-        # Админ
-        if login_or_email == "admin" and password == ADMIN_PASSWORD:
+        # Вход администратора — проверяем через HMAC, без прямого сравнения
+        if login_or_email == "admin":
+            if not ADMIN_PASSWORD:
+                return _resp(401, {"error": "Неверный логин или пароль"})
+            if not hmac.compare_digest(password, ADMIN_PASSWORD):
+                return _resp(401, {"error": "Неверный логин или пароль"})
+            admin_pw_hash = hashlib.sha256(ADMIN_PASSWORD.encode()).hexdigest()
+            admin_token = _make_token("admin", "admin", admin_pw_hash)
             return _resp(200, {
-                "role": "admin",
-                "login": "admin",
-                "full_name": "Администратор АОУСПТ",
-                "school": "АОУСПТ",
-                "token": f"admin:{hash_password(ADMIN_PASSWORD + 'salt_admin')}",
-                "subscription_status": "active",
-                "subscription_active": True,
+                "role": "admin", "login": "admin",
+                "full_name": "Администратор АОУСПТ", "school": "АОУСПТ",
+                "token": admin_token,
+                "subscription_status": "active", "subscription_active": True,
                 "subscription_until": None,
             })
 
         conn = get_conn()
         try:
             cur = conn.cursor()
-            # Поиск по логину или email
+
+            # Rate-limit: блокируем после LOGIN_FAIL_LIMIT неудачных попыток
+            if _check_rate_limit(cur, login_or_email):
+                return _resp(429, {"error": f"Слишком много попыток входа. Подождите {LOGIN_FAIL_WINDOW_MIN} минут."})
+
             cur.execute(
                 f"""SELECT login, password_hash, full_name, first_name, last_name, email, school, role, is_active,
                           subscription_status, subscription_until,
@@ -270,46 +393,57 @@ def handler(event: dict, context) -> dict:
                 (login_or_email, login_or_email)
             )
             row = cur.fetchone()
-            if not row or row[1] != hash_password(password):
+
+            # verify_password поддерживает pbkdf2 и старый sha256 (плавная миграция)
+            if not row or not verify_password(password, row[1]):
+                _record_attempt(cur, login_or_email, False)
+                conn.commit()
                 return _resp(401, {"error": "Неверный логин или пароль"})
 
-            (login, _ph, full_name, first_name, last_name, email, school, role, is_active,
+            (login, stored_ph, full_name, first_name, last_name, email, school, role, is_active,
              sub_status, sub_until, trial_until, trial_ai_calls_today, trial_ai_date, ai_balance_kopecks) = row
+
             if not is_active:
                 return _resp(403, {"error": "Аккаунт заблокирован. Обратитесь к администратору."})
 
-            sub = get_subscription_payload(sub_status, sub_until, trial_until, trial_ai_calls_today or 0, trial_ai_date)
+            # Если пароль хранился в старом sha256 — обновляем на pbkdf2 налету
+            new_ph = stored_ph
+            if not stored_ph.startswith("pbkdf2$"):
+                new_ph = hash_password(password)
+                cur.execute(
+                    f"UPDATE {SCHEMA}.users SET password_hash = %s WHERE login = %s",
+                    (new_ph, login)
+                )
 
-            # Тестер — всегда активен без подписки
+            _clear_attempts(cur, login_or_email)
+
+            sub = get_subscription_payload(sub_status, sub_until, trial_until, trial_ai_calls_today or 0, trial_ai_date)
             if role == "tester":
                 sub["subscription_active"] = True
                 sub["subscription_status"] = "active"
 
-            # Обновляем last_seen_at, статус подписки и сохраняем token_hash
             now_ts = datetime.utcnow()
             token_prefix = role if role in ("teacher", "student", "tester") else "teacher"
-            token = f"{token_prefix}:{hash_password(login + password + 'salt')}"
-            token_hash = hash_password(token)
-            if sub_status == 'active' and sub['subscription_status'] == 'expired':
+            token = _make_token(token_prefix, login, new_ph)
+            token_hash = hashlib.sha256(token.encode()).hexdigest()
+
+            update_fields = "last_seen_at = %s, auth_token_hash = %s, password_hash = %s"
+            update_vals = [now_ts, token_hash, new_ph, login]
+            if sub_status == "active" and sub["subscription_status"] == "expired":
                 cur.execute(
-                    f"UPDATE {SCHEMA}.users SET subscription_status = 'expired', last_seen_at = %s, auth_token_hash = %s WHERE login = %s",
-                    (now_ts, token_hash, login)
+                    f"UPDATE {SCHEMA}.users SET subscription_status = 'expired', {update_fields} WHERE login = %s",
+                    update_vals
                 )
             else:
                 cur.execute(
-                    f"UPDATE {SCHEMA}.users SET last_seen_at = %s, auth_token_hash = %s WHERE login = %s",
-                    (now_ts, token_hash, login)
+                    f"UPDATE {SCHEMA}.users SET {update_fields} WHERE login = %s",
+                    update_vals
                 )
             conn.commit()
             return _resp(200, {
-                "role": role,
-                "login": login,
-                "full_name": full_name,
-                "first_name": first_name,
-                "last_name": last_name,
-                "email": email,
-                "school": school,
-                "token": token,
+                "role": role, "login": login,
+                "full_name": full_name, "first_name": first_name, "last_name": last_name,
+                "email": email, "school": school, "token": token,
                 "ai_balance_kopecks": ai_balance_kopecks or 0,
                 "ai_balance_rub": round((ai_balance_kopecks or 0) / 100, 2),
                 **sub,
@@ -551,15 +685,15 @@ def handler(event: dict, context) -> dict:
         new_password = body.get("new_password", "").strip()
         if not login or not new_password:
             return _resp(400, {"error": "Укажите login и новый пароль"})
-        if len(new_password) < 6:
-            return _resp(400, {"error": "Пароль должен быть не менее 6 символов"})
+        if len(new_password) < 8:
+            return _resp(400, {"error": "Пароль должен быть не менее 8 символов"})
 
         conn = get_conn()
         try:
             cur = conn.cursor()
             cur.execute(
                 f"UPDATE {SCHEMA}.users SET password_hash = %s WHERE login = %s RETURNING id",
-                (hash_password(new_password), login)
+                (hash_password(new_password), login)   # pbkdf2
             )
             conn.commit()
             if not cur.fetchone():
@@ -682,11 +816,11 @@ def handler(event: dict, context) -> dict:
             if not row:
                 return _resp(404, {"error": "Пользователь не найден"})
 
-            # Если меняем пароль — проверяем текущий
+            # Если меняем пароль — проверяем текущий через безопасное сравнение
             if new_password:
                 if not current_password:
                     return _resp(400, {"error": "Для смены пароля укажите текущий пароль"})
-                if row[0] != hash_password(current_password):
+                if not verify_password(current_password, row[0]):
                     return _resp(403, {"error": "Текущий пароль неверен"})
 
             full_name = f"{last_name} {first_name}"
@@ -700,11 +834,12 @@ def handler(event: dict, context) -> dict:
                     return _resp(409, {"error": "Этот email уже используется другим пользователем"})
 
             if new_password:
+                new_pw_hash = hash_password(new_password)   # pbkdf2
                 cur.execute(
                     f"""UPDATE {SCHEMA}.users
                         SET first_name=%s, last_name=%s, full_name=%s, email=%s, school=%s, password_hash=%s
                         WHERE login=%s""",
-                    (first_name, last_name, full_name, email or None, school or None, hash_password(new_password), login)
+                    (first_name, last_name, full_name, email or None, school or None, new_pw_hash, login)
                 )
             else:
                 cur.execute(

@@ -1,5 +1,5 @@
 """
-Чат с ИИ через YandexGPT Pro API.
+Чат с ИИ через ИИ API.
 POST / — { messages: [{role, content}], system?: str }
 -> { reply: str }
 """
@@ -28,7 +28,7 @@ def _resp(status, body):
 
 def handler(event: dict, context) -> dict:
     """
-    Чат с YandexGPT. POST { messages: [{role, content}], system?: str } -> { reply: str }
+    Чат с ИИ API. POST { messages: [{role, content}], system?: str } -> { reply: str }
     """
     if event.get("httpMethod") == "OPTIONS":
         return {"statusCode": 200, "headers": CORS, "body": ""}
@@ -49,7 +49,7 @@ def handler(event: dict, context) -> dict:
     api_key = os.environ.get("YANDEXGPT_API_KEY", "").strip()
     folder_id = os.environ.get("YANDEXGPT_FOLDER_ID", "").strip()
     if not api_key or not folder_id:
-        return _resp(500, {"error": "YANDEXGPT_API_KEY или YANDEXGPT_FOLDER_ID не заданы"})
+        return _resp(500, {"error": "ИИ API: ключи доступа не заданы"})
 
     yandex_messages = [{"role": "system", "text": system_text}]
     for m in messages:
@@ -84,18 +84,18 @@ def handler(event: dict, context) -> dict:
                 data = json.loads(r.read().decode())
             alternatives = (data.get("result") or {}).get("alternatives") or []
             if not alternatives:
-                last_err = f"Пустой ответ YandexGPT"
+                last_err = f"ИИ API вернул пустой ответ"
                 continue
             reply = alternatives[0].get("message", {}).get("text", "").strip()
             if not reply:
-                last_err = "Пустой текст YandexGPT"
+                last_err = "ИИ API вернул пустой текст"
                 continue
             return _resp(200, {"reply": reply})
         except urllib.error.HTTPError as e:
             err_text = e.read().decode(errors="ignore")[:200]
             if e.code in (401, 403):
-                return _resp(502, {"error": f"YandexGPT auth error {e.code}"})
-            last_err = f"YandexGPT HTTP {e.code}: {err_text}"
+                return _resp(502, {"error": f"ИИ API auth error {e.code}"})
+            last_err = f"ИИ API HTTP {e.code}: {err_text}"
             if attempt < 3:
                 time.sleep(1.5)
         except Exception as e:

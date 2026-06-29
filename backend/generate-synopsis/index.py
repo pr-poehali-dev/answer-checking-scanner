@@ -1,5 +1,5 @@
 """
-Генерация конспекта урока через YandexGPT Pro → возвращает DOCX файл.
+Генерация конспекта урока через ИИ API → возвращает DOCX файл.
 POST / body: {subject, class_num, topic, description, teacher_name, teacher_school, login?}
 Возвращает: {docx_b64, filename, word_count, topic, subject, class_num}
 """
@@ -68,7 +68,7 @@ def spend_ai_tokens(login: str, amount: int, action_label: str = "Конспек
         return True, "", 0.0, 0.0
 
 
-# ─── YANDEXGPT API ────────────────────────────────────────────────────────────
+# ─── ИИ API ───────────────────────────────────────────────────────────────────
 
 YANDEX_GPT_URL = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
 
@@ -84,7 +84,7 @@ def yandex_chat(messages: list, max_tokens: int = 8000, temperature: float = 0.4
     yandex_messages = []
     for m in messages:
         role = m.get("role", "user")
-        # YandexGPT использует роли: system, user, assistant
+        # ИИ API использует роли: system, user, assistant
         yandex_messages.append({"role": role, "text": m.get("content", "")})
 
     payload = {
@@ -110,17 +110,17 @@ def yandex_chat(messages: list, max_tokens: int = 8000, temperature: float = 0.4
         body = json.loads(r.read().decode())
     alternatives = (body.get("result") or {}).get("alternatives") or []
     if not alternatives:
-        raise RuntimeError(f"YandexGPT пустой ответ: {body}")
+        raise RuntimeError(f"ИИ API пустой ответ: {body}")
     text = alternatives[0].get("message", {}).get("text", "").strip()
     if not text:
-        raise RuntimeError("YandexGPT вернул пустой текст")
+        raise RuntimeError("ИИ API вернул пустой текст")
     usage = (body.get("result") or {}).get("usage") or {}
     tokens_used = int(usage.get("totalTokens") or usage.get("completionTokens") or 0)
     return text, tokens_used
 
 
 # Псевдоним для совместимости
-def gigachat_chat(messages: list, max_tokens: int = 8000, req_timeout: int = 120) -> tuple[str, int]:
+def ai_chat(messages: list, max_tokens: int = 8000, req_timeout: int = 120) -> tuple[str, int]:
     return yandex_chat(messages, max_tokens=max_tokens, req_timeout=req_timeout)
 
 
@@ -157,7 +157,7 @@ def generate_synopsis_text(subject: str, class_num: int, topic: str, description
         "**5.6 Домашнее задание** — с указанием параграфов, базовый и творческий уровень\n\n"
         "Пиши развёрнуто. Минимальный объём — 2000 слов."
     )
-    return gigachat_chat(
+    return ai_chat(
         messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
         max_tokens=8000,
     )

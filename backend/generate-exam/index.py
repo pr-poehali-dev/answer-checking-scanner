@@ -77,7 +77,7 @@ def _resp(status: int, body: dict) -> dict:
     }
 
 
-# ─── YANDEXGPT API ────────────────────────────────────────────────────────────
+# ─── ИИ API ───────────────────────────────────────────────────────────────────
 
 YANDEX_GPT_URL = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
 
@@ -681,7 +681,7 @@ OGE_SUBJECTS = sorted(FIPИ_STRUCTURES["ОГЭ"].keys())
 EGE_SUBJECTS = sorted(FIPИ_STRUCTURES["ЕГЭ"].keys())
 
 
-def gigachat_chat(messages: list, max_tokens: int = 3000, req_timeout: int = 65) -> tuple[str, int]:
+def ai_chat(messages: list, max_tokens: int = 3000, req_timeout: int = 65) -> tuple[str, int]:
     api_key = os.environ.get("YANDEXGPT_API_KEY", "").strip()
     folder_id = os.environ.get("YANDEXGPT_FOLDER_ID", "").strip()
     if not api_key or not folder_id:
@@ -713,25 +713,25 @@ def gigachat_chat(messages: list, max_tokens: int = 3000, req_timeout: int = 65)
                 body = json.loads(r.read().decode())
             alternatives = (body.get("result") or {}).get("alternatives") or []
             if not alternatives:
-                raise RuntimeError(f"YandexGPT пустой ответ: {body}")
+                raise RuntimeError(f"ИИ API пустой ответ: {body}")
             text = alternatives[0].get("message", {}).get("text", "").strip()
             if not text:
-                raise RuntimeError("YandexGPT вернул пустой текст")
+                raise RuntimeError("ИИ API вернул пустой текст")
             usage = (body.get("result") or {}).get("usage") or {}
             tokens_used = int(usage.get("totalTokens") or usage.get("completionTokens") or 0)
             return text, tokens_used
         except urllib.error.HTTPError as e:
             err_text = e.read().decode(errors="ignore")[:300]
             if e.code in (401, 403):
-                raise RuntimeError(f"YandexGPT auth error {e.code}: {err_text}")
-            last_err = RuntimeError(f"YandexGPT HTTP {e.code}: {err_text}")
+                raise RuntimeError(f"ИИ API auth error {e.code}: {err_text}")
+            last_err = RuntimeError(f"ИИ API HTTP {e.code}: {err_text}")
             if attempt < 3:
                 time.sleep(2.0)
         except Exception as e:
-            last_err = RuntimeError(f"YandexGPT недоступен: {e}")
+            last_err = RuntimeError(f"ИИ API недоступен: {e}")
             if attempt < 3:
                 time.sleep(2.0)
-    raise last_err or RuntimeError("YandexGPT: не удалось получить ответ")
+    raise last_err or RuntimeError("ИИ API: не удалось получить ответ")
 
 
 # ─── ГЕНЕРАЦИЯ ЗАДАНИЙ ────────────────────────────────────────────────────────
@@ -812,7 +812,7 @@ def generate_task(task_def: dict, exam_type: str, subject: str) -> tuple[dict, i
         f"{format_prompt}"
     )
 
-    raw, tokens_used = gigachat_chat(
+    raw, tokens_used = ai_chat(
         [{"role": "system", "content": system}, {"role": "user", "content": user}],
         max_tokens=1200,
         req_timeout=65,

@@ -1,5 +1,5 @@
 """
-Генерация PPTX-презентации по теме урока через GigaChat. v2
+Генерация PPTX-презентации по теме урока через ИИ-движок. v2
 POST / body: {topic, description, slidesCount, audience?, teacherName, teacherSchool}
 Возвращает: {pptx_b64, filename, outline}.
 
@@ -7,10 +7,10 @@ POST / body: {topic, description, slidesCount, audience?, teacherName, teacherSc
 - Контент строго по ФГОС и программе Минпросвещения РФ
 - Фотографии по теме на каждом слайде (Wikimedia Commons / Unsplash)
 - Двухколоночный layout: текст слева, фото справа
-- Таймаут 320 секунд, мощная модель GigaChat-2
+- Таймаут 320 секунд, мощная модель ИИ-движка
 - Слайд "Содержание" после титульного
 
-GET /?action=ping — проверка доступности GigaChat
+GET /?action=ping — проверка доступности ИИ-движка
 """
 import json
 import os

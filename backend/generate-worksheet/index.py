@@ -434,11 +434,15 @@ def _no_space(p):
 
 
 def _add_answer_line(doc, color_hex: str = "AAB2BD"):
-    """Добавляет ровную линию для записи ответа — нижняя граница пустого абзаца.
-    Линия всегда на всю ширину текста, не переносится и не рвётся."""
+    """Добавляет ровную линию для записи ответа — нижняя граница абзаца с реальной
+    высотой строки. Каждая линия отдельная, есть место писать, линии не сливаются."""
     p = doc.add_paragraph()
+    # Неразрывный пробел даёт абзацу реальную высоту строки (иначе Word схлопывает пустые)
+    run = p.add_run("\u00A0")
+    run.font.size = Pt(12)
     p.paragraph_format.space_before = Pt(0)
-    p.paragraph_format.space_after = Pt(10)
+    p.paragraph_format.space_after = Pt(6)
+    p.paragraph_format.line_spacing = Pt(20)
     p_pr = p._p.get_or_add_pPr()
     p_bdr = OxmlElement("w:pBdr")
     bottom = OxmlElement("w:bottom")

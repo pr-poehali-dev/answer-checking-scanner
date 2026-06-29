@@ -158,7 +158,7 @@ export function WorksheetsForm() {
         </div>
         <div>
           <p className="text-sm font-bold">Параметры рабочего листа</p>
-          <p className="text-[10px] text-muted-foreground">Укажите тему и класс — ИИ подберёт материал и оформит фирменный бланк</p>
+          <p className="text-[10px] text-muted-foreground">Укажите тему и класс — ИИ составит выполнимые задания с нужными данными</p>
         </div>
       </div>
 
@@ -216,6 +216,32 @@ export function WorksheetsForm() {
           />
         </div>
 
+        {/* Что попадёт в лист */}
+        <div className="rounded-lg border border-border bg-muted/40 p-3">
+          <div className="flex items-center gap-1.5 mb-2">
+            <Icon name="Layers" size={13} className="text-primary" fallback="List" />
+            <p className="text-xs font-bold">Что войдёт в рабочий лист</p>
+          </div>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
+            {[
+              ["Table2", "Таблицы с данными"],
+              ["FileText", "Тексты-источники"],
+              ["Map", "Карты и схемы"],
+              ["Image", "Фотографии"],
+              ["PenLine", "Поля для ответов"],
+              ["CircleCheck", "Готов к печати"],
+            ].map(([icon, label]) => (
+              <div key={label} className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <Icon name={icon} size={12} className="text-primary/70 flex-shrink-0" fallback="Check" />
+                <span>{label}</span>
+              </div>
+            ))}
+          </div>
+          <p className="text-[10px] text-muted-foreground mt-2 leading-snug">
+            Данные прикладываются прямо к заданиям — ученик решает всё на листе, без других источников.
+          </p>
+        </div>
+
         {/* Кол-во заданий */}
         <div>
           <label className="text-xs font-semibold text-muted-foreground block mb-1.5">
@@ -251,7 +277,7 @@ export function WorksheetsForm() {
             <div className="min-w-0 flex-1">
               <p className={`text-sm font-bold ${withImages ? "text-primary" : "text-foreground"}`}>Иллюстрации, фото и карты</p>
               <p className="text-[11px] leading-snug text-muted-foreground">
-                ИИ добавит подходящие изображения к заданиям, где это полезно
+                ИИ приложит изображения к заданиям, где они нужны для выполнения
               </p>
             </div>
             <div className={`w-11 h-6 rounded-full flex-shrink-0 relative transition-all ${withImages ? "bg-primary" : "bg-muted"}`}>
@@ -284,7 +310,7 @@ export function WorksheetsForm() {
 
         {busy && (
           <p className="text-[10px] text-muted-foreground text-center">
-            Обычно занимает 20–60 секунд. Подбираем материал и оформляем бланк.
+            Обычно занимает 20–60 секунд. Подбираем материал и приложения к заданиям.
           </p>
         )}
       </div>

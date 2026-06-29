@@ -202,11 +202,17 @@ export interface GeneratedTestItem {
   };
 }
 
+export interface WorksheetTable {
+  headers: string[];
+  rows: string[][];
+}
+
 export interface WorksheetTask {
   number: number;
   type: string;
   instruction: string;
   content: string;
+  table?: WorksheetTable | null;
   answer_lines: number;
   image_query?: string;
 }

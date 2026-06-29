@@ -184,19 +184,47 @@ def extract_json(text: str) -> dict:
 
 # ─── ГЕНЕРАЦИЯ ЗАДАНИЙ ───────────────────────────────────────────────────────
 
+def _clean_table(tbl) -> dict | None:
+    """Нормализует таблицу-приложение: {headers: [...], rows: [[...], ...]}."""
+    if not isinstance(tbl, dict):
+        return None
+    headers = tbl.get("headers") or []
+    rows = tbl.get("rows") or []
+    if not isinstance(headers, list) or not isinstance(rows, list):
+        return None
+    headers = [str(h).strip() for h in headers][:8]
+    if not headers:
+        return None
+    clean_rows = []
+    for row in rows[:12]:
+        if not isinstance(row, list):
+            continue
+        cells = [str(c).strip() for c in row][:len(headers)]
+        while len(cells) < len(headers):
+            cells.append("")
+        clean_rows.append(cells)
+    if not clean_rows:
+        return None
+    return {"headers": headers, "rows": clean_rows}
+
+
 def generate_worksheet_content(subject: str, class_num: int, topic: str,
                                description: str, tasks_count: int, with_images: bool) -> tuple[dict, int]:
     system = (
         "Ты опытный учитель-методист РФ. Составляешь учебные рабочие листы строго по "
         "Федеральной образовательной программе и материалам, утверждённым Министерством "
         "просвещения Российской Федерации (ФГОС). Содержание точное, без ошибок, "
-        "соответствует возрасту и классу. Возвращай ТОЛЬКО валидный JSON без markdown."
+        "соответствует возрасту и классу. Главный принцип: каждое задание должно быть "
+        "ВЫПОЛНИМЫМ — если для решения нужны данные (числа, текст-источник, таблица, "
+        "карта, изображение), ты обязан приложить эти данные прямо в задании, чтобы ученик "
+        "мог выполнить его без посторонних источников. Возвращай ТОЛЬКО валидный JSON без markdown."
     )
     img_rule = (
-        '- Для заданий, где полезна иллюстрация (карта, схема, фото объекта, репродукция), '
-        'добавь поле "image_query" — короткий поисковый запрос на русском или английском для '
-        'поиска подходящей картинки (например "карта России", "клетка растения", "Пушкин портрет"). '
-        'Если иллюстрация не нужна — не добавляй это поле.\n'
+        '- Если для выполнения задания НУЖНА иллюстрация (карта с данными, схема, фото объекта, '
+        'репродукция, диаграмма) — добавь поле "image_query": короткий поисковый запрос на русском '
+        'или английском (например "политическая карта России", "строение клетки растения схема", '
+        '"портрет Пушкина"). Изображение должно быть напрямую связано с вопросом задания. '
+        'Если иллюстрация не требуется — не добавляй это поле.\n'
         if with_images else
         '- Поле "image_query" не добавляй.\n'
     )
@@ -207,26 +235,35 @@ def generate_worksheet_content(subject: str, class_num: int, topic: str,
         f"Описание/акцент: {description or '—'}\n\n"
         f"Составь учебный рабочий лист по теме строго по программе Минпросвещения РФ для {class_num} класса.\n"
         f"Нужно РОВНО {tasks_count} заданий разного типа (вопросы, задачи, заполнить пропуски, "
-        f"соотнести, проанализировать, кратко описать и т.п.).\n"
+        f"работа с таблицей данных, анализ текста-источника, работа с картой/изображением, "
+        f"соотнести, проанализировать и т.п.).\n"
         "Верни JSON строго в формате:\n"
         '{\n'
         '  "title": "Краткое название рабочего листа",\n'
         '  "intro": "1-2 предложения вводной информации/мотивации по теме",\n'
         '  "tasks": [\n'
         '    {"number": 1, "type": "Тип задания", "instruction": "Текст задания для ученика", '
-        '"content": "Дополнительный материал/текст/данные если нужно, иначе пустая строка", '
+        '"content": "Текст-источник или данные для выполнения, если нужны словами; иначе пустая строка", '
+        '"table": {"headers": ["Колонка 1", "Колонка 2"], "rows": [["знач", "знач"], ["знач", "знач"]]}, '
         '"answer_lines": 3, "image_query": "поисковый запрос для картинки (опционально)"}\n'
         '  ]\n'
         '}\n'
         "Требования:\n"
         f"- РОВНО {tasks_count} заданий в массиве tasks\n"
         "- instruction — понятная формулировка задания для ученика\n"
+        "- ВАЖНО: задание должно быть выполнимо. Если для ответа нужны данные — приложи их.\n"
+        "- Для заданий на анализ данных используй поле \"table\" с заголовками и строками "
+        "(реальные осмысленные данные по теме). Если таблица не нужна — не добавляй поле \"table\".\n"
+        "- В \"content\" клади текст-источник, набор фактов, условие задачи или ряд данных, "
+        "когда ученику нужно на что-то опираться. Иначе оставь пустым.\n"
+        "- Приложение (таблица, текст, изображение) и вопрос задания должны быть взаимосвязаны: "
+        "вопрос задаётся именно по приложенным данным.\n"
         "- answer_lines — сколько пустых линий оставить для ответа (1-6, для устных 0)\n"
         "- Задания разнообразные и проверяют понимание темы\n"
         + img_rule +
         "- Только достоверная информация по программе РФ"
     )
-    max_tok = min(220 * tasks_count + 900, 7000)
+    max_tok = min(300 * tasks_count + 1200, 8000)
     raw, tok = yandex_chat(
         [{"role": "system", "content": system}, {"role": "user", "content": user}],
         max_tokens=max_tok, temperature=0.45,
@@ -255,6 +292,7 @@ def generate_worksheet_content(subject: str, class_num: int, topic: str,
             "type": (t.get("type") or "Задание").strip(),
             "instruction": instr,
             "content": (t.get("content") or "").strip(),
+            "table": _clean_table(t.get("table")),
             "answer_lines": max(0, min(lines, 8)),
             "image_query": (t.get("image_query") or "").strip() if with_images else "",
         })
@@ -385,6 +423,36 @@ def _no_space(p):
     p.paragraph_format.space_after = Pt(0)
 
 
+def _add_data_table(doc, tbl: dict):
+    """Рисует таблицу-приложение с данными: тёмная шапка + строки данных."""
+    headers = tbl["headers"]
+    rows = tbl["rows"]
+    table = doc.add_table(rows=1 + len(rows), cols=len(headers))
+    table.style = "Table Grid"
+    table.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    hdr_cells = table.rows[0].cells
+    for j, h in enumerate(headers):
+        _set_cell_bg(hdr_cells[j], BRAND_ACCENT)
+        p = hdr_cells[j].paragraphs[0]
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = p.add_run(h)
+        run.bold = True
+        run.font.size = Pt(10.5)
+        run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
+
+    for i, row in enumerate(rows, start=1):
+        cells = table.rows[i].cells
+        if i % 2 == 0:
+            for c in cells:
+                _set_cell_bg(c, BRAND_LIGHT)
+        for j, val in enumerate(row):
+            p = cells[j].paragraphs[0]
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            run = p.add_run(val)
+            run.font.size = Pt(10.5)
+
+
 def build_docx(content: dict, subject: str, class_num: int, topic: str,
                teacher_name: str, teacher_school: str, images: dict) -> bytes:
     doc = Document()
@@ -400,22 +468,18 @@ def build_docx(content: dict, subject: str, class_num: int, topic: str,
     section.right_margin = Cm(1.5)
     _page_border(section, BRAND_ACCENT)
 
-    # ── Фирменная шапка САОУ (таблица-плашка) ──
-    head = doc.add_table(rows=1, cols=1)
-    head.autofit = True
-    hc = head.rows[0].cells[0]
-    _set_cell_bg(hc, BRAND_DARK)
-    hp = hc.paragraphs[0]
-    hp.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    r = hp.add_run("САОУ · СИСТЕМА АВТОМАТИЗИРОВАННОЙ ОЦЕНКИ УСПЕВАЕМОСТИ")
-    r.bold = True
-    r.font.size = Pt(11)
-    r.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
-    sub = hc.add_paragraph()
-    sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    rs = sub.add_run(teacher_school or "Учебное заведение")
-    rs.font.size = Pt(9)
-    rs.font.color.rgb = RGBColor(0x9F, 0xC8, 0xE8)
+    # ── Шапка: название учебного заведения (если указано) ──
+    if teacher_school:
+        head = doc.add_table(rows=1, cols=1)
+        head.autofit = True
+        hc = head.rows[0].cells[0]
+        _set_cell_bg(hc, BRAND_DARK)
+        hp = hc.paragraphs[0]
+        hp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        r = hp.add_run(teacher_school)
+        r.bold = True
+        r.font.size = Pt(11)
+        r.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
 
     # ── Заголовок «РАБОЧИЙ ЛИСТ» ──
     title = doc.add_paragraph()
@@ -486,14 +550,27 @@ def build_docx(content: dict, subject: str, class_num: int, topic: str,
         instr_p.paragraph_format.space_after = Pt(2)
         instr_p.add_run(t["instruction"]).font.size = Pt(12)
 
-        # Доп. материал
+        # Приложение: текст-источник / данные
         if t.get("content"):
+            src_label = doc.add_paragraph()
+            src_label.paragraph_format.space_before = Pt(2)
+            src_label.paragraph_format.space_after = Pt(0)
+            rl = src_label.add_run("Приложение к заданию:")
+            rl.bold = True
+            rl.font.size = Pt(10)
+            rl.font.color.rgb = RGBColor.from_string(BRAND_ACCENT)
+
             cont_p = doc.add_paragraph()
             cont_p.paragraph_format.left_indent = Cm(0.5)
-            cont_p.paragraph_format.space_after = Pt(2)
+            cont_p.paragraph_format.space_after = Pt(3)
             rc = cont_p.add_run(t["content"])
             rc.font.size = Pt(11)
             rc.italic = True
+
+        # Приложение: таблица данных
+        tbl = t.get("table")
+        if tbl and tbl.get("headers"):
+            _add_data_table(doc, tbl)
 
         # Иллюстрация
         img_bytes = images.get(t["number"])
@@ -513,13 +590,15 @@ def build_docx(content: dict, subject: str, class_num: int, topic: str,
             _no_space(lp)
             lp.paragraph_format.space_after = Pt(2)
 
-    # ── Подвал ──
-    footer = doc.add_paragraph()
-    footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    footer.paragraph_format.space_before = Pt(14)
-    rf = footer.add_run(f"Подготовлено в системе САОУ" + (f" · {teacher_name}" if teacher_name else ""))
-    rf.font.size = Pt(8)
-    rf.font.color.rgb = RGBColor(0x99, 0xA5, 0xB5)
+    # ── Подвал: подпись учителя (если указана) ──
+    if teacher_name:
+        footer = doc.add_paragraph()
+        footer.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        footer.paragraph_format.space_before = Pt(14)
+        rf = footer.add_run(f"Учитель: {teacher_name}")
+        rf.font.size = Pt(9)
+        rf.italic = True
+        rf.font.color.rgb = RGBColor(0x66, 0x77, 0x88)
 
     out = io.BytesIO()
     doc.save(out)

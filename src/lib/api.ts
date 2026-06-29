@@ -1038,6 +1038,7 @@ export interface WorksheetTaskApi {
   type: string;
   instruction: string;
   content: string;
+  table?: { headers: string[]; rows: string[][] } | null;
   answer_lines: number;
   image_query?: string;
 }

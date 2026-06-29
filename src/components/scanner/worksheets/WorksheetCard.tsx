@@ -139,7 +139,24 @@ export function WorksheetCard({ item }: { item: WorksheetItem }) {
                 </span>
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-semibold">{t.instruction}</p>
-                  {t.type && <p className="text-[10px] text-muted-foreground mt-0.5">{t.type}</p>}
+                  <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                    {t.type && <span className="text-[10px] text-muted-foreground">{t.type}</span>}
+                    {t.table && t.table.headers?.length > 0 && (
+                      <span className="inline-flex items-center gap-0.5 text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-primary/10 text-primary">
+                        <Icon name="Table2" size={9} fallback="Grid" /> Таблица
+                      </span>
+                    )}
+                    {t.content && (
+                      <span className="inline-flex items-center gap-0.5 text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-primary/10 text-primary">
+                        <Icon name="FileText" size={9} /> Данные
+                      </span>
+                    )}
+                    {t.image_query && (
+                      <span className="inline-flex items-center gap-0.5 text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-primary/10 text-primary">
+                        <Icon name="Image" size={9} fallback="ImagePlus" /> Иллюстрация
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
             ))}

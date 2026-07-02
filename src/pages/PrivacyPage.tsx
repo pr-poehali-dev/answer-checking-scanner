@@ -64,7 +64,7 @@ export default function PrivacyPage() {
               <li>Доступ к персональным данным имеют только уполномоченные сотрудники.</li>
               <li>Сайт применяет технические и организационные меры для защиты данных от несанкционированного доступа, уничтожения, изменения, блокирования, копирования и иных неправомерных действий.</li>
               <li>Пароли пользователей хранятся в зашифрованном (хешированном) формате. Восстановление пароля невозможно — предусмотрена только процедура сброса через электронную почту:{" "}
-                <a href="mailto:ooorassvet29@yandex.ru" className="underline hover:text-foreground">ooorassvet29@yandex.ru</a>.</li>
+                <a href="mailto:pres@ooo29.ru" className="underline hover:text-foreground">pres@ooo29.ru</a>.</li>
             </ul>
           </Section>
 
@@ -87,7 +87,7 @@ export default function PrivacyPage() {
               <li>Подать жалобу в уполномоченный орган по защите прав субъектов персональных данных</li>
             </ul>
             <p>Для реализации указанных прав обратитесь:{" "}
-              <a href="mailto:ooorassvet29@yandex.ru" className="underline hover:text-foreground">ooorassvet29@yandex.ru</a>.</p>
+              <a href="mailto:pres@ooo29.ru" className="underline hover:text-foreground">pres@ooo29.ru</a>.</p>
           </Section>
 
           <Section title="7. Сроки хранения данных">
@@ -100,7 +100,7 @@ export default function PrivacyPage() {
 
           <Section title="9. Контакты">
             <ul>
-              <li>E-mail: <a href="mailto:ooorassvet29@yandex.ru" className="underline hover:text-foreground">ooorassvet29@yandex.ru</a></li>
+              <li>E-mail: <a href="mailto:pres@ooo29.ru" className="underline hover:text-foreground">pres@ooo29.ru</a></li>
               <li>Почтовый адрес: 165133, Архангельская область, Вельский район, село Долматово, Партизанская ул., д. 40б</li>
             </ul>
           </Section>

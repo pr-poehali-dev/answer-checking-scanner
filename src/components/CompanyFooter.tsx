@@ -13,7 +13,7 @@ export const COMPANY_INFO = {
   ogrn: "1262900002947",
   phone: "+7 (995) 222-81-29",
   phoneLink: "+79952228129",
-  email: "ooorassvet29@yandex.ru",
+  email: "pres@ooo29.ru",
 };
 
 export default function CompanyFooter({

@@ -21,6 +21,13 @@ export interface SignResult {
   fingerprint: string;  // SHA-256 hex отпечаток сертификата
 }
 
+export interface RutokenDevice {
+  id: number;           // внутренний id устройства в плагине
+  label: string;        // метка/имя токена
+  model: string;        // модель (Rutoken ECP 3.0 и т.п.)
+  supportsGost: boolean;// эвристика поддержки ГОСТ по модели
+}
+
 const PEM_HEAD = "-----BEGIN CERTIFICATE REQUEST-----";
 const PEM_FOOT = "-----END CERTIFICATE REQUEST-----";
 
@@ -126,9 +133,34 @@ const rutoken = {
     return devices[0];
   },
 
-  async issue(subjectCN: string, pin: string): Promise<IssueResult> {
+  /** Список подключённых устройств Рутокен с человекочитаемыми метками. */
+  async listDevices(): Promise<RutokenDevice[]> {
     const plugin = await this.plugin();
-    const deviceId = await this.firstDevice(plugin);
+    const ids: number[] = await plugin.enumerateDevices();
+    if (!ids || ids.length === 0) return [];
+    const out: RutokenDevice[] = [];
+    for (const id of ids) {
+      let label = `Рутокен #${id}`;
+      let model = "";
+      try {
+        // Название модели токена (например «Rutoken ECP <3.0>»)
+        if (plugin.getDeviceInfo) {
+          const DI_LABEL = plugin.TOKEN_INFO_LABEL ?? 1;
+          const DI_MODEL = plugin.TOKEN_INFO_MODEL ?? 2;
+          const l = await plugin.getDeviceInfo(id, DI_LABEL).catch(() => "");
+          const m = await plugin.getDeviceInfo(id, DI_MODEL).catch(() => "");
+          if (l) label = String(l);
+          if (m) model = String(m);
+        }
+      } catch { /* метка необязательна */ }
+      out.push({ id, label, model, supportsGost: /ECP|ЭЦП|2\.0|3\.0/i.test(`${label} ${model}`) });
+    }
+    return out;
+  },
+
+  async issue(subjectCN: string, pin: string, deviceId?: number): Promise<IssueResult> {
+    const plugin = await this.plugin();
+    if (deviceId == null) deviceId = await this.firstDevice(plugin);
     await rtLogin(plugin, deviceId, pin);
     try {
       // Генерируем неизвлекаемую ключевую пару ГОСТ на самом токене.
@@ -187,9 +219,9 @@ const rutoken = {
     await plugin.importCertificate(deviceId, certB64, plugin.CERT_CATEGORY_USER ?? 1);
   },
 
-  async sign(nonce: string, pin: string): Promise<SignResult> {
+  async sign(nonce: string, pin: string, deviceId?: number): Promise<SignResult> {
     const plugin = await this.plugin();
-    const deviceId = await this.firstDevice(plugin);
+    if (deviceId == null) deviceId = await this.firstDevice(plugin);
     await rtLogin(plugin, deviceId, pin);
     const certs: string[] = await plugin.enumerateCertificates(deviceId, plugin.CERT_CATEGORY_USER ?? 1);
     if (!certs || certs.length === 0) throw new Error("На токене нет сертификата УДС");
@@ -281,14 +313,23 @@ const cryptopro = {
 
 // ── Унифицированный фасад ─────────────────────────────────────────────────────
 export const cryptoPlugins = {
-  async issue(type: ContainerType, subjectCN: string, pin?: string): Promise<IssueResult> {
-    return type === "rutoken" ? rutoken.issue(subjectCN, pin || "") : cryptopro.issue(subjectCN);
+  async issue(type: ContainerType, subjectCN: string, pin?: string, deviceId?: number): Promise<IssueResult> {
+    return type === "rutoken" ? rutoken.issue(subjectCN, pin || "", deviceId) : cryptopro.issue(subjectCN);
   },
   async install(type: ContainerType, ctx: unknown, certPem: string): Promise<void> {
     return type === "rutoken" ? rutoken.install(ctx, certPem) : cryptopro.install(ctx, certPem);
   },
-  async sign(type: ContainerType, nonce: string, pin?: string): Promise<SignResult> {
-    return type === "rutoken" ? rutoken.sign(nonce, pin || "") : cryptopro.sign(nonce);
+  async sign(type: ContainerType, nonce: string, pin?: string, deviceId?: number): Promise<SignResult> {
+    return type === "rutoken" ? rutoken.sign(nonce, pin || "", deviceId) : cryptopro.sign(nonce);
+  },
+
+  /** Список подключённых носителей Рутокен (для выбора конкретного токена). */
+  async listRutokenDevices(): Promise<RutokenDevice[]> {
+    try {
+      return await rutoken.listDevices();
+    } catch {
+      return [];
+    }
   },
 
   /** Проверяет, установлен ли и доступен плагин нужного типа. */

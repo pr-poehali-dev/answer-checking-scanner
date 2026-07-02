@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Icon from "@/components/ui/icon";
 import { udsApi, UdsCert } from "@/lib/api";
-import { cryptoPlugins, ContainerType } from "@/lib/cryptoPlugins";
+import { cryptoPlugins, ContainerType, RutokenDevice } from "@/lib/cryptoPlugins";
 
 type PluginState = "checking" | "ok" | "missing";
 
@@ -40,11 +40,23 @@ export default function UdsCertIssue({ login, token, cert, onDone, onLogout }: P
   const [cpState, setCpState] = useState<PluginState>("checking");
   const [rtReason, setRtReason] = useState("");
   const [cpReason, setCpReason] = useState("");
+  const [rtDevices, setRtDevices] = useState<RutokenDevice[]>([]);
+  const [rtDeviceId, setRtDeviceId] = useState<number | null>(null);
 
   const checkPlugins = useCallback(async () => {
     setRtState("checking"); setCpState("checking"); setRtReason(""); setCpReason("");
     const rt = await cryptoPlugins.diagnose("rutoken").catch((e) => ({ ok: false, reason: (e as Error).message }));
     setRtState(rt.ok ? "ok" : "missing"); setRtReason(rt.reason);
+    // Если Рутокен доступен — подгружаем список подключённых носителей для выбора
+    if (rt.ok) {
+      const devices = await cryptoPlugins.listRutokenDevices();
+      setRtDevices(devices);
+      // Автовыбор: первый носитель с поддержкой ГОСТ, иначе просто первый
+      const preferred = devices.find(d => d.supportsGost) ?? devices[0];
+      setRtDeviceId(preferred ? preferred.id : null);
+    } else {
+      setRtDevices([]); setRtDeviceId(null);
+    }
     const cp = await cryptoPlugins.diagnose("cryptopro").catch((e) => ({ ok: false, reason: (e as Error).message }));
     setCpState(cp.ok ? "ok" : "missing"); setCpReason(cp.reason);
   }, []);
@@ -65,7 +77,10 @@ export default function UdsCertIssue({ login, token, cert, onDone, onLogout }: P
         ? "Генерируем ключевую пару на Рутокене…"
         : "Генерируем ключевую пару в КриптоПро…");
       const subjectCN = cert ? (cert.serial_number || login) : login;
-      const { csr, context } = await cryptoPlugins.issue(type, displayName(subjectCN), pin || undefined);
+      const { csr, context } = await cryptoPlugins.issue(
+        type, displayName(subjectCN), pin || undefined,
+        type === "rutoken" ? (rtDeviceId ?? undefined) : undefined,
+      );
 
       setStage("Управление УДС «САОУ» выпускает сертификат…");
       const res = await udsApi.signCsr(login, token, csr);
@@ -254,10 +269,39 @@ export default function UdsCertIssue({ login, token, cert, onDone, onLogout }: P
               </div>
             )}
 
+            {/* ВЫБОР КОНКРЕТНОГО НОСИТЕЛЯ РУТОКЕН */}
+            {rtState === "ok" && rtDevices.length > 0 && (
+              <div className="p-3 rounded-lg bg-slate-800 border border-slate-700 space-y-2">
+                <label className="text-xs text-slate-300 flex items-center gap-1.5">
+                  <Icon name="Usb" size={13} className="text-blue-400" fallback="HardDrive" />
+                  {rtDevices.length > 1 ? "Выберите носитель Рутокен" : "Подключённый носитель"}
+                </label>
+                <select
+                  value={rtDeviceId ?? ""}
+                  onChange={(e) => setRtDeviceId(Number(e.target.value))}
+                  disabled={busy || rtDevices.length === 1}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-70"
+                >
+                  {rtDevices.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.label}{d.model ? ` — ${d.model}` : ""}{d.supportsGost ? "" : " (без ГОСТ)"}
+                    </option>
+                  ))}
+                </select>
+                {rtDeviceId != null && rtDevices.find(d => d.id === rtDeviceId && !d.supportsGost) && (
+                  <p className="text-[11px] text-amber-300 flex items-start gap-1.5">
+                    <Icon name="AlertTriangle" size={12} className="flex-shrink-0 mt-0.5" />
+                    Этот носитель может не поддерживать ГОСТ. Если выпуск не удастся —
+                    выберите Рутокен ЭЦП 2.0/3.0 или используйте КриптоПро.
+                  </p>
+                )}
+              </div>
+            )}
+
             <div className="flex items-center justify-center gap-2">
               <button onClick={checkPlugins}
                 className="text-[11px] text-slate-400 hover:text-slate-200 flex items-center gap-1.5">
-                <Icon name="RefreshCw" size={12} /> Проверить плагин снова
+                <Icon name="RefreshCw" size={12} /> Проверить плагин и носители снова
               </button>
             </div>
 

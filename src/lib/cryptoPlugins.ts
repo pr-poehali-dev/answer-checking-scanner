@@ -179,32 +179,35 @@ const rutoken = {
     if (deviceId == null) deviceId = await this.firstDevice(plugin);
     await rtLogin(plugin, deviceId, pin);
     try {
-      const GostR3410_2012_256 = plugin.KEY_ALGORITHM_GOST3410_2012_256 ?? 4;
-      const GostR3410_2001 = plugin.KEY_ALGORITHM_GOST3410_2001 ?? 1;
-      const variants: Array<{ algo: number; opts: any; name: string }> = [
-        { algo: GostR3410_2012_256, opts: { paramset: "A" }, name: "ГОСТ Р 34.10-2012 (256 бит)" },
-        { algo: GostR3410_2012_256, opts: {}, name: "ГОСТ Р 34.10-2012 (256 бит)" },
-        { algo: GostR3410_2001, opts: { paramset: "A" }, name: "ГОСТ Р 34.10-2001" },
-        { algo: GostR3410_2001, opts: {}, name: "ГОСТ Р 34.10-2001" },
+      // Официальная сигнатура Rutoken Plugin:
+      //   generateKeyPair(deviceId, reserved(undefined), marker, options)
+      // Алгоритм ГОСТ задаётся ВНУТРИ options.publicKeyAlgorithm + options.paramset,
+      // а не отдельным числовым аргументом (это была причина ошибки «алгоритм не поддерживается»).
+      const ALG_2012_256 = plugin.PUBLIC_KEY_ALGORITHM_GOST3410_2012_256 ?? 5;
+      const ALG_2012_512 = plugin.PUBLIC_KEY_ALGORITHM_GOST3410_2012_512 ?? 6;
+      const ALG_2001     = plugin.PUBLIC_KEY_ALGORITHM_GOST3410_2001 ?? 4;
+      const KEY_SPEC     = plugin.KEY_SPEC_SIGN_AND_EXCHANGE ?? plugin.KEY_SPEC_SIGN ?? 0;
+
+      // Перебираем от наиболее современного ГОСТ-2012-256 к 2001.
+      // Разные токены поддерживают разные наборы параметров (paramset).
+      const variants: Array<{ opts: any; name: string }> = [
+        { opts: { publicKeyAlgorithm: ALG_2012_256, paramset: "A",      keySpec: KEY_SPEC }, name: "ГОСТ Р 34.10-2012 (256 бит), набор A" },
+        { opts: { publicKeyAlgorithm: ALG_2012_256, paramset: "TC26-A", keySpec: KEY_SPEC }, name: "ГОСТ Р 34.10-2012 (256 бит), набор ТК26-A" },
+        { opts: { publicKeyAlgorithm: ALG_2012_256, paramset: "XA",     keySpec: KEY_SPEC }, name: "ГОСТ Р 34.10-2012 (256 бит), набор XA" },
+        { opts: { publicKeyAlgorithm: ALG_2012_512, paramset: "TC26-A", keySpec: KEY_SPEC }, name: "ГОСТ Р 34.10-2012 (512 бит)" },
+        { opts: { publicKeyAlgorithm: ALG_2001,     paramset: "A",      keySpec: KEY_SPEC }, name: "ГОСТ Р 34.10-2001, набор A" },
+        { opts: { publicKeyAlgorithm: ALG_2001,     paramset: "XA",     keySpec: KEY_SPEC }, name: "ГОСТ Р 34.10-2001, набор XA" },
       ];
 
+      const marker = "UDS-SAOU";
       let keyId: string | null = null;
       let algorithm = "";
       let lastErr: any = null;
       for (const v of variants) {
         try {
-          // generateKeyPair(deviceId, extractable, keyLabel, keyOptions, keyAlgorithm)
-          keyId = await plugin.generateKeyPair(deviceId, false, "", v.opts, v.algo);
+          // reserved = undefined (обязательно), marker — метка группы ключей
+          keyId = await plugin.generateKeyPair(deviceId, undefined, marker, v.opts);
           if (keyId != null) { algorithm = v.name; break; }
-        } catch (e) {
-          lastErr = e;
-        }
-      }
-      // Последняя попытка — старая сигнатура без явного алгоритма
-      if (keyId == null) {
-        try {
-          keyId = await plugin.generateKeyPair(deviceId, false, "", { paramset: "A" });
-          algorithm = "ГОСТ (авто)";
         } catch (e) {
           lastErr = e;
         }
@@ -225,12 +228,32 @@ const rutoken = {
     const ctn = container ?? await this.createGostContainer(pin, deviceId);
     const { plugin, deviceId: devId, keyId } = ctn;
     try {
-      const dn = [{ rdn: "commonName", value: subjectCN }, { rdn: "organizationName", value: "САОУ" }, { rdn: "organizationUnitName", value: "УДС" }];
+      // Официальная сигнатура: createPkcs10(deviceId, keyId, subject[], extensions, options)
+      // subject — МАССИВ RDN (раньше ошибочно передавали объект { dn }).
+      const subject = [
+        { rdn: "commonName", value: subjectCN },
+        { rdn: "organizationName", value: "САОУ" },
+        { rdn: "organizationUnitName", value: "УДС" },
+        { rdn: "countryName", value: "RU" },
+      ];
+      const extensions = {
+        keyUsage: ["digitalSignature", "nonRepudiation", "keyEncipherment", "dataEncipherment"],
+        extKeyUsage: ["clientAuth"],
+      };
+      // Хэш ГОСТ подбираем под алгоритм ключа; пустой options — плагин выберет сам.
+      const HASH_2012_256 = plugin.HASH_TYPE_GOST3411_12_256;
+      const HASH_2001 = plugin.HASH_TYPE_GOST3411_94;
+      const optsVariants: any[] = [
+        HASH_2012_256 != null ? { hashAlgorithm: HASH_2012_256 } : {},
+        HASH_2001 != null ? { hashAlgorithm: HASH_2001 } : {},
+        {},
+      ];
+
       let csrB64: string | null = null;
       let lastErr: any = null;
-      for (const csrOpts of [{ signAlgorithm: "GOST R 34.10-2012-256" }, {}]) {
+      for (const csrOpts of optsVariants) {
         try {
-          csrB64 = await plugin.createPkcs10(devId, keyId, { dn }, csrOpts);
+          csrB64 = await plugin.createPkcs10(devId, keyId, subject, extensions, csrOpts);
           if (csrB64) break;
         } catch (e) {
           lastErr = e;

@@ -79,6 +79,7 @@ let rtPluginCache: any = null;
 
 // Человекочитаемые сообщения по кодам ошибок Рутокен Плагина
 function rutokenErrorMessage(err: any): string {
+  const rawMsg = typeof err === "string" ? err : (err && err.message ? String(err.message) : "");
   const code = typeof err === "number" ? err
     : (err && (err.code ?? err.errorCode ?? err.message));
   const n = Number(code);
@@ -92,8 +93,14 @@ function rutokenErrorMessage(err: any): string {
     113: "PIN-код заблокирован. Разблокируйте токен через «Панель управления Рутокен».",
   };
   if (!Number.isNaN(n) && MAP[n]) return MAP[n];
+  // Внутренняя ошибка плагина без кода — обычно неподдерживаемый параметр запроса
+  if (/defaultErrorCode|Exception::/.test(rawMsg)) {
+    return "Рутокен Плагин отклонил запрос (внутренняя ошибка плагина). "
+      + "Чаще всего это старая версия плагина/драйверов или токен без поддержки ГОСТ. "
+      + "Обновите Рутокен Плагин и драйверы до последней версии и перезапустите браузер.";
+  }
   if (typeof err === "string") return err;
-  if (err && err.message) return String(err.message);
+  if (rawMsg) return rawMsg;
   return `Ошибка Рутокена (код ${code}). Проверьте PIN-код и подключение токена.`;
 }
 
@@ -183,21 +190,34 @@ const rutoken = {
       //   generateKeyPair(deviceId, reserved(undefined), marker, options)
       // Алгоритм ГОСТ задаётся ВНУТРИ options.publicKeyAlgorithm + options.paramset,
       // а не отдельным числовым аргументом (это была причина ошибки «алгоритм не поддерживается»).
-      const ALG_2012_256 = plugin.PUBLIC_KEY_ALGORITHM_GOST3410_2012_256 ?? 5;
-      const ALG_2012_512 = plugin.PUBLIC_KEY_ALGORITHM_GOST3410_2012_512 ?? 6;
-      const ALG_2001     = plugin.PUBLIC_KEY_ALGORITHM_GOST3410_2001 ?? 4;
-      const KEY_SPEC     = plugin.KEY_SPEC_SIGN_AND_EXCHANGE ?? plugin.KEY_SPEC_SIGN ?? 0;
+      // Значения берём из констант плагина (надёжнее, чем числовые фолбэки).
+      const ALG_2012_256 = plugin.PUBLIC_KEY_ALGORITHM_GOST3410_2012_256;
+      const ALG_2012_512 = plugin.PUBLIC_KEY_ALGORITHM_GOST3410_2012_512;
+      const ALG_2001     = plugin.PUBLIC_KEY_ALGORITHM_GOST3410_2001;
 
-      // Перебираем от наиболее современного ГОСТ-2012-256 к 2001.
-      // Разные токены поддерживают разные наборы параметров (paramset).
-      const variants: Array<{ opts: any; name: string }> = [
-        { opts: { publicKeyAlgorithm: ALG_2012_256, paramset: "A",      keySpec: KEY_SPEC }, name: "ГОСТ Р 34.10-2012 (256 бит), набор A" },
-        { opts: { publicKeyAlgorithm: ALG_2012_256, paramset: "TC26-A", keySpec: KEY_SPEC }, name: "ГОСТ Р 34.10-2012 (256 бит), набор ТК26-A" },
-        { opts: { publicKeyAlgorithm: ALG_2012_256, paramset: "XA",     keySpec: KEY_SPEC }, name: "ГОСТ Р 34.10-2012 (256 бит), набор XA" },
-        { opts: { publicKeyAlgorithm: ALG_2012_512, paramset: "TC26-A", keySpec: KEY_SPEC }, name: "ГОСТ Р 34.10-2012 (512 бит)" },
-        { opts: { publicKeyAlgorithm: ALG_2001,     paramset: "A",      keySpec: KEY_SPEC }, name: "ГОСТ Р 34.10-2001, набор A" },
-        { opts: { publicKeyAlgorithm: ALG_2001,     paramset: "XA",     keySpec: KEY_SPEC }, name: "ГОСТ Р 34.10-2001, набор XA" },
-      ];
+      // Идём от МИНИМАЛЬНОГО набора полей к более полному.
+      // Лишние/неизвестные поля в options заставляют старый плагин падать
+      // с внутренней ошибкой Exception::defaultErrorCode() — поэтому сначала
+      // пробуем только алгоритм, затем добавляем paramset.
+      const variants: Array<{ opts: any; name: string }> = [];
+      if (ALG_2012_256 != null) {
+        variants.push(
+          { opts: { publicKeyAlgorithm: ALG_2012_256 }, name: "ГОСТ Р 34.10-2012 (256 бит)" },
+          { opts: { publicKeyAlgorithm: ALG_2012_256, paramset: "A" }, name: "ГОСТ Р 34.10-2012 (256 бит), набор A" },
+          { opts: { publicKeyAlgorithm: ALG_2012_256, paramset: "XA" }, name: "ГОСТ Р 34.10-2012 (256 бит), набор XA" },
+        );
+      }
+      if (ALG_2012_512 != null) {
+        variants.push({ opts: { publicKeyAlgorithm: ALG_2012_512 }, name: "ГОСТ Р 34.10-2012 (512 бит)" });
+      }
+      if (ALG_2001 != null) {
+        variants.push(
+          { opts: { publicKeyAlgorithm: ALG_2001 }, name: "ГОСТ Р 34.10-2001" },
+          { opts: { publicKeyAlgorithm: ALG_2001, paramset: "A" }, name: "ГОСТ Р 34.10-2001, набор A" },
+        );
+      }
+      // Совсем базовый вариант — на случай, если константы недоступны (очень старый плагин).
+      variants.push({ opts: { paramset: "A" }, name: "ГОСТ (набор A)" });
 
       const marker = "UDS-SAOU";
       let keyId: string | null = null;
@@ -205,7 +225,7 @@ const rutoken = {
       let lastErr: any = null;
       for (const v of variants) {
         try {
-          // reserved = undefined (обязательно), marker — метка группы ключей
+          // Сигнатура: generateKeyPair(deviceId, reserved(undefined), marker, options)
           keyId = await plugin.generateKeyPair(deviceId, undefined, marker, v.opts);
           if (keyId != null) { algorithm = v.name; break; }
         } catch (e) {
@@ -240,20 +260,19 @@ const rutoken = {
         keyUsage: ["digitalSignature", "nonRepudiation", "keyEncipherment", "dataEncipherment"],
         extKeyUsage: ["clientAuth"],
       };
-      // Хэш ГОСТ подбираем под алгоритм ключа; пустой options — плагин выберет сам.
-      const HASH_2012_256 = plugin.HASH_TYPE_GOST3411_12_256;
-      const HASH_2001 = plugin.HASH_TYPE_GOST3411_94;
-      const optsVariants: any[] = [
-        HASH_2012_256 != null ? { hashAlgorithm: HASH_2012_256 } : {},
-        HASH_2001 != null ? { hashAlgorithm: HASH_2001 } : {},
-        {},
+
+      // Пробуем от простого к сложному: сначала без extensions/options (максимальная
+      // совместимость), затем добавляем расширения. Пустой options — плагин сам выберет хэш.
+      const attempts: Array<() => Promise<string>> = [
+        () => plugin.createPkcs10(devId, keyId, subject, {}, {}),
+        () => plugin.createPkcs10(devId, keyId, subject, extensions, {}),
       ];
 
       let csrB64: string | null = null;
       let lastErr: any = null;
-      for (const csrOpts of optsVariants) {
+      for (const attempt of attempts) {
         try {
-          csrB64 = await plugin.createPkcs10(devId, keyId, subject, extensions, csrOpts);
+          csrB64 = await attempt();
           if (csrB64) break;
         } catch (e) {
           lastErr = e;

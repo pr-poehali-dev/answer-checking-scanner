@@ -1,5 +1,6 @@
+import { useEffect } from "react";
 import Icon from "@/components/ui/icon";
-import { ContainerType } from "@/lib/cryptoPlugins";
+import { CryptoProMedia } from "@/lib/cryptoPlugins";
 
 interface UdsLoginFormProps {
   step: "cert" | "iis" | "creds" | "sms";
@@ -15,7 +16,10 @@ interface UdsLoginFormProps {
   busy: boolean;
   error: string;
   onLogoClick: () => void;
-  certLogin: (containerType: ContainerType, pin?: string) => void;
+  certLogin: (thumbprint?: string) => void;
+  certList: CryptoProMedia[] | null;
+  certLoading: boolean;
+  loadCertificates: () => void;
   verifyIis: (e: React.FormEvent) => void;
   doLogin: (e: React.FormEvent) => void;
   doVerifySms: (e: React.FormEvent) => void;
@@ -39,6 +43,9 @@ export default function UdsLoginForm({
   error,
   onLogoClick,
   certLogin,
+  certList,
+  certLoading,
+  loadCertificates,
   verifyIis,
   doLogin,
   doVerifySms,
@@ -46,6 +53,13 @@ export default function UdsLoginForm({
   setStep,
   setError,
 }: UdsLoginFormProps) {
+  // При открытии шага «cert» подгружаем список сертификатов КриптоПро
+  useEffect(() => {
+    if (step === "cert" && certList === null && !certLoading) {
+      loadCertificates();
+    }
+  }, [step, certList, certLoading, loadCertificates]);
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-900 px-4">
       <div className="w-full max-w-sm">
@@ -63,7 +77,7 @@ export default function UdsLoginForm({
             <div className="text-center">
               <Icon name="BadgeCheck" size={22} className="text-blue-600 mx-auto mb-1" fallback="ShieldCheck" />
               <p className="text-sm font-bold">Вход по сертификату</p>
-              <p className="text-[11px] text-gray-400 mt-1">Предъявите сертификат с носителя. Требуется установленный плагин.</p>
+              <p className="text-[11px] text-gray-400 mt-1">Выберите носитель (сертификат) КриптоПро. Требуется КриптоПро CSP и плагин.</p>
             </div>
             {error && (
               <div className="flex items-start gap-2 p-2.5 rounded-lg bg-red-50 border border-red-200">
@@ -71,18 +85,36 @@ export default function UdsLoginForm({
                 <p className="text-xs text-red-600">{error}</p>
               </div>
             )}
-            <div className="grid grid-cols-2 gap-2">
-              <button onClick={() => certLogin("rutoken")} disabled={busy}
-                className="flex flex-col items-center gap-1.5 py-3 border border-gray-200 rounded-lg hover:border-blue-400 hover:bg-blue-50 disabled:opacity-50 transition-colors">
-                <Icon name="Usb" size={20} className="text-blue-600" fallback="HardDrive" />
-                <span className="text-xs font-semibold">Рутокен</span>
-              </button>
-              <button onClick={() => certLogin("cryptopro")} disabled={busy}
-                className="flex flex-col items-center gap-1.5 py-3 border border-gray-200 rounded-lg hover:border-blue-400 hover:bg-blue-50 disabled:opacity-50 transition-colors">
-                <Icon name="Monitor" size={20} className="text-blue-600" fallback="Cpu" />
-                <span className="text-xs font-semibold">КриптоПро</span>
-              </button>
-            </div>
+
+            {certLoading ? (
+              <p className="text-xs text-center text-muted-foreground flex items-center justify-center gap-1.5 py-4">
+                <Icon name="Loader2" size={14} className="animate-spin" /> Ищем сертификаты КриптоПро…
+              </p>
+            ) : certList && certList.length > 0 ? (
+              <div className="space-y-2">
+                <p className="text-[11px] text-gray-500 font-semibold">Доступные носители:</p>
+                {certList.map((c) => (
+                  <button key={c.thumbprint} onClick={() => certLogin(c.thumbprint)} disabled={busy}
+                    className="w-full text-left flex items-start gap-2.5 p-2.5 border border-gray-200 rounded-lg hover:border-blue-400 hover:bg-blue-50 disabled:opacity-50 transition-colors">
+                    <Icon name="ShieldCheck" size={18} className="text-blue-600 flex-shrink-0 mt-0.5" />
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold truncate">{c.subject}</p>
+                      <p className="text-[10px] text-gray-400 truncate">Носитель: {c.container} · до {c.validTo}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-2">
+                <p className="text-xs text-gray-400">Сертификаты не найдены.</p>
+              </div>
+            )}
+
+            <button onClick={loadCertificates} disabled={busy || certLoading}
+              className="w-full text-[11px] text-blue-500 hover:text-blue-700 flex items-center justify-center gap-1.5 disabled:opacity-50">
+              <Icon name="RefreshCw" size={12} /> Обновить список носителей
+            </button>
+
             {busy && (
               <p className="text-xs text-center text-muted-foreground flex items-center justify-center gap-1.5">
                 <Icon name="Loader2" size={13} className="animate-spin" /> Проверка сертификата…

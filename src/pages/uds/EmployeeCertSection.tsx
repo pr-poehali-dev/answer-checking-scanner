@@ -105,10 +105,10 @@ export default function EmployeeCertSection({ login, token, targetLogin }: {
       {cert && cert.status !== "revoked" && (
         <div className="text-xs space-y-1">
           {cert.status === "assigned" && <p className="text-muted-foreground">Ожидает, пока сотрудник начнёт выпуск в своём ЛК.</p>}
-          {cert.status === "issuing" && <p className="text-muted-foreground">Сотрудник выпускает сертификат ({cert.container_type === "rutoken" ? "Рутокен" : "КриптоПро"})…</p>}
+          {cert.status === "issuing" && <p className="text-muted-foreground">Сотрудник выпускает сертификат (КриптоПро)…</p>}
           {cert.status === "active" && (
             <div className="grid grid-cols-2 gap-2">
-              <Info label="Носитель" value={cert.container_type === "rutoken" ? "Рутокен" : "КриптоПро"} />
+              <Info label="Носитель" value="КриптоПро" />
               <Info label="Серийный №" value={cert.serial_number || "—"} />
               <Info label="Выдан" value={fmt(cert.issued_at)} />
               <Info label="Действует до" value={fmt(cert.not_after)} />

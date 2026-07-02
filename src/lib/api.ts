@@ -479,7 +479,7 @@ export const udsApi = {
   certStatus: (login: string, token: string, targetLogin: string) =>
     udsRequest<{ cert: UdsCert | null }>("cert-status", "GET", login, token, undefined, { target_login: targetLogin }),
 
-  certAgree: (login: string, token: string, containerType: "rutoken" | "cryptopro") =>
+  certAgree: (login: string, token: string, containerType: "cryptopro" = "cryptopro") =>
     udsRequest<{ ok: boolean }>("cert-agree", "POST", login, token, { container_type: containerType }),
 
   signCsr: (login: string, token: string, csr: string) =>

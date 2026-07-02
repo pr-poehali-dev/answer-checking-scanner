@@ -1,42 +1,31 @@
 /**
- * Интеграция с криптоплагинами Рутокен и КриптоПро для выпуска и использования
- * сертификатов УДС с НЕИЗВЛЕКАЕМЫМ ключом (ключевая пара создаётся на токене / в CSP).
+ * Интеграция с КриптоПро для выпуска и использования сертификатов УДС
+ * с НЕИЗВЛЕКАЕМЫМ ключом ГОСТ (ключевая пара создаётся в контейнере КриптоПро CSP).
  *
- * Требуется установленный на ПК сотрудника плагин:
- *  - Рутокен:  Rutoken Plugin (https://www.rutoken.ru/products/all/rutoken-plugin/)
- *  - КриптоПро: КриптоПро ЭЦП Browser plug-in
+ * Требуется установленное на ПК сотрудника ПО:
+ *  - КриптоПро CSP (криптопровайдер, генерация ключа ГОСТ)
+ *  - КриптоПро ЭЦП Browser plug-in (+ расширение браузера)
  *
- * Без плагина выпуск физически невозможен.
+ * Без КриптоПро выпуск и вход по сертификату физически невозможны.
  */
-
-export type ContainerType = "rutoken" | "cryptopro";
 
 export interface IssueResult {
   csr: string;          // PKCS#10 в PEM
-  context: unknown;     // внутренний контекст (id ключа / контейнер)
+  context: unknown;     // внутренний контекст выпуска (CX509Enrollment)
 }
 
 export interface SignResult {
   signature: string;    // base64
-  fingerprint: string;  // SHA-256 hex отпечаток сертификата
+  fingerprint: string;  // SHA-1/thumbprint сертификата (hex)
 }
 
-export interface RutokenDevice {
-  id: number;           // внутренний id устройства в плагине
-  label: string;        // метка/имя токена
-  model: string;        // модель (Rutoken ECP 3.0 и т.п.)
-  supportsGost: boolean;// эвристика поддержки ГОСТ по модели
-}
-
-// ГОСТ-контейнер, созданный на токене (ШАГ 1 перед выпуском сертификата)
- 
-export interface GostContainer {
-  /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
-  plugin: any;
-  deviceId: number;
-  keyId: string;
-  pin: string;
-  algorithm: string;    // человекочитаемое имя сработавшего ГОСТ-алгоритма
+/** Носитель/сертификат КриптоПро для выбора пользователем. */
+export interface CryptoProMedia {
+  thumbprint: string;   // отпечаток сертификата (идентификатор выбора)
+  subject: string;      // CN владельца
+  issuer: string;       // кем выдан
+  validTo: string;      // срок действия «до» (локальная дата)
+  container: string;    // имя ключевого контейнера/носителя
 }
 
 const PEM_HEAD = "-----BEGIN CERTIFICATE REQUEST-----";
@@ -52,16 +41,14 @@ function stripPem(pem: string): string {
   return pem.replace(/-----[^-]+-----/g, "").replace(/\s+/g, "");
 }
 
-// ════════════════════════ RUTOKEN ════════════════════════════════════════════
+// ════════════════════════ КРИПТОПРО ══════════════════════════════════════════
 /* eslint-disable @typescript-eslint/no-explicit-any */
-declare global { interface Window { rutoken?: any; cadesplugin?: any; chrome?: any; } }
+declare global { interface Window { cadesplugin?: any; } }
 
-// Официальные api-скрипты грузим как обычные <script src> (через Vite ?url),
-// чтобы они выполнились в окне страницы и подцепили мост, внедрённый расширением.
-import rutokenAdapterUrl from "@aktivco/rutoken-plugin/rutoken-plugin.min.js?url";
+// Официальный cadesplugin_api.js грузим как обычный <script src> (через Vite ?url),
+// чтобы он выполнился в окне страницы и подцепил мост, внедрённый расширением.
 import cadespluginUrl from "crypto-pro-cadesplugin/dist/lib/cadesplugin_api.js?url";
 
-// Загрузка внешнего скрипта в <head> один раз
 const loadedScripts = new Set<string>();
 function loadScript(src: string): Promise<void> {
   if (loadedScripts.has(src)) return Promise.resolve();
@@ -75,246 +62,15 @@ function loadScript(src: string): Promise<void> {
   });
 }
 
-let rtPluginCache: any = null;
+// Провайдер ГОСТ-2012 (256). При отсутствии CSP выпуск невозможен.
+const GOST_2012_PROVIDER = "Crypto-Pro GOST R 34.10-2012 Cryptographic Service Provider";
+const CADES_STORE_MY = "My";
 
-// Человекочитаемые сообщения по кодам ошибок Рутокен Плагина
-function rutokenErrorMessage(err: any): string {
-  const rawMsg = typeof err === "string" ? err : (err && err.message ? String(err.message) : "");
-  const code = typeof err === "number" ? err
-    : (err && (err.code ?? err.errorCode ?? err.message));
-  const n = Number(code);
-  const MAP: Record<number, string> = {
-    2:   "Токен не поддерживает выбранный алгоритм ключа. Обновите Рутокен Плагин и драйверы, либо используйте токен с поддержкой ГОСТ.",
-    8:   "Рутокен не подключён или был извлечён. Вставьте токен и попробуйте снова.",
-    18:  "Неверный PIN-код Рутокена.",
-    19:  "PIN-код заблокирован: исчерпаны попытки ввода. Разблокируйте токен через «Панель управления Рутокен».",
-    93:  "Неверный PIN-код Рутокена. Введите корректный PIN и попробуйте снова.",
-    94:  "Требуется PIN-код Рутокена. Введите PIN в поле ниже.",
-    113: "PIN-код заблокирован. Разблокируйте токен через «Панель управления Рутокен».",
-  };
-  if (!Number.isNaN(n) && MAP[n]) return MAP[n];
-  // Внутренняя ошибка плагина без кода — обычно неподдерживаемый параметр запроса
-  if (/defaultErrorCode|Exception::/.test(rawMsg)) {
-    return "Рутокен Плагин отклонил запрос (внутренняя ошибка плагина). "
-      + "Чаще всего это старая версия плагина/драйверов или токен без поддержки ГОСТ. "
-      + "Обновите Рутокен Плагин и драйверы до последней версии и перезапустите браузер.";
-  }
-  if (typeof err === "string") return err;
-  if (rawMsg) return rawMsg;
-  return `Ошибка Рутокена (код ${code}). Проверьте PIN-код и подключение токена.`;
-}
-
-async function rtLogin(plugin: any, deviceId: number, pin: string): Promise<void> {
-  if (!pin) throw new Error("Введите PIN-код Рутокена в поле ниже.");
-  try {
-    await plugin.login(deviceId, pin);
-  } catch (e) {
-    throw new Error(rutokenErrorMessage(e));
-  }
-}
-
-async function ensureRutokenAdapter(): Promise<void> {
-  if (window.rutoken) return;
-  await loadScript(rutokenAdapterUrl);
-  // Адаптер инициализируется асинхронно — ждём появления window.rutoken
-  for (let i = 0; i < 50 && !window.rutoken; i++) {
-    await new Promise((r) => setTimeout(r, 100));
-  }
-}
-
-const rutoken = {
-  async plugin(): Promise<any> {
-    if (rtPluginCache) return rtPluginCache;
-    await ensureRutokenAdapter();
-    const rt = window.rutoken;
-    if (!rt || !rt.ready) {
-      throw new Error("Не найдено расширение «Адаптер Рутокен Плагин» в браузере. Установите его по ссылке ниже, включите и перезапустите браузер.");
-    }
-    await rt.ready;
-    const isChromiumOrFF = !!window.chrome || typeof (window as any).InstallTrigger !== "undefined";
-    if (isChromiumOrFF && rt.isExtensionInstalled) {
-      const extOk = await rt.isExtensionInstalled();
-      if (!extOk) throw new Error("Расширение «Адаптер Rutoken Plugin» не установлено в браузере.");
-    }
-    if (rt.isPluginInstalled) {
-      const plugOk = await rt.isPluginInstalled();
-      if (!plugOk) throw new Error("Rutoken Plugin не установлен. Установите плагин и перезапустите браузер.");
-    }
-    const plugin = await rt.loadPlugin();
-    rtPluginCache = plugin;
-    return plugin;
-  },
-
-  async firstDevice(plugin: any): Promise<number> {
-    const devices: number[] = await plugin.enumerateDevices();
-    if (!devices || devices.length === 0) throw new Error("Рутокен не найден. Подключите токен.");
-    return devices[0];
-  },
-
-  /** Список подключённых устройств Рутокен с человекочитаемыми метками. */
-  async listDevices(): Promise<RutokenDevice[]> {
-    const plugin = await this.plugin();
-    const ids: number[] = await plugin.enumerateDevices();
-    if (!ids || ids.length === 0) return [];
-    const out: RutokenDevice[] = [];
-    for (const id of ids) {
-      let label = `Рутокен #${id}`;
-      let model = "";
-      try {
-        // Название модели токена (например «Rutoken ECP <3.0>»)
-        if (plugin.getDeviceInfo) {
-          const DI_LABEL = plugin.TOKEN_INFO_LABEL ?? 1;
-          const DI_MODEL = plugin.TOKEN_INFO_MODEL ?? 2;
-          const l = await plugin.getDeviceInfo(id, DI_LABEL).catch(() => "");
-          const m = await plugin.getDeviceInfo(id, DI_MODEL).catch(() => "");
-          if (l) label = String(l);
-          if (m) model = String(m);
-        }
-      } catch { /* метка необязательна */ }
-      out.push({ id, label, model, supportsGost: /ECP|ЭЦП|2\.0|3\.0/i.test(`${label} ${model}`) });
-    }
-    return out;
-  },
-
-  /**
-   * ШАГ 1. Создаёт неизвлекаемый ГОСТ-контейнер (ключевую пару) на токене.
-   * Перебирает ГОСТ-2012 (256) → ГОСТ-2001 — что поддержит токен.
-   * Возвращает контекст с keyId и названием сработавшего алгоритма.
-   */
-  async createGostContainer(pin: string, deviceId?: number): Promise<GostContainer> {
-    const plugin = await this.plugin();
-    if (deviceId == null) deviceId = await this.firstDevice(plugin);
-    await rtLogin(plugin, deviceId, pin);
-    try {
-      // Официальная сигнатура Rutoken Plugin:
-      //   generateKeyPair(deviceId, reserved(undefined), marker, options)
-      // Алгоритм ГОСТ задаётся ВНУТРИ options.publicKeyAlgorithm + options.paramset,
-      // а не отдельным числовым аргументом (это была причина ошибки «алгоритм не поддерживается»).
-      // Значения берём из констант плагина (надёжнее, чем числовые фолбэки).
-      const ALG_2012_256 = plugin.PUBLIC_KEY_ALGORITHM_GOST3410_2012_256;
-      const ALG_2012_512 = plugin.PUBLIC_KEY_ALGORITHM_GOST3410_2012_512;
-      const ALG_2001     = plugin.PUBLIC_KEY_ALGORITHM_GOST3410_2001;
-
-      // Идём от МИНИМАЛЬНОГО набора полей к более полному.
-      // Лишние/неизвестные поля в options заставляют старый плагин падать
-      // с внутренней ошибкой Exception::defaultErrorCode() — поэтому сначала
-      // пробуем только алгоритм, затем добавляем paramset.
-      const variants: Array<{ opts: any; name: string }> = [];
-      if (ALG_2012_256 != null) {
-        variants.push(
-          { opts: { publicKeyAlgorithm: ALG_2012_256 }, name: "ГОСТ Р 34.10-2012 (256 бит)" },
-          { opts: { publicKeyAlgorithm: ALG_2012_256, paramset: "A" }, name: "ГОСТ Р 34.10-2012 (256 бит), набор A" },
-          { opts: { publicKeyAlgorithm: ALG_2012_256, paramset: "XA" }, name: "ГОСТ Р 34.10-2012 (256 бит), набор XA" },
-        );
-      }
-      if (ALG_2012_512 != null) {
-        variants.push({ opts: { publicKeyAlgorithm: ALG_2012_512 }, name: "ГОСТ Р 34.10-2012 (512 бит)" });
-      }
-      if (ALG_2001 != null) {
-        variants.push(
-          { opts: { publicKeyAlgorithm: ALG_2001 }, name: "ГОСТ Р 34.10-2001" },
-          { opts: { publicKeyAlgorithm: ALG_2001, paramset: "A" }, name: "ГОСТ Р 34.10-2001, набор A" },
-        );
-      }
-      // Совсем базовый вариант — на случай, если константы недоступны (очень старый плагин).
-      variants.push({ opts: { paramset: "A" }, name: "ГОСТ (набор A)" });
-
-      const marker = "UDS-SAOU";
-      let keyId: string | null = null;
-      let algorithm = "";
-      let lastErr: any = null;
-      for (const v of variants) {
-        try {
-          // Сигнатура: generateKeyPair(deviceId, reserved(undefined), marker, options)
-          keyId = await plugin.generateKeyPair(deviceId, undefined, marker, v.opts);
-          if (keyId != null) { algorithm = v.name; break; }
-        } catch (e) {
-          lastErr = e;
-        }
-      }
-      if (keyId == null) throw lastErr ?? new Error("Не удалось создать ГОСТ-контейнер на Рутокене");
-
-      return { plugin, deviceId, keyId, pin, algorithm };
-    } catch (e) {
-      throw new Error(rutokenErrorMessage(e));
-    }
-  },
-
-  /**
-   * ШАГ 2. Формирует запрос на сертификат (CSR) на основе готового ГОСТ-контейнера.
-   * Если контейнер не передан — создаёт его сам (обратная совместимость).
-   */
-  async issue(subjectCN: string, pin: string, deviceId?: number, container?: GostContainer): Promise<IssueResult> {
-    const ctn = container ?? await this.createGostContainer(pin, deviceId);
-    const { plugin, deviceId: devId, keyId } = ctn;
-    try {
-      // Официальная сигнатура: createPkcs10(deviceId, keyId, subject[], extensions, options)
-      // subject — МАССИВ RDN (раньше ошибочно передавали объект { dn }).
-      const subject = [
-        { rdn: "commonName", value: subjectCN },
-        { rdn: "organizationName", value: "САОУ" },
-        { rdn: "organizationUnitName", value: "УДС" },
-        { rdn: "countryName", value: "RU" },
-      ];
-      const extensions = {
-        keyUsage: ["digitalSignature", "nonRepudiation", "keyEncipherment", "dataEncipherment"],
-        extKeyUsage: ["clientAuth"],
-      };
-
-      // Пробуем от простого к сложному: сначала без extensions/options (максимальная
-      // совместимость), затем добавляем расширения. Пустой options — плагин сам выберет хэш.
-      const attempts: Array<() => Promise<string>> = [
-        () => plugin.createPkcs10(devId, keyId, subject, {}, {}),
-        () => plugin.createPkcs10(devId, keyId, subject, extensions, {}),
-      ];
-
-      let csrB64: string | null = null;
-      let lastErr: any = null;
-      for (const attempt of attempts) {
-        try {
-          csrB64 = await attempt();
-          if (csrB64) break;
-        } catch (e) {
-          lastErr = e;
-        }
-      }
-      if (!csrB64) throw lastErr ?? new Error("Не удалось создать запрос на сертификат");
-
-      return { csr: csrB64.includes(PEM_HEAD) ? csrB64 : toPemCsr(csrB64), context: { plugin, deviceId: devId, keyId, pin } };
-    } catch (e) {
-      throw new Error(rutokenErrorMessage(e));
-    }
-  },
-
-  async install(ctx: any, certPem: string): Promise<void> {
-    const { plugin, deviceId } = ctx;
-    const certB64 = stripPem(certPem);
-    await plugin.importCertificate(deviceId, certB64, plugin.CERT_CATEGORY_USER ?? 1);
-  },
-
-  async sign(nonce: string, pin: string, deviceId?: number): Promise<SignResult> {
-    const plugin = await this.plugin();
-    if (deviceId == null) deviceId = await this.firstDevice(plugin);
-    await rtLogin(plugin, deviceId, pin);
-    const certs: string[] = await plugin.enumerateCertificates(deviceId, plugin.CERT_CATEGORY_USER ?? 1);
-    if (!certs || certs.length === 0) throw new Error("На токене нет сертификата УДС");
-    const certId = certs[0];
-    const info = await plugin.parseCertificate(deviceId, certId);
-    const fingerprint = (info.fingerprint || info.serialNumber || "").toLowerCase();
-    const signature = await plugin.rawSign
-      ? await plugin.rawSign(deviceId, certId, btoa(nonce), {})
-      : await plugin.sign(deviceId, certId, btoa(nonce), plugin.DATA_FORMAT_PLAIN ?? 0, {});
-    return { signature, fingerprint };
-  },
-};
-
-// ════════════════════════ КРИПТОПРО ══════════════════════════════════════════
 let cpCache: any = null;
 
 const cryptopro = {
   async api(): Promise<any> {
     if (cpCache) return cpCache;
-    // Официальный cadesplugin_api.js сам внедряет глобальный window.cadesplugin
     if (!window.cadesplugin) {
       await loadScript(cadespluginUrl);
       for (let i = 0; i < 50 && !window.cadesplugin; i++) {
@@ -323,36 +79,75 @@ const cryptopro = {
     }
     const cadesplugin = window.cadesplugin;
     if (!cadesplugin) {
-      throw new Error("Не найдено расширение «CryptoPro Extension for CAdES» в браузере. Установите его и перезапустите браузер.");
+      throw new Error("Не найдено расширение «CryptoPro Extension for CAdES» в браузере. Установите КриптоПро ЭЦП Browser plug-in и включите расширение.");
     }
-
-    // window.cadesplugin — это Promise готовности. Дожидаемся его,
-    // но методы (async_spawn, CreateObjectAsync) остаются на самом объекте
-    // window.cadesplugin, а НЕ на результате await. Используем именно объект.
+    // window.cadesplugin — Promise готовности; методы остаются на самом объекте.
     try {
       await cadesplugin;
-    } catch (e) {
-      throw new Error("КриптоПро ЭЦП Browser plug-in не готов. Установите плагин и КриптоПро CSP, включите расширение и перезапустите браузер.");
+    } catch {
+      throw new Error("КриптоПро ЭЦП Browser plug-in не готов. Установите КриптоПро CSP и плагин, включите расширение и перезапустите браузер.");
     }
-
     const cp = window.cadesplugin;
-    // Проверяем, что интерфейс действительно доступен (иначе async_spawn === undefined)
     if (!cp || typeof cp.async_spawn !== "function" || typeof cp.CreateObjectAsync !== "function") {
-      throw new Error("КриптоПро ЭЦП Browser plug-in недоступен. Проверьте, что установлены КриптоПро CSP и плагин, расширение включено, и перезапустите браузер.");
+      throw new Error("КриптоПро ЭЦП Browser plug-in недоступен. Проверьте установку КриптоПро CSP и плагина, включите расширение и перезапустите браузер.");
     }
-
     cpCache = cp;
     return cp;
   },
 
+  /**
+   * Перечисляет сертификаты из личного хранилища «My» (для входа с выбором носителя).
+   */
+  async listCertificates(): Promise<CryptoProMedia[]> {
+    const cp = await this.api();
+    return await cp.async_spawn(function* (this: any): any {
+      const list: CryptoProMedia[] = [];
+      const oStore = yield cp.CreateObjectAsync("CAdESCOM.Store");
+      yield oStore.Open(2, CADES_STORE_MY, 0); // CAPICOM_CURRENT_USER_STORE, readonly
+      const oCerts = yield oStore.Certificates;
+      const count = yield oCerts.Count;
+      for (let i = 1; i <= count; i++) {
+        try {
+          const oCert = yield oCerts.Item(i);
+          const thumbprint = String(yield oCert.Thumbprint).toLowerCase();
+          const subjectName = String(yield oCert.SubjectName);
+          const issuerName = String(yield oCert.IssuerName);
+          const validTo = new Date(yield oCert.ValidToDate).toLocaleDateString("ru-RU");
+          // Имя контейнера (носителя) — из закрытого ключа, если доступно
+          let container = "";
+          try {
+            const hasPk = yield oCert.HasPrivateKey();
+            if (hasPk) {
+              const oPk = yield oCert.PrivateKey;
+              container = String(yield oPk.ContainerName);
+            }
+          } catch { /* контейнер необязателен */ }
+          list.push({
+            thumbprint,
+            subject: extractCN(subjectName),
+            issuer: extractCN(issuerName),
+            validTo,
+            container: container || "—",
+          });
+        } catch { /* пропускаем нечитаемый сертификат */ }
+      }
+      yield oStore.Close();
+      return list;
+    });
+  },
+
+  /**
+   * ШАГ 1+2. Создаёт неизвлекаемый ГОСТ-ключ в контейнере CSP и формирует CSR.
+   * Ключ генерируется КриптоПро CSP; пользователь может выбрать носитель
+   * при появлении диалога КриптоПро (реестр/носитель/токен через CSP).
+   */
   async issue(subjectCN: string): Promise<IssueResult> {
     const cp = await this.api();
-    // Генерация запроса с созданием неизвлекаемого ключа в контейнере CSP
     return await cp.async_spawn(function* (this: any): any {
       const oPrivateKey = yield cp.CreateObjectAsync("X509Enrollment.CX509PrivateKey");
-      yield oPrivateKey.propset_ProviderName("Crypto-Pro GOST R 34.10-2012 Cryptographic Service Provider");
-      yield oPrivateKey.propset_KeySpec(1);
-      yield oPrivateKey.propset_Exportable(false); // НЕизвлекаемый ключ
+      yield oPrivateKey.propset_ProviderName(GOST_2012_PROVIDER);
+      yield oPrivateKey.propset_KeySpec(1);              // AT_KEYEXCHANGE/подпись
+      yield oPrivateKey.propset_Exportable(false);       // НЕизвлекаемый ключ
       const oRequest = yield cp.CreateObjectAsync("X509Enrollment.CX509CertificateRequestPkcs10");
       yield oRequest.InitializeFromPrivateKey(1, oPrivateKey, "");
       const oDN = yield cp.CreateObjectAsync("X509Enrollment.CX500DistinguishedName");
@@ -360,97 +155,110 @@ const cryptopro = {
       yield oRequest.propset_Subject(oDN);
       const oEnroll = yield cp.CreateObjectAsync("X509Enrollment.CX509Enrollment");
       yield oEnroll.InitializeFromRequest(oRequest);
-      const csrB64 = yield oEnroll.CreateRequest(1);
+      const csrB64 = yield oEnroll.CreateRequest(1);     // base64 PKCS#10
       return { csr: csrB64.includes(PEM_HEAD) ? csrB64 : toPemCsr(csrB64), context: { oEnroll } };
     });
   },
 
+  /** ШАГ 3. Устанавливает выпущенный сертификат в контейнер CSP. */
   async install(ctx: any, certPem: string): Promise<void> {
     const cp = await this.api();
     const certB64 = stripPem(certPem);
     await cp.async_spawn(function* (this: any): any {
-      const oEnroll = ctx.oEnroll || (yield cp.CreateObjectAsync("X509Enrollment.CX509Enrollment"));
+      const oEnroll = ctx?.oEnroll || (yield cp.CreateObjectAsync("X509Enrollment.CX509Enrollment"));
       yield oEnroll.InstallResponse(0, certB64, 0, "");
     });
   },
 
-  async sign(nonce: string): Promise<SignResult> {
+  /**
+   * Подпись nonce выбранным сертификатом (вход).
+   * thumbprint — отпечаток выбранного носителя/сертификата; если не задан,
+   * берётся первый доступный.
+   */
+  async sign(nonce: string, thumbprint?: string): Promise<SignResult> {
     const cp = await this.api();
     return await cp.async_spawn(function* (this: any): any {
       const oStore = yield cp.CreateObjectAsync("CAdESCOM.Store");
-      yield oStore.Open(2, "My", 0);
+      yield oStore.Open(2, CADES_STORE_MY, 0);
       const oCerts = yield oStore.Certificates;
       const count = yield oCerts.Count;
-      if (count < 1) throw new Error("Нет сертификата УДС в хранилище");
-      const oCert = yield oCerts.Item(1);
-      const thumb = (yield oCert.Thumbprint).toLowerCase();
+      if (count < 1) { yield oStore.Close(); throw new Error("Нет сертификата УДС в хранилище КриптоПро"); }
+
+      // Выбираем сертификат по отпечатку, иначе — первый
+      let oCert: any = null;
+      if (thumbprint) {
+        const tp = thumbprint.toLowerCase();
+        for (let i = 1; i <= count; i++) {
+          const c = yield oCerts.Item(i);
+          const t = String(yield c.Thumbprint).toLowerCase();
+          if (t === tp) { oCert = c; break; }
+        }
+        if (!oCert) { yield oStore.Close(); throw new Error("Выбранный носитель/сертификат не найден в хранилище"); }
+      } else {
+        oCert = yield oCerts.Item(1);
+      }
+
+      const thumb = String(yield oCert.Thumbprint).toLowerCase();
       const oSigner = yield cp.CreateObjectAsync("CAdESCOM.CPSigner");
       yield oSigner.propset_Certificate(oCert);
-      const oSignedData = yield cp.CreateObjectAsync("CAdESCOM.CADESCOM_BASE64_TO_BINARY");
-      yield oSignedData;
       const oSD = yield cp.CreateObjectAsync("CAdESCOM.CadesSignedData");
       yield oSD.propset_Content(btoa(nonce));
       const signature = yield oSD.SignCades(oSigner, 1, true);
       yield oStore.Close();
-      return { signature: signature.replace(/\s+/g, ""), fingerprint: thumb };
+      return { signature: String(signature).replace(/\s+/g, ""), fingerprint: thumb };
     });
   },
 };
+
+function extractCN(dn: string): string {
+  const m = dn.match(/CN=([^,]+)/i);
+  return m ? m[1].trim() : dn;
+}
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
-// ── Унифицированный фасад ─────────────────────────────────────────────────────
+// ── Унифицированный фасад (только КриптоПро) ──────────────────────────────────
 export const cryptoPlugins = {
-  /** ШАГ 1 (только Рутокен): создать ГОСТ-контейнер на выбранном носителе. */
-  async createRutokenContainer(pin?: string, deviceId?: number): Promise<GostContainer> {
-    return rutoken.createGostContainer(pin || "", deviceId);
+  /** Создать ГОСТ-ключ в контейнере CSP и получить CSR. */
+  async issue(subjectCN: string): Promise<IssueResult> {
+    return cryptopro.issue(subjectCN);
   },
 
-  async issue(type: ContainerType, subjectCN: string, pin?: string, deviceId?: number, container?: GostContainer): Promise<IssueResult> {
-    return type === "rutoken"
-      ? rutoken.issue(subjectCN, pin || "", deviceId, container)
-      : cryptopro.issue(subjectCN);
-  },
-  async install(type: ContainerType, ctx: unknown, certPem: string): Promise<void> {
-    return type === "rutoken" ? rutoken.install(ctx, certPem) : cryptopro.install(ctx, certPem);
-  },
-  async sign(type: ContainerType, nonce: string, pin?: string, deviceId?: number): Promise<SignResult> {
-    return type === "rutoken" ? rutoken.sign(nonce, pin || "", deviceId) : cryptopro.sign(nonce);
+  /** Установить выпущенный сертификат УДС в контейнер КриптоПро. */
+  async install(ctx: unknown, certPem: string): Promise<void> {
+    return cryptopro.install(ctx, certPem);
   },
 
-  /** Список подключённых носителей Рутокен (для выбора конкретного токена). */
-  async listRutokenDevices(): Promise<RutokenDevice[]> {
+  /** Подписать nonce выбранным сертификатом (вход). */
+  async sign(nonce: string, thumbprint?: string): Promise<SignResult> {
+    return cryptopro.sign(nonce, thumbprint);
+  },
+
+  /** Список сертификатов/носителей для выбора при входе. */
+  async listCertificates(): Promise<CryptoProMedia[]> {
     try {
-      return await rutoken.listDevices();
+      return await cryptopro.listCertificates();
     } catch {
       return [];
     }
   },
 
-  /** Проверяет, установлен ли и доступен плагин нужного типа. */
-  async isAvailable(type: ContainerType): Promise<boolean> {
+  /** Проверяет доступность КриптоПро. */
+  async isAvailable(): Promise<boolean> {
     try {
-      if (type === "rutoken") {
-        const plugin = await rutoken.plugin();
-        return !!plugin;
-      }
-      const cp = await cryptopro.api();
-      return !!cp;
+      await cryptopro.api();
+      return true;
     } catch {
       return false;
     }
   },
 
   /** Возвращает {ok, reason} с понятным объяснением, чего не хватает. */
-  async diagnose(type: ContainerType): Promise<{ ok: boolean; reason: string }> {
+  async diagnose(): Promise<{ ok: boolean; reason: string }> {
     try {
-      if (type === "rutoken") {
-        await rutoken.plugin();
-        return { ok: true, reason: "Плагин Рутокен готов" };
-      }
       await cryptopro.api();
       return { ok: true, reason: "КриптоПро готов" };
     } catch (e) {
-      return { ok: false, reason: (e as Error).message || "Плагин не найден" };
+      return { ok: false, reason: (e as Error).message || "КриптоПро не найден" };
     }
   },
 };

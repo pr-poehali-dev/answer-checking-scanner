@@ -1369,11 +1369,12 @@ def handler(event: dict, context) -> dict:
                 "revoked_by": r[9], "revoked_at": str(r[10]) if r[10] else None,
             }})
 
-        # ── cert-agree — сотрудник согласился, выбрал носитель ──────────────
+        # ── cert-agree — сотрудник согласился на выпуск (носитель — КриптоПро) ──
         if action == "cert-agree" and method == "POST":
-            container_type = (body.get("container_type") or "").strip().lower()
-            if container_type not in ("rutoken", "cryptopro"):
-                return _resp(400, {"error": "Выберите носитель: rutoken или cryptopro"})
+            container_type = (body.get("container_type") or "cryptopro").strip().lower()
+            # Выпуск и хранение ключа ГОСТ — только через КриптоПро
+            if container_type != "cryptopro":
+                container_type = "cryptopro"
             cur = conn.cursor()
             # Любой сотрудник может выпускать сертификат сам, в любой момент.
             # Старый активный сертификат не мешает — отзываем его при новом выпуске.

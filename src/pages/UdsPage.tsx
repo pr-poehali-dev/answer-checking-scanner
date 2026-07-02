@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { udsApi, UdsPerms, UdsCert } from "@/lib/api";
-import { cryptoPlugins, ContainerType } from "@/lib/cryptoPlugins";
+import { cryptoPlugins, CryptoProMedia } from "@/lib/cryptoPlugins";
 import UdsCertIssue from "@/pages/uds/UdsCertIssue";
 import UdsLoginForm from "@/pages/uds/UdsLoginForm";
 import UdsDashboard from "@/pages/uds/UdsDashboard";
@@ -26,6 +26,8 @@ export default function UdsPage() {
   const [smsHint, setSmsHint] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [certList, setCertList] = useState<CryptoProMedia[] | null>(null);
+  const [certLoading, setCertLoading] = useState(false);
   const [tab, setTab] = useState<Tab>("employees");
   const [logoClicks, setLogoClicks] = useState(0);
   const lastActivityRef = useRef<number>(Date.now());
@@ -100,12 +102,31 @@ export default function UdsPage() {
     } catch { /* ignore */ }
   }, [refreshMe]);
 
-  // Вход по сертификату
-  const certLogin = async (containerType: ContainerType, pin?: string) => {
+  // Загрузка списка сертификатов КриптоПро для выбора носителя
+  const loadCertificates = useCallback(async () => {
+    setCertLoading(true); setError("");
+    try {
+      const diag = await cryptoPlugins.diagnose();
+      if (!diag.ok) { setError(diag.reason); setCertList([]); return; }
+      const list = await cryptoPlugins.listCertificates();
+      setCertList(list);
+      if (list.length === 0) {
+        setError("В хранилище КриптоПро нет сертификатов. Сначала выпустите сертификат УДС.");
+      }
+    } catch (e) {
+      setError((e as Error).message);
+      setCertList([]);
+    } finally {
+      setCertLoading(false);
+    }
+  }, []);
+
+  // Вход по выбранному сертификату (носителю) КриптоПро
+  const certLogin = async (thumbprint?: string) => {
     setBusy(true); setError("");
     try {
       const { nonce } = await udsApi.certChallenge();
-      const { signature, fingerprint } = await cryptoPlugins.sign(containerType, nonce, pin);
+      const { signature, fingerprint } = await cryptoPlugins.sign(nonce, thumbprint);
       const res = await udsApi.certLogin(fingerprint, nonce, signature);
       applyAuth(res);
     } catch (e) {
@@ -200,6 +221,9 @@ export default function UdsPage() {
         error={error}
         onLogoClick={onLogoClick}
         certLogin={certLogin}
+        certList={certList}
+        certLoading={certLoading}
+        loadCertificates={loadCertificates}
         verifyIis={verifyIis}
         doLogin={doLogin}
         doVerifySms={doVerifySms}

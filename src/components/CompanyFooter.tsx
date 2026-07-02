@@ -6,11 +6,11 @@ interface CompanyFooterProps {
 }
 
 export const COMPANY_INFO = {
-  fullName: "ООО «РАССВЕТ»",
-  legalName: 'ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ "РАССВЕТ"',
-  inn: "2907011706",
+  fullName: "ООО «Компания «Немзор»",
+  legalName: 'ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ "КОМПАНИЯ "НЕМЗОР"',
+  inn: "2907019688",
   kpp: "290701001",
-  ogrn: "1062907013707",
+  ogrn: "1262900002947",
   phone: "+7 (995) 222-81-29",
   phoneLink: "+79952228129",
   email: "ooorassvet29@yandex.ru",

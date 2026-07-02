@@ -321,12 +321,26 @@ const cryptopro = {
         await new Promise((r) => setTimeout(r, 100));
       }
     }
-    const cp = window.cadesplugin;
-    if (!cp) {
+    const cadesplugin = window.cadesplugin;
+    if (!cadesplugin) {
       throw new Error("Не найдено расширение «CryptoPro Extension for CAdES» в браузере. Установите его и перезапустите браузер.");
     }
-    // Дожидаемся готовности плагина (cadesplugin — это Promise)
-    await cp;
+
+    // window.cadesplugin — это Promise готовности. Дожидаемся его,
+    // но методы (async_spawn, CreateObjectAsync) остаются на самом объекте
+    // window.cadesplugin, а НЕ на результате await. Используем именно объект.
+    try {
+      await cadesplugin;
+    } catch (e) {
+      throw new Error("КриптоПро ЭЦП Browser plug-in не готов. Установите плагин и КриптоПро CSP, включите расширение и перезапустите браузер.");
+    }
+
+    const cp = window.cadesplugin;
+    // Проверяем, что интерфейс действительно доступен (иначе async_spawn === undefined)
+    if (!cp || typeof cp.async_spawn !== "function" || typeof cp.CreateObjectAsync !== "function") {
+      throw new Error("КриптоПро ЭЦП Browser plug-in недоступен. Проверьте, что установлены КриптоПро CSP и плагин, расширение включено, и перезапустите браузер.");
+    }
+
     cpCache = cp;
     return cp;
   },

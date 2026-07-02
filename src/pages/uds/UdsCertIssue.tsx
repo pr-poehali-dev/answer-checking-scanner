@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Icon from "@/components/ui/icon";
 import { udsApi, UdsCert } from "@/lib/api";
-import { cryptoPlugins, ContainerType, RutokenDevice } from "@/lib/cryptoPlugins";
+import { cryptoPlugins, ContainerType, RutokenDevice, GostContainer } from "@/lib/cryptoPlugins";
 
 type PluginState = "checking" | "ok" | "missing";
 
@@ -73,16 +73,31 @@ export default function UdsCertIssue({ login, token, cert, onDone, onLogout }: P
       setStage("Подтверждаем выбор носителя…");
       await udsApi.certAgree(login, token, type);
 
+      // Для Рутокена — сначала ШАГ 1: создаём ГОСТ-контейнер на токене,
+      // и только после его успешного создания — ШАГ 2: выпуск сертификата.
+      let gostContainer: GostContainer | undefined;
+      if (type === "rutoken") {
+        setStage("Шаг 1 из 3. Создаём ГОСТ-контейнер на Рутокене…");
+        gostContainer = await cryptoPlugins.createRutokenContainer(
+          pin || undefined,
+          rtDeviceId ?? undefined,
+        );
+        setStage(`ГОСТ-контейнер создан (${gostContainer.algorithm}). Формируем запрос…`);
+      }
+
       setStage(type === "rutoken"
-        ? "Генерируем ключевую пару на Рутокене…"
+        ? "Шаг 2 из 3. Формируем запрос на сертификат…"
         : "Генерируем ключевую пару в КриптоПро…");
       const subjectCN = cert ? (cert.serial_number || login) : login;
       const { csr, context } = await cryptoPlugins.issue(
         type, displayName(subjectCN), pin || undefined,
         type === "rutoken" ? (rtDeviceId ?? undefined) : undefined,
+        gostContainer,
       );
 
-      setStage("Управление УДС «САОУ» выпускает сертификат…");
+      setStage(type === "rutoken"
+        ? "Шаг 3 из 3. Управление УДС «САОУ» выпускает сертификат…"
+        : "Управление УДС «САОУ» выпускает сертификат…");
       const res = await udsApi.signCsr(login, token, csr);
 
       setStage("Устанавливаем сертификат на носитель…");
@@ -236,7 +251,7 @@ export default function UdsCertIssue({ login, token, cert, onDone, onLogout }: P
                 <PluginBadge state={rtState} />
                 <Icon name="Usb" size={28} className="text-blue-400" fallback="HardDrive" />
                 <span className="text-sm font-semibold">На Рутокен</span>
-                <span className="text-[10px] text-slate-500">аппаратный носитель</span>
+                <span className="text-[10px] text-slate-500">ГОСТ-контейнер + сертификат</span>
               </button>
               <button onClick={() => issue("cryptopro")} disabled={busy || cpState !== "ok"}
                 className="relative flex flex-col items-center gap-2 py-6 bg-slate-800 border border-slate-700 rounded-xl hover:border-blue-500 hover:bg-slate-700 disabled:opacity-50 disabled:hover:border-slate-700 transition-colors">

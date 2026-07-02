@@ -28,6 +28,17 @@ export interface RutokenDevice {
   supportsGost: boolean;// эвристика поддержки ГОСТ по модели
 }
 
+// ГОСТ-контейнер, созданный на токене (ШАГ 1 перед выпуском сертификата)
+ 
+export interface GostContainer {
+  /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+  plugin: any;
+  deviceId: number;
+  keyId: string;
+  pin: string;
+  algorithm: string;    // человекочитаемое имя сработавшего ГОСТ-алгоритма
+}
+
 const PEM_HEAD = "-----BEGIN CERTIFICATE REQUEST-----";
 const PEM_FOOT = "-----END CERTIFICATE REQUEST-----";
 
@@ -158,48 +169,68 @@ const rutoken = {
     return out;
   },
 
-  async issue(subjectCN: string, pin: string, deviceId?: number): Promise<IssueResult> {
+  /**
+   * ШАГ 1. Создаёт неизвлекаемый ГОСТ-контейнер (ключевую пару) на токене.
+   * Перебирает ГОСТ-2012 (256) → ГОСТ-2001 — что поддержит токен.
+   * Возвращает контекст с keyId и названием сработавшего алгоритма.
+   */
+  async createGostContainer(pin: string, deviceId?: number): Promise<GostContainer> {
     const plugin = await this.plugin();
     if (deviceId == null) deviceId = await this.firstDevice(plugin);
     await rtLogin(plugin, deviceId, pin);
     try {
-      // Генерируем неизвлекаемую ключевую пару ГОСТ на самом токене.
-      // Перебираем варианты: ГОСТ-2012 (256), затем ГОСТ-2001 — что поддержит токен.
       const GostR3410_2012_256 = plugin.KEY_ALGORITHM_GOST3410_2012_256 ?? 4;
       const GostR3410_2001 = plugin.KEY_ALGORITHM_GOST3410_2001 ?? 1;
-      const variants: Array<{ algo: number; opts: any }> = [
-        { algo: GostR3410_2012_256, opts: { paramset: "A" } },
-        { algo: GostR3410_2012_256, opts: {} },
-        { algo: GostR3410_2001, opts: { paramset: "A" } },
-        { algo: GostR3410_2001, opts: {} },
+      const variants: Array<{ algo: number; opts: any; name: string }> = [
+        { algo: GostR3410_2012_256, opts: { paramset: "A" }, name: "ГОСТ Р 34.10-2012 (256 бит)" },
+        { algo: GostR3410_2012_256, opts: {}, name: "ГОСТ Р 34.10-2012 (256 бит)" },
+        { algo: GostR3410_2001, opts: { paramset: "A" }, name: "ГОСТ Р 34.10-2001" },
+        { algo: GostR3410_2001, opts: {}, name: "ГОСТ Р 34.10-2001" },
       ];
 
       let keyId: string | null = null;
+      let algorithm = "";
       let lastErr: any = null;
       for (const v of variants) {
         try {
-          // Сигнатура: generateKeyPair(deviceId, extractable, keyLabel, keyOptions, keyAlgorithm)
+          // generateKeyPair(deviceId, extractable, keyLabel, keyOptions, keyAlgorithm)
           keyId = await plugin.generateKeyPair(deviceId, false, "", v.opts, v.algo);
-          if (keyId != null) break;
+          if (keyId != null) { algorithm = v.name; break; }
         } catch (e) {
           lastErr = e;
         }
       }
-      // Последняя попытка — старая сигнатура без алгоритма
+      // Последняя попытка — старая сигнатура без явного алгоритма
       if (keyId == null) {
         try {
           keyId = await plugin.generateKeyPair(deviceId, false, "", { paramset: "A" });
+          algorithm = "ГОСТ (авто)";
         } catch (e) {
           lastErr = e;
         }
       }
-      if (keyId == null) throw lastErr ?? new Error("Не удалось создать ключ на Рутокене");
+      if (keyId == null) throw lastErr ?? new Error("Не удалось создать ГОСТ-контейнер на Рутокене");
 
+      return { plugin, deviceId, keyId, pin, algorithm };
+    } catch (e) {
+      throw new Error(rutokenErrorMessage(e));
+    }
+  },
+
+  /**
+   * ШАГ 2. Формирует запрос на сертификат (CSR) на основе готового ГОСТ-контейнера.
+   * Если контейнер не передан — создаёт его сам (обратная совместимость).
+   */
+  async issue(subjectCN: string, pin: string, deviceId?: number, container?: GostContainer): Promise<IssueResult> {
+    const ctn = container ?? await this.createGostContainer(pin, deviceId);
+    const { plugin, deviceId: devId, keyId } = ctn;
+    try {
       const dn = [{ rdn: "commonName", value: subjectCN }, { rdn: "organizationName", value: "САОУ" }, { rdn: "organizationUnitName", value: "УДС" }];
       let csrB64: string | null = null;
+      let lastErr: any = null;
       for (const csrOpts of [{ signAlgorithm: "GOST R 34.10-2012-256" }, {}]) {
         try {
-          csrB64 = await plugin.createPkcs10(deviceId, keyId, { dn }, csrOpts);
+          csrB64 = await plugin.createPkcs10(devId, keyId, { dn }, csrOpts);
           if (csrB64) break;
         } catch (e) {
           lastErr = e;
@@ -207,7 +238,7 @@ const rutoken = {
       }
       if (!csrB64) throw lastErr ?? new Error("Не удалось создать запрос на сертификат");
 
-      return { csr: csrB64.includes(PEM_HEAD) ? csrB64 : toPemCsr(csrB64), context: { plugin, deviceId, keyId, pin } };
+      return { csr: csrB64.includes(PEM_HEAD) ? csrB64 : toPemCsr(csrB64), context: { plugin, deviceId: devId, keyId, pin } };
     } catch (e) {
       throw new Error(rutokenErrorMessage(e));
     }
@@ -313,8 +344,15 @@ const cryptopro = {
 
 // ── Унифицированный фасад ─────────────────────────────────────────────────────
 export const cryptoPlugins = {
-  async issue(type: ContainerType, subjectCN: string, pin?: string, deviceId?: number): Promise<IssueResult> {
-    return type === "rutoken" ? rutoken.issue(subjectCN, pin || "", deviceId) : cryptopro.issue(subjectCN);
+  /** ШАГ 1 (только Рутокен): создать ГОСТ-контейнер на выбранном носителе. */
+  async createRutokenContainer(pin?: string, deviceId?: number): Promise<GostContainer> {
+    return rutoken.createGostContainer(pin || "", deviceId);
+  },
+
+  async issue(type: ContainerType, subjectCN: string, pin?: string, deviceId?: number, container?: GostContainer): Promise<IssueResult> {
+    return type === "rutoken"
+      ? rutoken.issue(subjectCN, pin || "", deviceId, container)
+      : cryptopro.issue(subjectCN);
   },
   async install(type: ContainerType, ctx: unknown, certPem: string): Promise<void> {
     return type === "rutoken" ? rutoken.install(ctx, certPem) : cryptopro.install(ctx, certPem);

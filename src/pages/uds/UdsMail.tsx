@@ -95,11 +95,13 @@ export default function UdsMail({ login, token, myAddress }: Props) {
     if (!peer || !draft.trim()) return;
     setSending(true); setError("");
     try {
-      await udsApi.mailSend(login, token, peer.address, subject.trim(), draft.trim());
+      const res = await udsApi.mailSend(login, token, peer.address, subject.trim(), draft.trim());
       setDraft(""); setSubject("");
       const d = await udsApi.mailThread(login, token, peer.address);
       setMessages(d.messages);
       loadThreads();
+      // Сообщение сохранено, но не ушло на внешний адрес — предупреждаем
+      if (res.warning) setError(res.warning);
     } catch (e) { setError((e as Error).message); }
     finally { setSending(false); }
   };

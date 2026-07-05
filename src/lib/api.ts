@@ -614,7 +614,7 @@ export const udsApi = {
     udsRequest<{ messages: MailMessage[]; my_address: string }>("mail-thread", "GET", login, token, undefined, { peer }),
 
   mailSend: (login: string, token: string, to: string, subject: string, body: string) =>
-    udsRequest<{ ok: boolean; id: number; created_at: string; external_sent: boolean }>(
+    udsRequest<{ ok: boolean; id: number; created_at: string; external_sent: boolean; warning?: string | null }>(
       "mail-send", "POST", login, token, { to, subject, body }
     ),
 

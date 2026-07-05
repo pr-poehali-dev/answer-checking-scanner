@@ -266,12 +266,15 @@ SMTP_HOST = os.environ.get("UDS_SMTP_HOST", "").strip()
 SMTP_PORT = int(os.environ.get("UDS_SMTP_PORT") or "465")
 
 
-def _server_host_from_isp():
-    """Извлекает хост сервера хостинга из ISPMANAGER_URL (напр. server185.hosting.reg.ru).
+# Отдельный SMTP-хост для отправки писем сотрудников (если общий не работает)
+MAIL_SMTP_HOST = os.environ.get("MAIL_SMTP_HOST", "").strip()
 
-    Именно персональный сервер хостинга обычно принимает SMTP-авторизацию ящиков,
-    тогда как общий mail.hosting.reg.ru может обрывать соединение.
-    """
+# Быстрый таймаут на попытку, чтобы уложиться в лимит функции (30 сек)
+SMTP_TIMEOUT = 7
+
+
+def _server_host_from_isp():
+    """Извлекает хост сервера хостинга из ISPMANAGER_URL (напр. server185.hosting.reg.ru)."""
     url = os.environ.get("ISPMANAGER_URL", "").strip()
     if not url:
         return None
@@ -283,22 +286,19 @@ def _server_host_from_isp():
 def _smtp_candidates():
     """Список вариантов (host, port, mode) для перебора при отправке.
 
-    mode: 'ssl' (SMTPS 465) или 'starttls' (587). Рег.ру принимает оба, но
-    один из хостов/портов может обрывать соединение — перебираем рабочий.
+    Приоритет — персональному серверу хостинга (server185...), т.к. общий
+    mail.hosting.reg.ru часто обрывает соединение. Держим короткий список,
+    чтобы не упереться в таймаут функции.
     """
     hosts = []
-    # Приоритет: заданный SMTP-хост, затем персональный сервер хостинга, затем общий
-    for h in [SMTP_HOST, _server_host_from_isp(), "mail.hosting.reg.ru"]:
+    # Приоритет: явный MAIL_SMTP_HOST → сервер из ISP → заданный UDS_SMTP_HOST → общий
+    for h in [MAIL_SMTP_HOST, _server_host_from_isp(), SMTP_HOST, "mail.hosting.reg.ru"]:
         if h and h not in hosts:
             hosts.append(h)
     candidates = []
     for h in hosts:
-        if SMTP_PORT == 465:
-            candidates.append((h, 465, "ssl"))
-            candidates.append((h, 587, "starttls"))
-        else:
-            candidates.append((h, SMTP_PORT, "starttls"))
-            candidates.append((h, 465, "ssl"))
+        candidates.append((h, 465, "ssl"))
+        candidates.append((h, 587, "starttls"))
     return candidates
 
 
@@ -318,17 +318,29 @@ def send_external_email(from_address: str, from_password: str, from_name: str,
     msg.attach(MIMEText(body, "plain", "utf-8"))
     raw = msg.as_string()
 
+    import socket
     ctx = ssl.create_default_context()
     last_err = None
     auth_failed = False
+    unresolved = set()
     for host, port, mode in _smtp_candidates():
+        # Хост не резолвится — пропускаем сразу, без ожидания
+        if host in unresolved:
+            continue
+        try:
+            socket.getaddrinfo(host, port)
+        except Exception:
+            unresolved.add(host)
+            last_err = f"хост {host} не найден"
+            print(f"[UDS SMTP] DNS FAIL {host}")
+            continue
         try:
             if mode == "ssl":
-                with smtplib.SMTP_SSL(host, port, context=ctx, timeout=20) as s:
+                with smtplib.SMTP_SSL(host, port, context=ctx, timeout=SMTP_TIMEOUT) as s:
                     s.login(from_address, from_password)
                     s.sendmail(from_address, [to_address], raw)
             else:
-                with smtplib.SMTP(host, port, timeout=20) as s:
+                with smtplib.SMTP(host, port, timeout=SMTP_TIMEOUT) as s:
                     s.ehlo(); s.starttls(context=ctx); s.ehlo()
                     s.login(from_address, from_password)
                     s.sendmail(from_address, [to_address], raw)

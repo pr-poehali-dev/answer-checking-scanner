@@ -2059,11 +2059,14 @@ def handler(event: dict, context) -> dict:
             to_login = rcp[0] if rcp else None
             to_name = rcp[1] if rcp else to_addr
 
-            internal = mail.is_internal(to_addr)
+            # Внутренний получатель — если это пользователь системы (@ooo29.ru
+            # или найден по email). Тогда это мессенджер, SMTP не нужен.
+            internal = mail.is_internal(to_addr) or (to_login is not None)
             external_sent = False
             direction = "internal" if internal else "outbound"
+            send_error = None
 
-            # Реальная отправка наружу (или на любой адрес, если есть пароль почты)
+            # Реальная отправка наружу — только на внешние адреса (не пользователям системы)
             if not internal:
                 if not pass_set or not my_pass_enc:
                     return _resp(400, {"error": "Сначала установите пароль почты, чтобы писать на внешние адреса"})
@@ -2072,7 +2075,9 @@ def handler(event: dict, context) -> dict:
                     mail.send_external_email(my_addr, my_pass, my_name, to_addr, subject or "(без темы)", text)
                     external_sent = True
                 except Exception as e:
-                    return _resp(503, {"error": f"Не удалось отправить письмо: {e}"})
+                    # Не теряем сообщение: сохраняем в переписку и предупреждаем
+                    send_error = str(e)[:300]
+                    print(f"[UDS MAIL] send failed: {e}")
 
             tk = mail.thread_key(my_addr, to_addr)
             cur.execute(
@@ -2088,6 +2093,7 @@ def handler(event: dict, context) -> dict:
             return _resp(200, {
                 "ok": True, "id": mid, "created_at": str(created),
                 "external_sent": external_sent,
+                "warning": (f"Сообщение сохранено, но не ушло на внешний адрес: {send_error}" if send_error else None),
             })
 
         return _resp(404, {"error": f"Неизвестный action: {action}"})

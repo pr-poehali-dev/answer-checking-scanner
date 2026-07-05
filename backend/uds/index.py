@@ -1363,6 +1363,67 @@ def handler(event: dict, context) -> dict:
                     for x in cur.fetchall()]
             return _resp(200, {"logs": logs})
 
+        # ── consents — журнал согласий пользователей (Глава/Зам) ──────────────
+        # Доказательная база: кто, когда, с какого IP и с какой редакцией
+        # документов согласился. Доступно только Главе и Зам. Главы.
+        if action == "consents" and method == "GET":
+            if my_role not in FULL_ACCESS_ROLES and not caller.get("is_admin"):
+                return _resp(403, {"error": "Журнал согласий доступен только Главе и Зам. Главы"})
+            q = (qs.get("q") or "").strip().lower()
+            ctx = (qs.get("context") or "").strip().lower()
+            cur = conn.cursor()
+            base = f"""SELECT id, user_id, login, full_name, email, phone, context,
+                              documents, app_version, privacy_revision, oferta_revision,
+                              documents_hash, ip_address, user_agent, institution_id, created_at
+                       FROM {SCHEMA}.user_consents"""
+            conds, params = [], []
+            if q:
+                like = f"%{q}%"
+                conds.append("""(LOWER(COALESCE(login,'')) LIKE %s OR LOWER(COALESCE(full_name,'')) LIKE %s
+                                 OR LOWER(COALESCE(email,'')) LIKE %s OR COALESCE(phone,'') LIKE %s)""")
+                params += [like, like, like, like]
+            if ctx:
+                conds.append("LOWER(context) = %s")
+                params.append(ctx)
+            where = (" WHERE " + " AND ".join(conds)) if conds else ""
+            cur.execute(base + where + " ORDER BY created_at DESC LIMIT 500", tuple(params))
+            consents = [{
+                "id": x[0], "user_id": x[1], "login": x[2], "full_name": x[3],
+                "email": x[4], "phone": x[5], "context": x[6], "documents": x[7],
+                "app_version": x[8], "privacy_revision": x[9], "oferta_revision": x[10],
+                "documents_hash": x[11], "ip_address": x[12], "user_agent": x[13],
+                "institution_id": x[14], "created_at": str(x[15]) if x[15] else None,
+            } for x in cur.fetchall()]
+            log_action(cur, caller["login"], my_role, "view_consents", None,
+                       {"q": q or None, "context": ctx or None})
+            conn.commit()
+            return _resp(200, {"consents": consents})
+
+        # ── user-consents — согласия конкретного пользователя (карточка) ──────
+        if action == "user-consents" and method == "GET":
+            if my_role not in FULL_ACCESS_ROLES and not caller.get("is_admin"):
+                return _resp(403, {"error": "Согласия доступны только Главе и Зам. Главы"})
+            tl = (qs.get("target_login") or "").strip()
+            if not tl:
+                return _resp(400, {"error": "Укажите пользователя"})
+            cur = conn.cursor()
+            cur.execute(
+                f"""SELECT id, user_id, login, full_name, email, phone, context,
+                           documents, app_version, privacy_revision, oferta_revision,
+                           documents_hash, ip_address, user_agent, institution_id, created_at
+                    FROM {SCHEMA}.user_consents
+                    WHERE login = %s OR user_id = (SELECT id FROM {SCHEMA}.users WHERE login = %s)
+                    ORDER BY created_at DESC LIMIT 100""", (tl, tl)
+            )
+            consents = [{
+                "id": x[0], "user_id": x[1], "login": x[2], "full_name": x[3],
+                "email": x[4], "phone": x[5], "context": x[6], "documents": x[7],
+                "app_version": x[8], "privacy_revision": x[9], "oferta_revision": x[10],
+                "documents_hash": x[11], "ip_address": x[12], "user_agent": x[13],
+                "institution_id": x[14], "created_at": str(x[15]) if x[15] else None,
+            } for x in cur.fetchall()]
+            return _resp(200, {"consents": consents})
+
         # ── users — список/поиск пользователей ───────────────────────────────
         if action == "users" and method == "GET":
             q = (qs.get("q") or "").strip().lower()

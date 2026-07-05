@@ -128,7 +128,38 @@ def _row_to_dict(r) -> dict:
     return d
 
 
-def handle_submit(body: dict) -> dict:
+def _client_ip(event: dict) -> str:
+    headers = {k.lower(): v for k, v in (event.get("headers") or {}).items()}
+    xff = headers.get("x-forwarded-for") or ""
+    if xff:
+        return xff.split(",")[0].strip()[:64]
+    ip = ((event.get("requestContext") or {}).get("identity") or {}).get("sourceIp")
+    return (ip or "")[:64]
+
+
+def _record_consent(cur, *, full_name, email, phone, consent, ip, user_agent):
+    consent = consent or {}
+    cur.execute(
+        f"""INSERT INTO {SCHEMA}.user_consents
+            (user_id, login, full_name, email, phone, context, documents,
+             app_version, privacy_revision, oferta_revision, documents_hash,
+             ip_address, user_agent, institution_id)
+            VALUES (NULL,NULL,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NULL)""",
+        (
+            (full_name or "")[:256], (email or "")[:256] or None,
+            (phone or "")[:32] or None,
+            (consent.get("context") or "sjou_application")[:64],
+            (consent.get("documents") or "oferta,privacy")[:64],
+            (consent.get("app_version") or "")[:32] or None,
+            (consent.get("privacy_revision") or "")[:32] or None,
+            (consent.get("oferta_revision") or "")[:32] or None,
+            (consent.get("documents_hash") or "")[:64] or None,
+            ip or None, (user_agent or "")[:2000] or None,
+        ),
+    )
+
+
+def handle_submit(body: dict, event: dict = None) -> dict:
     required = ["oo_full_name", "oo_type", "inn", "legal_address", "region",
                 "director_name", "contact_name", "contact_phone", "contact_email"]
     for f in required:
@@ -180,6 +211,18 @@ def handle_submit(body: dict) -> dict:
             ),
         )
         new_id = cur.fetchone()[0]
+        # Фиксируем согласие контактного лица (доказательная база)
+        if event is not None:
+            hdrs = {k.lower(): v for k, v in (event.get("headers") or {}).items()}
+            _record_consent(
+                cur,
+                full_name=body["contact_name"].strip(),
+                email=body["contact_email"].strip(),
+                phone=body["contact_phone"].strip(),
+                consent=body.get("consent") or {},
+                ip=_client_ip(event),
+                user_agent=hdrs.get("user-agent", ""),
+            )
         conn.commit()
         return _resp(200, {"ok": True, "id": new_id})
     finally:
@@ -500,7 +543,7 @@ def handler(event: dict, context) -> dict:
 
     action = body.get("action", "submit")
     if action == "submit":
-        return handle_submit(body)
+        return handle_submit(body, event)
     if action == "list":
         return handle_list(event, body)
     if action == "review":

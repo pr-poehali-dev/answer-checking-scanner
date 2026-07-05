@@ -359,7 +359,7 @@ export const appStore = {
     }
   },
 
-  signup: async (payload: { first_name: string; last_name: string; email: string; password: string; role?: "teacher" | "student"; study_group?: string }): Promise<
+  signup: async (payload: { first_name: string; last_name: string; email: string; password: string; role?: "teacher" | "student"; study_group?: string; consent?: Record<string, string> }): Promise<
     { ok: true; role: UserRole; login: string } | { ok: false; error: string }
   > => {
     try {

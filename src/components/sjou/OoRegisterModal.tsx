@@ -1,5 +1,6 @@
 import { useState } from "react";
 import Icon from "@/components/ui/icon";
+import { buildConsent } from "@/lib/appVersion";
 
 const API = "https://functions.poehali.dev/2188b28c-bef1-4cf5-9016-f25d4b79fa8a";
 
@@ -93,6 +94,7 @@ export default function OoRegisterModal({ onClose }: Props) {
           ...form,
           statement_file_b64: fileB64 || undefined,
           statement_file_name: fileName || undefined,
+          consent: buildConsent("sjou_application"),
         }),
       });
       const data = await res.json();

@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import Icon from "@/components/ui/icon";
 import { appStore } from "@/store/appStore";
 import CompanyFooter from "@/components/CompanyFooter";
+import { buildConsent } from "@/lib/appVersion";
 
 interface LoginPageProps {
   onLogin: (role: "admin" | "teacher" | "tester" | "student") => void;
@@ -85,6 +86,7 @@ export default function LoginPage({ onLogin, initialMode = "login", onBack }: Lo
       password: signupPass,
       role: signupRole,
       study_group: signupRole === "student" ? studyGroup.trim() : undefined,
+      consent: buildConsent("registration"),
     });
     setLoading(false);
     if (res.ok) onLogin(res.role);

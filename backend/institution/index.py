@@ -72,6 +72,39 @@ def get_auth_token(login: str, password: str) -> str:
     return f"ou:{hash_password(login + password + 'ou_salt')}"
 
 
+def get_client_ip(event: dict, headers: dict) -> str:
+    xff = headers.get("x-forwarded-for") or ""
+    if xff:
+        return xff.split(",")[0].strip()[:64]
+    ip = ((event.get("requestContext") or {}).get("identity") or {}).get("sourceIp")
+    return (ip or "")[:64]
+
+
+def record_consent(cur, *, user_id, login, full_name, email, phone, context,
+                   consent: dict, ip: str, user_agent: str, institution_id=None):
+    """Записывает факт согласия пользователя с документами (доказательная база)."""
+    consent = consent or {}
+    cur.execute(
+        f"""INSERT INTO {SCHEMA}.user_consents
+            (user_id, login, full_name, email, phone, context, documents,
+             app_version, privacy_revision, oferta_revision, documents_hash,
+             ip_address, user_agent, institution_id)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+        (
+            user_id, (login or "")[:64], (full_name or "")[:256],
+            (email or "")[:256] or None, (phone or "")[:32] or None,
+            (context or "registration")[:64],
+            (consent.get("documents") or "oferta,privacy")[:64],
+            (consent.get("app_version") or "")[:32] or None,
+            (consent.get("privacy_revision") or "")[:32] or None,
+            (consent.get("oferta_revision") or "")[:32] or None,
+            (consent.get("documents_hash") or "")[:64] or None,
+            ip or None, (user_agent or "")[:2000] or None,
+            institution_id,
+        ),
+    )
+
+
 def check_ou_token(headers: dict, cur) -> dict | None:
     """Проверяет токен ОУ-администратора, возвращает данные пользователя или None."""
     token = (headers.get("x-authorization") or "").strip()
@@ -193,6 +226,16 @@ def handler(event: dict, context) -> dict:
                  institution_id, admin_ou_role)
             )
             user_id = cur.fetchone()[0]
+            # Фиксируем согласие администратора ОУ (доказательная база)
+            record_consent(
+                cur, user_id=user_id, login=admin_login, full_name=full_name,
+                email=email, phone=None,
+                context=(body.get("consent") or {}).get("context") or "institution_registration",
+                consent=body.get("consent") or {},
+                ip=get_client_ip(event, headers),
+                user_agent=headers.get("user-agent", ""),
+                institution_id=institution_id,
+            )
             conn.commit()
 
             return _resp(200, {

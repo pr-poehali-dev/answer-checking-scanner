@@ -77,7 +77,7 @@ export const authApi = {
       body: JSON.stringify({ login, password }),
     }),
 
-  signup: (payload: { first_name: string; last_name: string; email: string; password: string; school?: string; role?: "teacher" | "student"; study_group?: string }) =>
+  signup: (payload: { first_name: string; last_name: string; email: string; password: string; school?: string; role?: "teacher" | "student"; study_group?: string; consent?: Record<string, string> }) =>
     request<AuthUser & { id: number; success: boolean }>("signup", {
       method: "POST",
       body: JSON.stringify(payload),
@@ -450,6 +450,25 @@ export interface UdsUser {
   bind_code: string | null;
 }
 
+export interface UdsConsent {
+  id: number;
+  user_id: number | null;
+  login: string | null;
+  full_name: string | null;
+  email: string | null;
+  phone: string | null;
+  context: string;
+  documents: string;
+  app_version: string | null;
+  privacy_revision: string | null;
+  oferta_revision: string | null;
+  documents_hash: string | null;
+  ip_address: string | null;
+  user_agent: string | null;
+  institution_id: number | null;
+  created_at: string | null;
+}
+
 async function udsRequest<T>(action: string, method: string, login: string, token: string, body?: object, query?: Record<string, string>): Promise<T> {
   const isGet = method === "GET";
   const qs = new URLSearchParams({ action });
@@ -525,6 +544,12 @@ export const udsApi = {
 
   auditLog: (login: string, token: string, targetLogin?: string) =>
     udsRequest<{ logs: UdsAuditEntry[] }>("audit-log", "GET", login, token, undefined, targetLogin ? { target_login: targetLogin } : {}),
+
+  consents: (login: string, token: string, q?: string, context?: string) =>
+    udsRequest<{ consents: UdsConsent[] }>("consents", "GET", login, token, undefined, { ...(q ? { q } : {}), ...(context ? { context } : {}) }),
+
+  userConsents: (login: string, token: string, targetLogin: string) =>
+    udsRequest<{ consents: UdsConsent[] }>("user-consents", "GET", login, token, undefined, { target_login: targetLogin }),
 
   users: (login: string, token: string, q?: string) =>
     udsRequest<{ users: UdsUser[] }>("users", "GET", login, token, undefined, q ? { q } : {}),
@@ -741,6 +766,7 @@ export const institutionApi = {
     name: string; region: string; inn: string;
     director_full_name: string; vice_director_full_name: string;
     admin_login: string; admin_password: string; admin_ou_role: string; email: string;
+    consent?: Record<string, string>;
   }) => instRequest<{ success: boolean; user_id: number; institution_id: number; login: string; full_name: string; role: string; institution_position: string; institution_name: string; token: string }>(
     "register-institution", { method: "POST", body: payload }
   ),

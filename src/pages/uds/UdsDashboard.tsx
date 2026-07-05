@@ -2,6 +2,7 @@ import Icon from "@/components/ui/icon";
 import UdsEmployees from "@/pages/uds/UdsEmployees";
 import UdsUsers from "@/pages/uds/UdsUsers";
 import UdsAuditLog from "@/pages/uds/UdsAuditLog";
+import UdsConsents from "@/pages/uds/UdsConsents";
 import UdsProfile from "@/pages/uds/UdsProfile";
 import UdsSupport from "@/pages/uds/UdsSupport";
 import UdsLkView from "@/pages/uds/UdsLkView";
@@ -23,6 +24,7 @@ interface UdsDashboardProps {
 export default function UdsDashboard({ session, tab, setTab, logout, onProfileUpdated, myMailAddress }: UdsDashboardProps) {
   const { perms } = session;
   const canModerate = ["advisor", "deputy", "head"].includes(session.panel_role) || session.login === "admin";
+  const canConsents = ["deputy", "head"].includes(session.panel_role) || session.login === "admin";
   const TABS: { id: Tab; label: string; icon: string; show: boolean; badge?: number }[] = [
     { id: "employees", label: "Сотрудники", icon: "Users", show: true },
     { id: "wards", label: "Мои подопечные", icon: "UserCheck", show: !!perms.is_curator, badge: session.pending_transfers },
@@ -33,6 +35,7 @@ export default function UdsDashboard({ session, tab, setTab, logout, onProfileUp
     { id: "lkview", label: "Вид ЛК", icon: "LayoutDashboard", show: perms.can_lkview },
     { id: "maintenance", label: "Тех. работы", icon: "Construction", show: perms.can_maintenance },
     { id: "audit", label: "Логи действий", icon: "ScrollText", show: true },
+    { id: "consents", label: "Согласия", icon: "ShieldCheck", show: canConsents },
     { id: "profile", label: "Мой профиль", icon: "UserCog", show: session.login !== "admin" },
   ].filter(t => t.show);
 
@@ -105,6 +108,9 @@ export default function UdsDashboard({ session, tab, setTab, logout, onProfileUp
         )}
         {tab === "audit" && (
           <UdsAuditLog login={session.login} token={session.token} />
+        )}
+        {tab === "consents" && (
+          <UdsConsents login={session.login} token={session.token} />
         )}
         {tab === "support" && (
           <UdsSupport login={session.login} token={session.token} panelRole={session.panel_role} />

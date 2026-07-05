@@ -2,6 +2,7 @@ import { useState } from "react";
 import Icon from "@/components/ui/icon";
 import { institutionApi } from "@/lib/api";
 import CompanyFooter from "@/components/CompanyFooter";
+import { buildConsent } from "@/lib/appVersion";
 
 const REGIONS = [
   // Россия
@@ -95,6 +96,7 @@ export default function InstitutionRegisterPage({ onSuccess, onBack }: Props) {
         vice_director_full_name: viceDirector,
         admin_login: adminLogin, admin_password: adminPassword,
         admin_ou_role: adminRole, email,
+        consent: buildConsent("institution_registration"),
       });
       onSuccess({ login: adminLogin, password: adminPassword, institution_name: name });
     } catch (e) {

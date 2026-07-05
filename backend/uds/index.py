@@ -2047,21 +2047,30 @@ def handler(event: dict, context) -> dict:
                 return _resp(404, {"error": "У вас нет почтового ящика"})
             my_addr, my_pass_enc, pass_set, my_name = r[0], r[1], r[2], r[3]
 
-            # Находим получателя среди пользователей (для снимка ФИО и login)
-            cur.execute(
-                f"""SELECT u.login, u.full_name FROM {SCHEMA}.users u
-                    LEFT JOIN {SCHEMA}.mailboxes mb ON mb.login = u.login
-                    WHERE LOWER(mb.email_address) = %s OR LOWER(u.email) = %s
-                    LIMIT 1""",
-                (to_addr, to_addr)
-            )
+            # Внутренний получатель — ТОЛЬКО корпоративный ящик (@ooo29.ru).
+            # Совпадение с личным email пользователя НЕ делает письмо внутренним —
+            # иначе mail.ru/gmail ошибочно считались бы внутренними и не уходили.
+            internal = mail.is_internal(to_addr)
+
+            # Находим получателя среди пользователей (для снимка ФИО и login).
+            # Для внутренних — по корпоративному ящику; для внешних — по личному email.
+            if internal:
+                cur.execute(
+                    f"""SELECT u.login, u.full_name FROM {SCHEMA}.users u
+                        JOIN {SCHEMA}.mailboxes mb ON mb.login = u.login
+                        WHERE LOWER(mb.email_address) = %s LIMIT 1""",
+                    (to_addr,)
+                )
+            else:
+                cur.execute(
+                    f"""SELECT u.login, u.full_name FROM {SCHEMA}.users u
+                        WHERE LOWER(u.email) = %s LIMIT 1""",
+                    (to_addr,)
+                )
             rcp = cur.fetchone()
             to_login = rcp[0] if rcp else None
             to_name = rcp[1] if rcp else to_addr
 
-            # Внутренний получатель — если это пользователь системы (@ooo29.ru
-            # или найден по email). Тогда это мессенджер, SMTP не нужен.
-            internal = mail.is_internal(to_addr) or (to_login is not None)
             external_sent = False
             direction = "internal" if internal else "outbound"
             send_error = None

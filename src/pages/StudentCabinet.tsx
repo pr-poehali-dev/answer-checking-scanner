@@ -12,6 +12,7 @@ import { ChatSection } from "@/components/scanner/ChatSection";
 import { SupportSection } from "@/components/scanner/SupportSection";
 import { StudentPresentationsSection } from "@/components/scanner/StudentPresentationsSection";
 import { MyMaterialsSection } from "@/components/scanner/MyMaterialsSection";
+import { ProjectSection } from "@/components/scanner/ProjectSection";
 import TokensModal from "@/components/TokensModal";
 import SubscriptionGate from "@/components/SubscriptionGate";
 import YadiskRequiredGate from "@/components/YadiskRequiredGate";
@@ -27,6 +28,7 @@ const SECTION_COMPONENTS: Partial<Record<Section, React.FC>> = {
   exams: ExamsSection,
   fipiExams: FipiExamsSection,
   chat: ChatSection,
+  project: ProjectSection,
   materials: MyMaterialsSection,
   support: SupportSection,
   settings: StudentSettingsSection,

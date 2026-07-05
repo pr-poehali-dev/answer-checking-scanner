@@ -14,7 +14,8 @@ export type Section =
   | "collective"
   | "support"
   | "myResults"
-  | "materials";
+  | "materials"
+  | "project";
 
 export const NAV_ITEMS: { id: Section; label: string; icon: string }[] = [
   { id: "works", label: "Работы", icon: "ClipboardList" },
@@ -42,6 +43,7 @@ export const STUDENT_NAV_ITEMS: { id: Section; label: string; icon: string }[] =
   { id: "synopsis", label: "Конспекты", icon: "BookOpen" },
   { id: "exams", label: "ОГЭ / ЕГЭ", icon: "GraduationCap" },
   { id: "fipiExams", label: "Варианты ФИПИ", icon: "ScrollText" },
+  { id: "project", label: "Проект / Курсовая", icon: "Sparkles" },
   { id: "materials", label: "Мои материалы", icon: "FolderOpen" },
   { id: "support", label: "Тех. поддержка", icon: "Headphones" },
   { id: "settings", label: "Настройки", icon: "Settings" },
@@ -75,6 +77,7 @@ export const SECTION_TITLES: Record<Section, string> = {
   collective: "Коллектив",
   myResults: "Мои результаты",
   materials: "Мои материалы",
+  project: "Проект / Курсовая",
 };
 
 export const WORK_TYPES = ["Проверочная работа", "Контрольная работа"] as const;

@@ -849,6 +849,76 @@ export const synopsisApi = {
   },
 };
 
+// ── Индивидуальные работы (проект/реферат/курсовая/доклад/сочинение/текст) ────
+const PROJECT_URL = "https://functions.poehali.dev/9b56b3fb-f6f2-46a2-b187-0da21bc8b48d";
+
+export type ProjectWorkType = "project" | "referat" | "coursework" | "report" | "essay" | "text";
+
+export interface ProjectResponse {
+  docx_b64?: string;
+  pdf_b64?: string | null;
+  filename: string;
+  text: string;
+  chapters: string[];
+  word_count: number;
+  page_estimate: number;
+  work_label: string;
+  topic: string;
+  spent_rub?: number;
+  balance_rub?: number;
+}
+
+export const projectApi = {
+  generate: async (
+    params: {
+      work_type: ProjectWorkType;
+      topic: string;
+      subject?: string;
+      description?: string;
+      author_name?: string;
+      school?: string;
+      login?: string;
+    },
+    onRetry?: (attempt: number) => void,
+  ): Promise<ProjectResponse> => {
+    const MAX_ATTEMPTS = 2;
+    const TIMEOUT_MS = 580_000; // до 9-10 минут — большие работы
+    let lastError: Error = new Error("Не удалось создать работу");
+
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      if (attempt > 1 && onRetry) onRetry(attempt);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+      try {
+        const res = await fetch(PROJECT_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(params),
+          signal: controller.signal,
+        });
+        clearTimeout(timer);
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 429 || res.status >= 500) {
+          lastError = new Error(data.error || `Ошибка сервера (${res.status})`);
+          if (attempt < MAX_ATTEMPTS) { await new Promise(r => setTimeout(r, 2500)); continue; }
+        }
+        if (!res.ok) throw new Error(data.error || `Ошибка ${res.status}`);
+        return data as ProjectResponse;
+      } catch (e) {
+        clearTimeout(timer);
+        const err = e as Error;
+        if (err.name === "AbortError") {
+          lastError = new Error("Работа генерируется дольше обычного. Попробуйте ещё раз.");
+          if (attempt < MAX_ATTEMPTS) continue;
+          throw lastError;
+        }
+        throw err;
+      }
+    }
+    throw lastError;
+  },
+};
+
 export interface BlankStudent {
   code: string;       // 5-значный код (зашивается в QR)
   name: string;       // ФИО (печатается готовым)

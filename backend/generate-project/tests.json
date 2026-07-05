@@ -1,0 +1,30 @@
+{
+  "tests": [
+    {
+      "name": "OPTIONS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    },
+    {
+      "name": "GET not allowed",
+      "method": "GET",
+      "path": "/",
+      "expectedStatus": 405
+    },
+    {
+      "name": "unknown work_type returns 400",
+      "method": "POST",
+      "path": "/",
+      "body": {"work_type": "unknown", "topic": "Тест"},
+      "expectedStatus": 400
+    },
+    {
+      "name": "missing topic returns 400",
+      "method": "POST",
+      "path": "/",
+      "body": {"work_type": "essay", "topic": ""},
+      "expectedStatus": 400
+    }
+  ]
+}

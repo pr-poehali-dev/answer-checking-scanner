@@ -19,6 +19,7 @@ import UdsPage from "./pages/UdsPage";
 import KnowledgeBasePage from "./pages/KnowledgeBasePage";
 import MaterialsPage from "./pages/MaterialsPage";
 import PublicHomePage from "./pages/PublicHomePage";
+import SiteVersionBadge from "./components/SiteVersionBadge";
 
 const queryClient = new QueryClient();
 
@@ -46,6 +47,7 @@ const App = () => (
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>
+        <SiteVersionBadge />
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>

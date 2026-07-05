@@ -1,4 +1,5 @@
 import Icon from "@/components/ui/icon";
+import { APP_VERSION, SITE_REVISION_DATE } from "@/lib/appVersion";
 
 interface CompanyFooterProps {
   variant?: "full" | "compact";
@@ -56,6 +57,9 @@ export default function CompanyFooter({
             <span>·</span>
             <a href="/privacy" className="hover:text-foreground underline underline-offset-2">Конфиденциальность</a>
           </span>
+        </div>
+        <div className="mt-2 text-center text-[9px] text-muted-foreground/70">
+          Версия сайта {APP_VERSION} · ред. от {SITE_REVISION_DATE}
         </div>
       </footer>
     );
@@ -132,6 +136,10 @@ export default function CompanyFooter({
             <span>·</span>
             <a href="/privacy" className="hover:text-foreground underline underline-offset-2">Политика конфиденциальности</a>
           </p>
+        </div>
+
+        <div className="mt-2 text-center text-[9px] text-muted-foreground/70">
+          Версия сайта {APP_VERSION} · ред. от {SITE_REVISION_DATE}
         </div>
       </div>
     </footer>

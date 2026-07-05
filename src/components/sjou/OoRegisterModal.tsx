@@ -39,6 +39,7 @@ export default function OoRegisterModal({ onClose }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState(false);
+  const [agreed, setAgreed] = useState(false);
 
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -77,6 +78,10 @@ export default function OoRegisterModal({ onClose }: Props) {
         setError(`Заполните: ${label}`);
         return;
       }
+    }
+    if (!agreed) {
+      setError("Необходимо принять условия оферты и согласие на обработку персональных данных");
+      return;
     }
     setSubmitting(true);
     try {
@@ -256,9 +261,24 @@ export default function OoRegisterModal({ onClose }: Props) {
               </div>
             )}
 
+            <label className="flex items-start gap-2.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={agreed}
+                onChange={(e) => setAgreed(e.target.checked)}
+                className="mt-0.5 w-4 h-4 flex-shrink-0 accent-blue-600 cursor-pointer"
+              />
+              <span className="text-xs text-slate-600 leading-relaxed">
+                Я принимаю условия{" "}
+                <a href="/oferta" target="_blank" rel="noreferrer" className="underline underline-offset-2 hover:text-blue-600">Договора-оферты</a>
+                {" "}и даю согласие на обработку персональных данных согласно{" "}
+                <a href="/privacy" target="_blank" rel="noreferrer" className="underline underline-offset-2 hover:text-blue-600">Политике конфиденциальности</a>{" "}(152-ФЗ)
+              </span>
+            </label>
+
             <button
               type="submit"
-              disabled={submitting}
+              disabled={submitting || !agreed}
               className="w-full py-3 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
             >
               {submitting ? (
@@ -273,9 +293,6 @@ export default function OoRegisterModal({ onClose }: Props) {
                 </>
               )}
             </button>
-            <p className="text-xs text-center text-slate-500">
-              Отправляя заявку, вы соглашаетесь на обработку персональных данных в соответствии с 152-ФЗ.
-            </p>
           </form>
         )}
       </div>

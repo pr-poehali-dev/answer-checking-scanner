@@ -65,6 +65,7 @@ export default function InstitutionRegisterPage({ onSuccess, onBack }: Props) {
   const [showPass, setShowPass] = useState(false);
   const [adminRole, setAdminRole] = useState<"director" | "vice_director">("director");
   const [email, setEmail] = useState("");
+  const [agreed, setAgreed] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -81,6 +82,10 @@ export default function InstitutionRegisterPage({ onSuccess, onBack }: Props) {
     }
     if (adminPassword.length < 6) {
       setError("Пароль должен быть не менее 6 символов");
+      return;
+    }
+    if (!agreed) {
+      setError("Необходимо принять условия Договора-оферты и Политики конфиденциальности");
       return;
     }
     setLoading(true);
@@ -339,9 +344,24 @@ export default function InstitutionRegisterPage({ onSuccess, onBack }: Props) {
                 </div>
               )}
 
+              <label className="flex items-start gap-2.5 cursor-pointer group">
+                <input
+                  type="checkbox"
+                  checked={agreed}
+                  onChange={e => setAgreed(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 flex-shrink-0 accent-primary cursor-pointer"
+                />
+                <span className="text-[11px] text-muted-foreground leading-relaxed group-hover:text-foreground transition-colors">
+                  Я принимаю условия{" "}
+                  <a href="/oferta" target="_blank" className="underline underline-offset-2 hover:text-primary">Договора-оферты</a>
+                  {" "}и даю согласие на обработку персональных данных согласно{" "}
+                  <a href="/privacy" target="_blank" className="underline underline-offset-2 hover:text-primary">Политике конфиденциальности</a>
+                </span>
+              </label>
+
               <button
                 type="submit"
-                disabled={loading}
+                disabled={loading || !agreed}
                 className="w-full flex items-center justify-center gap-2 py-2.5 bg-primary text-primary-foreground text-sm font-semibold rounded-sm hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loading ? (

@@ -781,12 +781,9 @@ def handler(event: dict, context) -> dict:
         finally:
             conn.close()
 
-    # ── POST update-profile (teacher — самостоятельное редактирование) ─────
+    # ── POST update-profile (учитель/ученик — самостоятельное редактирование) ─
     if method == "POST" and route in ("update-profile", "update_profile"):
         token = headers.get("x-authorization", "")
-        if not token.startswith("teacher:"):
-            return _resp(403, {"error": "Нет доступа"})
-
         login = (body.get("login") or "").strip()
         if not login:
             return _resp(400, {"error": "Укажите login"})
@@ -809,12 +806,22 @@ def handler(event: dict, context) -> dict:
         try:
             cur = conn.cursor()
             cur.execute(
-                f"SELECT password_hash FROM {SCHEMA}.users WHERE login = %s",
+                f"SELECT password_hash, role FROM {SCHEMA}.users WHERE login = %s",
                 (login,)
             )
             row = cur.fetchone()
             if not row:
                 return _resp(404, {"error": "Пользователь не найден"})
+
+            # Проверяем токен под ролью пользователя (учитель/ученик/тестер/админ)
+            stored_hash = row[0]
+            user_role = row[1] or "teacher"
+            token_ok = any(
+                _verify_token(token, r, login, stored_hash)
+                for r in {user_role, "teacher", "student", "tester", "admin"}
+            )
+            if not token_ok:
+                return _resp(403, {"error": "Нет доступа"})
 
             # Если меняем пароль — проверяем текущий через безопасное сравнение
             if new_password:

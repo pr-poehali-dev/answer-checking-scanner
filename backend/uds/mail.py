@@ -92,10 +92,19 @@ def generate_email(first_name: str, last_name: str, middle_name: str, cur, schem
 
 def _fernet():
     from cryptography.fernet import Fernet
+    import base64
+    import hashlib
     key = os.environ.get("MAIL_ENCRYPTION_KEY", "").strip()
     if not key:
         raise RuntimeError("MAIL_ENCRYPTION_KEY не задан")
-    return Fernet(key.encode())
+    # Fernet требует ровно 32 url-safe base64 байта. Если ключ задан в другом
+    # формате — нормализуем детерминированно (SHA-256 → base64url), чтобы
+    # шифрование всегда работало, а расшифровка была стабильной.
+    try:
+        return Fernet(key.encode())
+    except Exception:
+        derived = base64.urlsafe_b64encode(hashlib.sha256(key.encode()).digest())
+        return Fernet(derived)
 
 
 def encrypt_password(plain: str) -> str:
@@ -192,26 +201,55 @@ def _isp_call(params: dict) -> dict:
     return parsed
 
 
+# Возможные имена функции создания ящика (зависит от сборки ISPmanager хостинга)
+_MAILBOX_FUNCS = ["emailbox.edit", "email.box.edit", "mail.box.edit"]
+
+
+def _isp_mailbox(base_params: dict) -> None:
+    """Пробует создать/изменить ящик перебирая известные имена функций.
+
+    'module missing' по одной функции — не фатально, пробуем следующую.
+    """
+    endpoint, sid = _isp_auth()
+    last_err = None
+    for func in _MAILBOX_FUNCS:
+        raw = _http_post(endpoint, {"auth": sid, "out": "json", "func": func, **base_params})
+        print(f"[ISP MAILBOX] func={func} -> {raw[:300]}")
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            last_err = f"неожиданный ответ ({func})"
+            continue
+        err = _isp_error(parsed)
+        if not err:
+            return  # успех
+        last_err = err
+        # Если модуль/функция отсутствует — пробуем следующее имя
+        if "missing" in err.lower() or "find the" in err.lower() or "module" in err.lower():
+            continue
+        # Иная ошибка (например, ящик уже существует) — прекращаем перебор
+        raise RuntimeError(f"ISPmanager: {err}")
+    raise RuntimeError(f"ISPmanager: {last_err or 'не удалось создать ящик'}")
+
+
 def create_mailbox(email_address: str, password: str) -> None:
-    """Создаёт почтовый ящик в ISPmanager 6. Бросает исключение при ошибке."""
+    """Создаёт почтовый ящик на хостинге. Бросает исключение при ошибке."""
     local, _, domain = email_address.partition("@")
-    _isp_call({
-        "func": "mail.box.edit",
+    _isp_mailbox({
         "sok": "ok",
-        "elid": domain,          # в v6 контекст ящика — почтовый домен
+        "elid": domain,
         "domain": domain,
-        "mailbox": local,        # v6: имя ящика — параметр mailbox
-        "name": local,           # совместимость со старыми сборками
+        "mailbox": local,
+        "name": local,
         "passwd": password,
         "confirm": password,
     })
 
 
 def set_mailbox_password(email_address: str, password: str) -> None:
-    """Меняет пароль существующего ящика в ISPmanager 6."""
+    """Меняет пароль существующего ящика на хостинге."""
     local, _, domain = email_address.partition("@")
-    _isp_call({
-        "func": "mail.box.edit",
+    _isp_mailbox({
         "sok": "ok",
         "elid": email_address,   # редактирование существующего ящика по полному адресу
         "domain": domain,

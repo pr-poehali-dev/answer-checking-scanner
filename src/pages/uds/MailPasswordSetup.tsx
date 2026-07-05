@@ -6,14 +6,17 @@ interface Props {
   login: string;
   token: string;
   emailAddress: string;
+  mailStatus?: string;
   onDone: () => void;
+  onLogout: () => void;
 }
 
 /**
  * Обязательная установка пароля корпоративной почты при первом входе.
- * Показывается на весь экран, пока пароль не установлен.
+ * Показывается на весь экран. Продолжить в панель без пароля НЕЛЬЗЯ —
+ * доступна только установка пароля или выход из аккаунта.
  */
-export default function MailPasswordSetup({ login, token, emailAddress, onDone }: Props) {
+export default function MailPasswordSetup({ login, token, emailAddress, mailStatus, onDone, onLogout }: Props) {
   const [pass, setPass] = useState("");
   const [pass2, setPass2] = useState("");
   const [show, setShow] = useState(false);
@@ -49,6 +52,9 @@ export default function MailPasswordSetup({ login, token, emailAddress, onDone }
           <p className="text-sm font-mono font-semibold text-blue-700 mt-0.5 break-all">{emailAddress}</p>
           <p className="text-xs text-muted-foreground mt-2">
             Придумайте пароль для почты — он понадобится для отправки писем и входа в веб-почту хостинга.
+          </p>
+          <p className="text-[11px] font-semibold text-blue-700 mt-2 bg-blue-50 border border-blue-100 rounded-lg px-2.5 py-1.5">
+            Это обязательный шаг. Продолжить работу в УДС можно только после установки пароля почты.
           </p>
         </div>
 
@@ -94,6 +100,15 @@ export default function MailPasswordSetup({ login, token, emailAddress, onDone }
         <p className="text-[10px] text-gray-400 text-center">
           Пароль хранится в защищённом виде. Его можно сменить позже в разделе «Почта».
         </p>
+        <div className="pt-1 border-t border-gray-100 text-center">
+          <button
+            onClick={onLogout}
+            disabled={busy}
+            className="text-[11px] text-gray-400 hover:text-gray-600 inline-flex items-center gap-1 disabled:opacity-50"
+          >
+            <Icon name="LogOut" size={11} /> Выйти из аккаунта
+          </button>
+        </div>
       </div>
     </div>
   );

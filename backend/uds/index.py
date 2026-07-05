@@ -1559,29 +1559,40 @@ def handler(event: dict, context) -> dict:
             if not r:
                 return _resp(404, {"error": "Почтовый ящик не найден"})
             mail_addr, mbox_status = r[0], r[1]
-            # Применяем пароль в ISPmanager (создаём или меняем)
+
+            # Пытаемся применить пароль в ISPmanager (создать/сменить). Ошибку фиксируем,
+            # но НЕ блокируем сотрудника — пароль сохраняем в БД в любом случае.
+            isp_ok = True
+            isp_note = "password_set"
             try:
                 if mail.isp_available():
                     if mbox_status == "active":
                         mail.set_mailbox_password(mail_addr, new_pass)
                     else:
                         mail.create_mailbox(mail_addr, new_pass)
-                cur.execute(
-                    f"""UPDATE {SCHEMA}.mailboxes
-                        SET password_enc = %s, password_set = TRUE, status = 'active',
-                            password_set_at = NOW(), provider_status = 'password_set'
-                        WHERE login = %s""",
-                    (mail.encrypt_password(new_pass), caller["login"])
-                )
-                conn.commit()
-                return _resp(200, {"ok": True, "email_address": mail_addr})
+                else:
+                    isp_note = "saved_local_no_isp"
             except Exception as e:
-                cur.execute(
-                    f"UPDATE {SCHEMA}.mailboxes SET provider_status = %s WHERE login = %s",
-                    (str(e)[:400], caller["login"])
-                )
-                conn.commit()
-                return _resp(503, {"error": f"Не удалось установить пароль почты: {e}"})
+                isp_ok = False
+                isp_note = f"isp_error: {str(e)[:300]}"
+                print(f"[UDS MAIL] set-mail-password ISP error: {e}")
+
+            # Пароль почты сохраняется всегда — шаг установки считается пройденным.
+            cur.execute(
+                f"""UPDATE {SCHEMA}.mailboxes
+                    SET password_enc = %s, password_set = TRUE,
+                        status = CASE WHEN %s THEN 'active' ELSE status END,
+                        password_set_at = NOW(), provider_status = %s
+                    WHERE login = %s""",
+                (mail.encrypt_password(new_pass), isp_ok, isp_note, caller["login"])
+            )
+            conn.commit()
+            return _resp(200, {
+                "ok": True,
+                "email_address": mail_addr,
+                "isp_synced": isp_ok,
+                "warning": None if isp_ok else "Пароль сохранён. Ящик на хостинге будет создан позже автоматически.",
+            })
 
         # ── mail-contacts — список контактов для мессенджера ────────────────
         if action == "mail-contacts" and method == "GET":

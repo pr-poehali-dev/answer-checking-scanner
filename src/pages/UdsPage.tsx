@@ -251,13 +251,16 @@ export default function UdsPage() {
   }
 
   // ── Обязательная установка пароля почты при первом входе ──────────────────
-  if (myMail && myMail.status !== "error" && !myMail.password_set) {
+  // Без права отказа: пока пароль не установлен — доступ в панель закрыт.
+  if (myMail && !myMail.password_set) {
     return (
       <MailPasswordSetup
         login={session.login}
         token={session.token}
         emailAddress={myMail.email_address}
+        mailStatus={myMail.status}
         onDone={() => refreshMe(session)}
+        onLogout={logout}
       />
     );
   }

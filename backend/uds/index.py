@@ -1515,6 +1515,18 @@ def handler(event: dict, context) -> dict:
 
         # ════════════ КОРПОРАТИВНАЯ ПОЧТА ═══════════════════════════════════
 
+        # ── mail-test-isp — диагностика соединения с ISPmanager (Глава/Зам) ──
+        if action == "mail-test-isp" and method == "GET":
+            if my_rank < 5:
+                return _resp(403, {"error": "Доступно Главе и Зам. Главы"})
+            if not mail.isp_available():
+                return _resp(200, {"ok": False, "reason": "Не заданы ISPMANAGER_URL/USER/PASSWORD"})
+            try:
+                endpoint, sid = mail._isp_auth()
+                return _resp(200, {"ok": True, "endpoint": endpoint, "message": "Авторизация в ISPmanager успешна"})
+            except Exception as e:
+                return _resp(200, {"ok": False, "reason": str(e)[:500]})
+
         # ── mail-status — есть ли ящик, установлен ли пароль ────────────────
         if action == "mail-status" and method == "GET":
             cur = conn.cursor()

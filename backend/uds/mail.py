@@ -120,57 +120,102 @@ def isp_available() -> bool:
     return bool(url and user and pwd)
 
 
-def _isp_call(params: dict) -> dict:
-    """Вызов ISPmanager API (ihttpd). Возвращает распарсенный JSON или бросает исключение."""
+def _ssl_ctx():
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE  # у хостинг-панелей часто самоподписанный серт
+    return ctx
+
+
+def _http_post(endpoint: str, params: dict) -> str:
+    data = urllib.parse.urlencode(params).encode()
+    req = urllib.request.Request(endpoint, data=data, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=25, context=_ssl_ctx()) as r:
+            return r.read().decode(errors="ignore")
+    except urllib.error.HTTPError as e:
+        return e.read().decode(errors="ignore") if hasattr(e, "read") else str(e)
+
+
+def _isp_error(parsed: dict):
+    """Возвращает текст ошибки из ответа ISPmanager или None."""
+    doc = parsed.get("doc") or parsed
+    if isinstance(doc, dict) and doc.get("error"):
+        err = doc["error"]
+        if isinstance(err, dict):
+            return err.get("msg", {}).get("$") if isinstance(err.get("msg"), dict) else \
+                   (err.get("msg") or err.get("$") or err.get("value") or json.dumps(err, ensure_ascii=False))
+        return str(err)
+    return None
+
+
+def _isp_auth() -> tuple[str, str]:
+    """Авторизация в ISPmanager 6: получаем session id. Возвращает (base_url, session_id)."""
     url, user, pwd = _isp_config()
     if not (url and user and pwd):
         raise RuntimeError("ISPmanager не настроен (ISPMANAGER_URL/USER/PASSWORD)")
 
-    query = {"authinfo": f"{user}:{pwd}", "out": "json", **params}
-    data = urllib.parse.urlencode(query).encode()
-    endpoint = f"{url}/ispmgr"
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE  # у хостинг-панелей часто самоподписанный серт
-    req = urllib.request.Request(endpoint, data=data, method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=25, context=ctx) as r:
-            raw = r.read().decode(errors="ignore")
-    except urllib.error.HTTPError as e:
-        raw = e.read().decode(errors="ignore") if hasattr(e, "read") else str(e)
+    # ISPmanager 6 отдаёт API по /manager/ispmgr, старые сборки — /ispmgr
+    for path in ("/manager/ispmgr", "/ispmgr"):
+        endpoint = f"{url}{path}"
+        raw = _http_post(endpoint, {
+            "func": "auth", "username": user, "password": pwd, "out": "json",
+        })
+        print(f"[ISP AUTH] {endpoint} -> {raw[:300]}")
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            continue  # не тот путь / не JSON — пробуем следующий
+        err = _isp_error(parsed)
+        if err:
+            raise RuntimeError(f"Авторизация ISPmanager: {err}")
+        doc = parsed.get("doc") or parsed
+        sid = (doc.get("auth", {}).get("$") if isinstance(doc.get("auth"), dict)
+               else doc.get("auth")) or parsed.get("auth")
+        if sid:
+            return endpoint, str(sid)
+    raise RuntimeError("Не удалось авторизоваться в ISPmanager (проверьте адрес, логин и пароль)")
+
+
+def _isp_call(params: dict) -> dict:
+    """Вызов ISPmanager 6 API с авторизацией по сессии."""
+    endpoint, sid = _isp_auth()
+    raw = _http_post(endpoint, {"auth": sid, "out": "json", **params})
+    print(f"[ISP CALL] func={params.get('func')} -> {raw[:400]}")
     try:
         parsed = json.loads(raw)
     except Exception:
         raise RuntimeError(f"ISPmanager: неожиданный ответ: {raw[:200]}")
-    doc = parsed.get("doc") or parsed
-    if isinstance(doc, dict) and doc.get("error"):
-        err = doc["error"]
-        msg = err.get("msg") or err.get("$") or str(err)
-        raise RuntimeError(f"ISPmanager: {msg}")
+    err = _isp_error(parsed)
+    if err:
+        raise RuntimeError(f"ISPmanager: {err}")
     return parsed
 
 
 def create_mailbox(email_address: str, password: str) -> None:
-    """Создаёт почтовый ящик в ISPmanager. Бросает исключение при ошибке."""
+    """Создаёт почтовый ящик в ISPmanager 6. Бросает исключение при ошибке."""
     local, _, domain = email_address.partition("@")
     _isp_call({
         "func": "mail.box.edit",
         "sok": "ok",
+        "elid": domain,          # в v6 контекст ящика — почтовый домен
         "domain": domain,
-        "name": local,
+        "mailbox": local,        # v6: имя ящика — параметр mailbox
+        "name": local,           # совместимость со старыми сборками
         "passwd": password,
         "confirm": password,
     })
 
 
 def set_mailbox_password(email_address: str, password: str) -> None:
-    """Меняет пароль существующего ящика в ISPmanager."""
+    """Меняет пароль существующего ящика в ISPmanager 6."""
     local, _, domain = email_address.partition("@")
     _isp_call({
         "func": "mail.box.edit",
         "sok": "ok",
-        "elid": email_address,
+        "elid": email_address,   # редактирование существующего ящика по полному адресу
         "domain": domain,
+        "mailbox": local,
         "name": local,
         "passwd": password,
         "confirm": password,

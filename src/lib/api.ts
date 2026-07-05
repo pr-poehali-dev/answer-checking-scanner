@@ -567,6 +567,11 @@ export const udsApi = {
     udsRequest<{ ok: boolean; id: number; created_at: string; external_sent: boolean }>(
       "mail-send", "POST", login, token, { to, subject, body }
     ),
+
+  mailTestIsp: (login: string, token: string) =>
+    udsRequest<{ ok: boolean; endpoint?: string; message?: string; reason?: string }>(
+      "mail-test-isp", "GET", login, token
+    ),
 };
 
 // ── Institution API ───────────────────────────────────────────────────────────

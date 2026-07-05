@@ -37,7 +37,21 @@ export default function UdsMail({ login, token, myAddress }: Props) {
   const [loadingThread, setLoadingThread] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
+  const [ispCheck, setIspCheck] = useState<{ ok: boolean; text: string } | null>(null);
+  const [ispBusy, setIspBusy] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  const testIsp = async () => {
+    setIspBusy(true); setIspCheck(null);
+    try {
+      const r = await udsApi.mailTestIsp(login, token);
+      setIspCheck({ ok: r.ok, text: r.ok ? (r.message || "Связь с ISPmanager есть") : (r.reason || "Ошибка") });
+    } catch (e) {
+      setIspCheck({ ok: false, text: (e as Error).message });
+    } finally {
+      setIspBusy(false);
+    }
+  };
 
   const loadThreads = useCallback(async () => {
     setLoadingList(true);
@@ -175,6 +189,19 @@ export default function UdsMail({ login, token, myAddress }: Props) {
             <Icon name="Mail" size={40} className="opacity-30" />
             <p className="text-sm">Выберите диалог или контакт слева</p>
             {myAddress && <p className="text-xs">Ваш адрес: <span className="font-mono">{myAddress}</span></p>}
+            <div className="mt-4 flex flex-col items-center gap-2">
+              <button onClick={testIsp} disabled={ispBusy}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-border text-xs rounded-sm hover:bg-muted disabled:opacity-50">
+                {ispBusy ? <Icon name="Loader2" size={12} className="animate-spin" /> : <Icon name="Server" size={12} />}
+                Проверить связь с почтовым хостингом
+              </button>
+              {ispCheck && (
+                <p className={`text-xs max-w-xs ${ispCheck.ok ? "text-green-600" : "text-destructive"}`}>
+                  <Icon name={ispCheck.ok ? "CheckCircle2" : "AlertCircle"} size={12} className="inline mr-1" />
+                  {ispCheck.text}
+                </p>
+              )}
+            </div>
           </div>
         ) : (
           <>

@@ -262,13 +262,38 @@ def set_mailbox_password(email_address: str, password: str) -> None:
 
 # ── SMTP отправка наружу ──────────────────────────────────────────────────────
 
-SMTP_HOST = os.environ.get("UDS_SMTP_HOST", "")
+SMTP_HOST = os.environ.get("UDS_SMTP_HOST", "").strip()
 SMTP_PORT = int(os.environ.get("UDS_SMTP_PORT") or "465")
+
+
+def _smtp_candidates():
+    """Список вариантов (host, port, mode) для перебора при отправке.
+
+    mode: 'ssl' (SMTPS 465) или 'starttls' (587/25). Рег.ру принимает оба,
+    но иногда 465 обрывает соединение — тогда работает 587 STARTTLS.
+    """
+    hosts = []
+    for h in [SMTP_HOST, "mail.hosting.reg.ru", "smtp.hosting.reg.ru"]:
+        if h and h not in hosts:
+            hosts.append(h)
+    candidates = []
+    for h in hosts:
+        # Сначала заданный порт, потом альтернативы
+        if SMTP_PORT == 465:
+            candidates.append((h, 465, "ssl"))
+            candidates.append((h, 587, "starttls"))
+        else:
+            candidates.append((h, SMTP_PORT, "starttls"))
+            candidates.append((h, 465, "ssl"))
+    return candidates
 
 
 def send_external_email(from_address: str, from_password: str, from_name: str,
                         to_address: str, subject: str, body: str) -> None:
-    """Отправляет реальное письмо от имени сотрудника через SMTP Рег.ру."""
+    """Отправляет реальное письмо от имени сотрудника через SMTP Рег.ру.
+
+    Перебирает несколько комбинаций хост/порт/режим, пока не получится.
+    """
     if not SMTP_HOST:
         raise RuntimeError("SMTP не настроен (UDS_SMTP_HOST)")
 
@@ -277,17 +302,38 @@ def send_external_email(from_address: str, from_password: str, from_name: str,
     msg["From"] = f"{from_name} <{from_address}>" if from_name else from_address
     msg["To"] = to_address
     msg.attach(MIMEText(body, "plain", "utf-8"))
+    raw = msg.as_string()
 
     ctx = ssl.create_default_context()
-    if SMTP_PORT == 465:
-        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, context=ctx, timeout=20) as s:
-            s.login(from_address, from_password)
-            s.sendmail(from_address, [to_address], msg.as_string())
-    else:
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20) as s:
-            s.ehlo(); s.starttls(context=ctx); s.ehlo()
-            s.login(from_address, from_password)
-            s.sendmail(from_address, [to_address], msg.as_string())
+    last_err = None
+    auth_failed = False
+    for host, port, mode in _smtp_candidates():
+        try:
+            if mode == "ssl":
+                with smtplib.SMTP_SSL(host, port, context=ctx, timeout=20) as s:
+                    s.login(from_address, from_password)
+                    s.sendmail(from_address, [to_address], raw)
+            else:
+                with smtplib.SMTP(host, port, timeout=20) as s:
+                    s.ehlo(); s.starttls(context=ctx); s.ehlo()
+                    s.login(from_address, from_password)
+                    s.sendmail(from_address, [to_address], raw)
+            print(f"[UDS SMTP] OK via {host}:{port} ({mode})")
+            return
+        except smtplib.SMTPAuthenticationError as e:
+            # Неверный логин/пароль — перебор других портов не поможет
+            auth_failed = True
+            last_err = f"неверный логин или пароль почты ({e.smtp_code})"
+            print(f"[UDS SMTP] AUTH FAIL {host}:{port}: {e}")
+            break
+        except Exception as e:
+            last_err = str(e)
+            print(f"[UDS SMTP] FAIL {host}:{port} ({mode}): {e}")
+            continue
+
+    if auth_failed:
+        raise RuntimeError("Неверный пароль почты. Задайте пароль ящика заново в разделе «Почта».")
+    raise RuntimeError(f"Не удалось подключиться к почтовому серверу: {last_err or 'соединение закрыто'}")
 
 
 def thread_key(a: str, b: str) -> str:

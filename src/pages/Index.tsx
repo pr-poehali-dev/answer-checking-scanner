@@ -15,6 +15,7 @@ import { FipiExamsSection } from "@/components/scanner/FipiExamsSection";
 import { ChatSection } from "@/components/scanner/ChatSection";
 import CollectiveSection from "@/components/scanner/CollectiveSection";
 import { SupportSection } from "@/components/scanner/SupportSection";
+import { MyMaterialsSection } from "@/components/scanner/MyMaterialsSection";
 import TokensModal from "@/components/TokensModal";
 import { authApi } from "@/lib/api";
 import LoginPage from "@/pages/LoginPage";
@@ -77,6 +78,7 @@ const SECTION_COMPONENTS: Record<Section, React.FC> = {
   settings: SettingsSection,
   collective: CollectiveSection,
   myResults: ResultsSection,
+  materials: MyMaterialsSection,
 };
 
 // Разделы для нижней мобильной панели (самые частые)

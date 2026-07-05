@@ -79,6 +79,26 @@
       "method": "GET",
       "path": "/?action=nope",
       "expectedStatus": 403
+    },
+    {
+      "name": "mail-status without auth returns 403",
+      "method": "GET",
+      "path": "/?action=mail-status",
+      "expectedStatus": 403
+    },
+    {
+      "name": "mail-send without auth returns 403",
+      "method": "POST",
+      "path": "/?action=mail-send",
+      "body": { "to": "x@ooo29.ru", "body": "hi" },
+      "expectedStatus": 403
+    },
+    {
+      "name": "set-mail-password without auth returns 403",
+      "method": "POST",
+      "path": "/?action=set-mail-password",
+      "body": { "password": "12345678" },
+      "expectedStatus": 403
     }
   ]
 }

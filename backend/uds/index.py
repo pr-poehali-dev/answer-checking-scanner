@@ -28,6 +28,8 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta, timezone
 
+import mail
+
 SCHEMA = os.environ.get("MAIN_DB_SCHEMA", "t_p31556921_answer_checking_scan")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin2026")
 
@@ -761,6 +763,17 @@ def handler(event: dict, context) -> dict:
                         "not_after": str(rc[3]) if rc[3] else None,
                         "assigned_by": rc[4], "assigned_at": str(rc[5]) if rc[5] else None,
                     }
+            # Корпоративная почта (для предложения установить пароль при входе)
+            my_mail = None
+            if access:
+                curm = conn.cursor()
+                curm.execute(
+                    f"SELECT email_address, status, password_set FROM {SCHEMA}.mailboxes WHERE login = %s",
+                    (caller["login"],)
+                )
+                rm = curm.fetchone()
+                if rm:
+                    my_mail = {"email_address": rm[0], "status": rm[1], "password_set": bool(rm[2])}
             return _resp(200, {
                 "login": caller["login"],
                 "panel_role": role,
@@ -771,6 +784,7 @@ def handler(event: dict, context) -> dict:
                 "uds_access": access,
                 "perms": perms_for(role) if (access and role) else None,
                 "my_cert": my_cert,
+                "my_mail": my_mail,
             })
 
         # ── update-profile — смена своего логина/пароля ──────────────────────
@@ -843,9 +857,11 @@ def handler(event: dict, context) -> dict:
             cur.execute(
                 f"""SELECT po.login, po.panel_role, po.operator_number, po.assigned_by, po.assigned_at,
                            po.uds_registered, po.phone, po.email, po.iis_code,
-                           u.full_name, u.is_active, u.last_seen_at
+                           u.full_name, u.is_active, u.last_seen_at,
+                           mb.email_address, mb.status
                     FROM {SCHEMA}.panel_operators po
                     LEFT JOIN {SCHEMA}.users u ON u.login = po.login
+                    LEFT JOIN {SCHEMA}.mailboxes mb ON mb.login = po.login
                     WHERE po.panel_role IS NOT NULL AND po.panel_role != 'removed'
                     ORDER BY po.operator_number"""
             )
@@ -858,6 +874,7 @@ def handler(event: dict, context) -> dict:
                     "uds_registered": bool(r[5]), "phone": r[6], "email": r[7], "iis_code": r[8],
                     "full_name": r[9] or r[0], "is_active": bool(r[10]) if r[10] is not None else True,
                     "last_seen_at": str(r[11]) if r[11] else None,
+                    "mail_address": r[12], "mail_status": r[13],
                 })
             return _resp(200, {"employees": emps})
 
@@ -946,8 +963,39 @@ def handler(event: dict, context) -> dict:
                     VALUES (%s, %s, %s, %s, TRUE, %s, %s, %s)""",
                 (new_login, panel_role, op_num, caller["login"], phone or None, email or None, iis_code)
             )
+            # ── Создаём корпоративный почтовый ящик @ooo29.ru ──────────────────
+            mail_address = None
+            mail_status = "pending"
+            try:
+                mail_address = mail.generate_email(first_name, last_name, middle_name, cur, SCHEMA)
+                cur.execute(
+                    f"""INSERT INTO {SCHEMA}.mailboxes (login, email_address, status)
+                        VALUES (%s, %s, 'pending')""",
+                    (new_login, mail_address)
+                )
+                # Пытаемся создать ящик в ISPmanager с временным паролем (сотрудник сменит при входе)
+                if mail.isp_available():
+                    try:
+                        temp_mail_pass = gen_password(14)
+                        mail.create_mailbox(mail_address, temp_mail_pass)
+                        cur.execute(
+                            f"""UPDATE {SCHEMA}.mailboxes
+                                SET status='active', password_enc=%s, provider_status='created'
+                                WHERE login=%s""",
+                            (mail.encrypt_password(temp_mail_pass), new_login)
+                        )
+                        mail_status = "active"
+                    except Exception as me:
+                        cur.execute(
+                            f"UPDATE {SCHEMA}.mailboxes SET status='error', provider_status=%s WHERE login=%s",
+                            (str(me)[:400], new_login)
+                        )
+                        mail_status = "error"
+            except Exception as me:
+                print(f"[UDS MAIL] Ошибка создания ящика: {me}")
+
             log_action(cur, caller["login"], my_role, "register_employee", new_login,
-                       {"panel_role": panel_role, "operator_number": op_num})
+                       {"panel_role": panel_role, "operator_number": op_num, "mail": mail_address})
             conn.commit()
             return _resp(200, {
                 "ok": True,
@@ -957,6 +1005,8 @@ def handler(event: dict, context) -> dict:
                 "operator_number": op_num,
                 "full_name": full_name,
                 "panel_role": panel_role,
+                "mail_address": mail_address,
+                "mail_status": mail_status,
             })
 
         # ── set-role — изменить панельную роль ───────────────────────────────
@@ -1462,6 +1512,237 @@ def handler(event: dict, context) -> dict:
             log_action(cur, caller["login"], my_role, "revoke_cert", tl, {"reason": reason})
             conn.commit()
             return _resp(200, {"ok": True})
+
+        # ════════════ КОРПОРАТИВНАЯ ПОЧТА ═══════════════════════════════════
+
+        # ── mail-status — есть ли ящик, установлен ли пароль ────────────────
+        if action == "mail-status" and method == "GET":
+            cur = conn.cursor()
+            cur.execute(
+                f"""SELECT email_address, status, password_set FROM {SCHEMA}.mailboxes
+                    WHERE login = %s""", (caller["login"],)
+            )
+            r = cur.fetchone()
+            if not r:
+                return _resp(200, {"has_mailbox": False})
+            return _resp(200, {
+                "has_mailbox": True,
+                "email_address": r[0],
+                "status": r[1],
+                "password_set": bool(r[2]),
+                "isp_available": mail.isp_available(),
+            })
+
+        # ── set-mail-password — сотрудник устанавливает пароль почты ────────
+        if action == "set-mail-password" and method == "POST":
+            new_pass = (body.get("password") or "").strip()
+            if len(new_pass) < 8:
+                return _resp(400, {"error": "Пароль почты — минимум 8 символов"})
+            cur = conn.cursor()
+            cur.execute(
+                f"SELECT email_address, status FROM {SCHEMA}.mailboxes WHERE login = %s",
+                (caller["login"],)
+            )
+            r = cur.fetchone()
+            if not r:
+                return _resp(404, {"error": "Почтовый ящик не найден"})
+            mail_addr, mbox_status = r[0], r[1]
+            # Применяем пароль в ISPmanager (создаём или меняем)
+            try:
+                if mail.isp_available():
+                    if mbox_status == "active":
+                        mail.set_mailbox_password(mail_addr, new_pass)
+                    else:
+                        mail.create_mailbox(mail_addr, new_pass)
+                cur.execute(
+                    f"""UPDATE {SCHEMA}.mailboxes
+                        SET password_enc = %s, password_set = TRUE, status = 'active',
+                            password_set_at = NOW(), provider_status = 'password_set'
+                        WHERE login = %s""",
+                    (mail.encrypt_password(new_pass), caller["login"])
+                )
+                conn.commit()
+                return _resp(200, {"ok": True, "email_address": mail_addr})
+            except Exception as e:
+                cur.execute(
+                    f"UPDATE {SCHEMA}.mailboxes SET provider_status = %s WHERE login = %s",
+                    (str(e)[:400], caller["login"])
+                )
+                conn.commit()
+                return _resp(503, {"error": f"Не удалось установить пароль почты: {e}"})
+
+        # ── mail-contacts — список контактов для мессенджера ────────────────
+        if action == "mail-contacts" and method == "GET":
+            search = (qs.get("q") or "").strip().lower()
+            cur = conn.cursor()
+            # Сотрудники УДС (есть ящик) + учителя/ученики с email
+            like = f"%{search}%"
+            cur.execute(
+                f"""SELECT u.login, u.full_name, u.role, po.panel_role,
+                           COALESCE(mb.email_address, u.email) AS addr
+                    FROM {SCHEMA}.users u
+                    LEFT JOIN {SCHEMA}.panel_operators po ON po.login = u.login AND po.panel_role != 'removed'
+                    LEFT JOIN {SCHEMA}.mailboxes mb ON mb.login = u.login
+                    WHERE u.login != %s AND u.is_active = TRUE
+                      AND COALESCE(mb.email_address, u.email) IS NOT NULL
+                      AND (%s = '' OR LOWER(u.full_name) LIKE %s OR LOWER(u.login) LIKE %s
+                           OR LOWER(COALESCE(mb.email_address, u.email)) LIKE %s)
+                    ORDER BY (po.panel_role IS NOT NULL) DESC, u.full_name
+                    LIMIT 100""",
+                (caller["login"], search, like, like, like)
+            )
+            contacts = []
+            for lg, fn, role, prole, addr in cur.fetchall():
+                contacts.append({
+                    "login": lg, "full_name": fn, "address": addr,
+                    "role": role,
+                    "panel_role": prole,
+                    "role_label": (PANEL_ROLE_LABELS.get(prole) if prole else
+                                   ("Учитель" if role == "teacher" else "Ученик" if role == "student" else role)),
+                })
+            return _resp(200, {"contacts": contacts})
+
+        # ── mail-threads — список диалогов (последнее сообщение в каждом) ────
+        if action == "mail-threads" and method == "GET":
+            cur = conn.cursor()
+            cur.execute(f"SELECT email_address FROM {SCHEMA}.mailboxes WHERE login = %s", (caller["login"],))
+            r = cur.fetchone()
+            if not r:
+                return _resp(200, {"threads": []})
+            my_addr = r[0]
+            cur.execute(
+                f"""SELECT DISTINCT ON (thread_key) thread_key, from_login, from_address, from_name,
+                           to_login, to_address, to_name, subject, body, direction, is_read, created_at
+                    FROM {SCHEMA}.mail_messages
+                    WHERE from_login = %s OR to_login = %s OR LOWER(from_address) = %s OR LOWER(to_address) = %s
+                    ORDER BY thread_key, created_at DESC""",
+                (caller["login"], caller["login"], my_addr.lower(), my_addr.lower())
+            )
+            threads = []
+            for row in cur.fetchall():
+                (tk, fl, fa, fnm, tl2, ta, tnm, subj, bd, direction, is_read, created) = row
+                # Определяем «собеседника»
+                if (fl == caller["login"]) or (fa.lower() == my_addr.lower()):
+                    peer_addr, peer_name, peer_login = ta, tnm, tl2
+                else:
+                    peer_addr, peer_name, peer_login = fa, fnm, fl
+                threads.append({
+                    "thread_key": tk,
+                    "peer_login": peer_login,
+                    "peer_address": peer_addr,
+                    "peer_name": peer_name or peer_addr,
+                    "last_subject": subj,
+                    "last_body": bd[:120],
+                    "last_at": str(created),
+                    "unread": (not is_read) and (tl2 == caller["login"] or ta.lower() == my_addr.lower()),
+                })
+            threads.sort(key=lambda t: t["last_at"], reverse=True)
+            return _resp(200, {"threads": threads, "my_address": my_addr})
+
+        # ── mail-thread — сообщения одного диалога ──────────────────────────
+        if action == "mail-thread" and method == "GET":
+            peer_addr = (qs.get("peer") or "").strip().lower()
+            if not peer_addr:
+                return _resp(400, {"error": "Укажите собеседника"})
+            cur = conn.cursor()
+            cur.execute(f"SELECT email_address FROM {SCHEMA}.mailboxes WHERE login = %s", (caller["login"],))
+            r = cur.fetchone()
+            if not r:
+                return _resp(404, {"error": "Нет почтового ящика"})
+            my_addr = r[0]
+            tk = mail.thread_key(my_addr, peer_addr)
+            cur.execute(
+                f"""SELECT id, from_login, from_address, from_name, to_address, to_name,
+                           subject, body, direction, external_sent, is_read, created_at
+                    FROM {SCHEMA}.mail_messages WHERE thread_key = %s
+                    ORDER BY created_at ASC LIMIT 500""",
+                (tk,)
+            )
+            messages = []
+            for row in cur.fetchall():
+                messages.append({
+                    "id": row[0],
+                    "from_address": row[2],
+                    "from_name": row[3],
+                    "to_address": row[4],
+                    "subject": row[6],
+                    "body": row[7],
+                    "direction": row[8],
+                    "external_sent": row[9],
+                    "mine": row[2].lower() == my_addr.lower(),
+                    "created_at": str(row[11]),
+                })
+            # Помечаем входящие как прочитанные
+            cur.execute(
+                f"""UPDATE {SCHEMA}.mail_messages SET is_read = TRUE
+                    WHERE thread_key = %s AND LOWER(to_address) = %s AND is_read = FALSE""",
+                (tk, my_addr.lower())
+            )
+            conn.commit()
+            return _resp(200, {"messages": messages, "my_address": my_addr})
+
+        # ── mail-send — отправить сообщение (внутри + реально наружу) ────────
+        if action == "mail-send" and method == "POST":
+            to_addr = (body.get("to") or "").strip().lower()
+            subject = (body.get("subject") or "").strip()[:512]
+            text = (body.get("body") or "").strip()
+            if not to_addr or not text:
+                return _resp(400, {"error": "Укажите получателя и текст"})
+
+            cur = conn.cursor()
+            cur.execute(
+                f"""SELECT mb.email_address, mb.password_enc, mb.password_set, u.full_name
+                    FROM {SCHEMA}.mailboxes mb JOIN {SCHEMA}.users u ON u.login = mb.login
+                    WHERE mb.login = %s""",
+                (caller["login"],)
+            )
+            r = cur.fetchone()
+            if not r:
+                return _resp(404, {"error": "У вас нет почтового ящика"})
+            my_addr, my_pass_enc, pass_set, my_name = r[0], r[1], r[2], r[3]
+
+            # Находим получателя среди пользователей (для снимка ФИО и login)
+            cur.execute(
+                f"""SELECT u.login, u.full_name FROM {SCHEMA}.users u
+                    LEFT JOIN {SCHEMA}.mailboxes mb ON mb.login = u.login
+                    WHERE LOWER(mb.email_address) = %s OR LOWER(u.email) = %s
+                    LIMIT 1""",
+                (to_addr, to_addr)
+            )
+            rcp = cur.fetchone()
+            to_login = rcp[0] if rcp else None
+            to_name = rcp[1] if rcp else to_addr
+
+            internal = mail.is_internal(to_addr)
+            external_sent = False
+            direction = "internal" if internal else "outbound"
+
+            # Реальная отправка наружу (или на любой адрес, если есть пароль почты)
+            if not internal:
+                if not pass_set or not my_pass_enc:
+                    return _resp(400, {"error": "Сначала установите пароль почты, чтобы писать на внешние адреса"})
+                try:
+                    my_pass = mail.decrypt_password(my_pass_enc)
+                    mail.send_external_email(my_addr, my_pass, my_name, to_addr, subject or "(без темы)", text)
+                    external_sent = True
+                except Exception as e:
+                    return _resp(503, {"error": f"Не удалось отправить письмо: {e}"})
+
+            tk = mail.thread_key(my_addr, to_addr)
+            cur.execute(
+                f"""INSERT INTO {SCHEMA}.mail_messages
+                    (thread_key, from_login, from_address, from_name, to_login, to_address, to_name,
+                     subject, body, direction, external_sent, is_read)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE) RETURNING id, created_at""",
+                (tk, caller["login"], my_addr, my_name, to_login, to_addr, to_name,
+                 subject or None, text, direction, external_sent)
+            )
+            mid, created = cur.fetchone()
+            conn.commit()
+            return _resp(200, {
+                "ok": True, "id": mid, "created_at": str(created),
+                "external_sent": external_sent,
+            })
 
         return _resp(404, {"error": f"Неизвестный action: {action}"})
     finally:

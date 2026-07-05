@@ -56,8 +56,8 @@ export default function EmployeeRegisterForm({ login, token, assignable, onDone 
   const [emailStep, setEmailStep] = useState<"form" | "verify">("form");
   const [emailCode, setEmailCode] = useState("");
   const [emailHint, setEmailHint] = useState("");
-  const [pendingResult, setPendingResult] = useState<{ login: string; password: string; iis_code: string; operator_number: number } | null>(null);
-  const [result, setResult] = useState<{ login: string; password: string; iis_code: string; operator_number: number } | null>(null);
+  const [pendingResult, setPendingResult] = useState<{ login: string; password: string; iis_code: string; operator_number: number; mail_address?: string | null; mail_status?: string | null } | null>(null);
+  const [result, setResult] = useState<{ login: string; password: string; iis_code: string; operator_number: number; mail_address?: string | null; mail_status?: string | null } | null>(null);
 
   // Шаг 1: регистрация → если есть email, отправляем код подтверждения
   const submit = async (e: React.FormEvent) => {
@@ -70,7 +70,7 @@ export default function EmployeeRegisterForm({ login, token, assignable, onDone 
         email: email.trim() || undefined, phone: phone.trim() || undefined,
         panel_role: role,
       });
-      const reg = { login: res.login, password: res.password, iis_code: res.iis_code, operator_number: res.operator_number };
+      const reg = { login: res.login, password: res.password, iis_code: res.iis_code, operator_number: res.operator_number, mail_address: res.mail_address, mail_status: res.mail_status };
       if (email.trim()) {
         // Отправляем 6-значный код на email нового сотрудника
         const hint = await udsApi.sendEmailCode(email.trim(), res.login);
@@ -129,6 +129,22 @@ export default function EmployeeRegisterForm({ login, token, assignable, onDone 
           <CredBox label="Пароль" value={result.password} />
           <CredBox label="Код ИИС" value={result.iis_code} />
         </div>
+        {result.mail_address && (
+          <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 space-y-1">
+            <div className="flex items-center gap-1.5">
+              <Icon name="Mail" size={13} className="text-blue-600" />
+              <p className="text-xs font-bold text-blue-800">Корпоративная почта</p>
+            </div>
+            <p className="text-sm font-mono font-semibold text-blue-700 break-all">{result.mail_address}</p>
+            <p className="text-[11px] text-blue-600">
+              {result.mail_status === "active"
+                ? "Ящик создан. Сотрудник задаст пароль почты при первом входе в УДС."
+                : result.mail_status === "error"
+                ? "Адрес зарезервирован, но ящик не создан автоматически. Проверьте доступ к ISPmanager."
+                : "Ящик будет создан при установке пароля сотрудником."}
+            </p>
+          </div>
+        )}
         <button onClick={onDone} className="px-4 py-2 bg-primary text-primary-foreground text-xs font-semibold rounded-sm hover:opacity-90">
           Готово
         </button>

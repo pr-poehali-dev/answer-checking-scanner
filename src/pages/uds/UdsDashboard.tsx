@@ -6,6 +6,7 @@ import UdsProfile from "@/pages/uds/UdsProfile";
 import UdsSupport from "@/pages/uds/UdsSupport";
 import UdsLkView from "@/pages/uds/UdsLkView";
 import UdsMaintenance from "@/pages/uds/UdsMaintenance";
+import UdsMail from "@/pages/uds/UdsMail";
 import { PANEL_ROLE_LABELS, Session, Tab } from "@/pages/uds/udsSession";
 
 interface UdsDashboardProps {
@@ -14,13 +15,15 @@ interface UdsDashboardProps {
   setTab: (t: Tab) => void;
   logout: () => void;
   onProfileUpdated: (newLogin: string, newToken: string) => void;
+  myMailAddress?: string | null;
 }
 
-export default function UdsDashboard({ session, tab, setTab, logout, onProfileUpdated }: UdsDashboardProps) {
+export default function UdsDashboard({ session, tab, setTab, logout, onProfileUpdated, myMailAddress }: UdsDashboardProps) {
   const { perms } = session;
   const TABS: { id: Tab; label: string; icon: string; show: boolean }[] = [
     { id: "employees", label: "Сотрудники", icon: "Users", show: true },
     { id: "users", label: "Пользователи", icon: "UserSearch", show: true },
+    { id: "mail", label: "Почта", icon: "Mail", show: !!myMailAddress },
     { id: "support", label: "Тех. поддержка", icon: "Headphones", show: perms.can_support },
     { id: "lkview", label: "Вид ЛК", icon: "LayoutDashboard", show: perms.can_lkview },
     { id: "maintenance", label: "Тех. работы", icon: "Construction", show: perms.can_maintenance },
@@ -80,6 +83,9 @@ export default function UdsDashboard({ session, tab, setTab, logout, onProfileUp
         )}
         {tab === "users" && (
           <UdsUsers login={session.login} token={session.token} perms={perms} />
+        )}
+        {tab === "mail" && (
+          <UdsMail login={session.login} token={session.token} myAddress={myMailAddress} />
         )}
         {tab === "audit" && (
           <UdsAuditLog login={session.login} token={session.token} />

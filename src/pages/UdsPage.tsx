@@ -4,6 +4,7 @@ import { cryptoPlugins, CryptoProMedia } from "@/lib/cryptoPlugins";
 import UdsCertIssue from "@/pages/uds/UdsCertIssue";
 import UdsLoginForm from "@/pages/uds/UdsLoginForm";
 import UdsDashboard from "@/pages/uds/UdsDashboard";
+import MailPasswordSetup from "@/pages/uds/MailPasswordSetup";
 import {
   Session,
   Tab,
@@ -17,6 +18,7 @@ import {
 export default function UdsPage() {
   const [session, setSession] = useState<Session | null>(null);
   const [myCert, setMyCert] = useState<UdsCert | null>(null);
+  const [myMail, setMyMail] = useState<{ email_address: string; status: string; password_set: boolean } | null>(null);
   // Шаги входа: cert → iis → creds → sms
   const [step, setStep] = useState<"cert" | "iis" | "creds" | "sms">("cert");
   const [iisCode, setIisCode] = useState("");
@@ -41,7 +43,7 @@ export default function UdsPage() {
   const doLogout = useCallback(() => {
     localStorage.removeItem(LS_KEY);
     removeCookie();
-    setSession(null); setMyCert(null);
+    setSession(null); setMyCert(null); setMyMail(null);
     setStep("cert"); setIisCode("");
     setLoginName(""); setPassword(""); setSmsCode(""); setSmsHint("");
   }, []);
@@ -69,6 +71,7 @@ export default function UdsPage() {
       if (me.uds_access && me.perms) {
         setSession(prev => prev ? { ...prev, panel_role: me.panel_role || prev.panel_role, perms: me.perms! } : prev);
         setMyCert(me.my_cert);
+        setMyMail(me.my_mail);
       } else {
         localStorage.removeItem(LS_KEY); removeCookie(); setSession(null);
       }
@@ -247,6 +250,18 @@ export default function UdsPage() {
     );
   }
 
+  // ── Обязательная установка пароля почты при первом входе ──────────────────
+  if (myMail && myMail.status !== "error" && !myMail.password_set) {
+    return (
+      <MailPasswordSetup
+        login={session.login}
+        token={session.token}
+        emailAddress={myMail.email_address}
+        onDone={() => refreshMe(session)}
+      />
+    );
+  }
+
   const onProfileUpdated = (newLogin: string, newToken: string) => {
     const updated = { ...session, login: newLogin, token: newToken };
     setSession(updated);
@@ -260,6 +275,7 @@ export default function UdsPage() {
       setTab={setTab}
       logout={logout}
       onProfileUpdated={onProfileUpdated}
+      myMailAddress={myMail?.email_address ?? null}
     />
   );
 }

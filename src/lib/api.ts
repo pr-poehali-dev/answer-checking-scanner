@@ -347,6 +347,50 @@ export interface UdsEmployee {
   full_name: string;
   is_active: boolean;
   last_seen_at: string | null;
+  mail_address?: string | null;
+  mail_status?: string | null;
+}
+
+// ── Корпоративная почта УДС ──
+export interface MailStatus {
+  has_mailbox: boolean;
+  email_address?: string;
+  status?: string;
+  password_set?: boolean;
+  isp_available?: boolean;
+}
+
+export interface MailContact {
+  login: string;
+  full_name: string;
+  address: string;
+  role: string;
+  panel_role: string | null;
+  role_label: string;
+}
+
+export interface MailThread {
+  thread_key: string;
+  peer_login: string | null;
+  peer_address: string;
+  peer_name: string;
+  last_subject: string | null;
+  last_body: string;
+  last_at: string;
+  unread: boolean;
+}
+
+export interface MailMessage {
+  id: number;
+  from_address: string;
+  from_name: string | null;
+  to_address: string;
+  subject: string | null;
+  body: string;
+  direction: string;
+  external_sent: boolean;
+  mine: boolean;
+  created_at: string;
 }
 
 export interface UdsAuditEntry {
@@ -411,7 +455,7 @@ export const udsApi = {
     ),
 
   me: (login: string, token: string) =>
-    udsRequest<{ login: string; panel_role: string | null; panel_role_label: string | null; operator_number: number | null; is_panel: boolean; uds_registered: boolean; uds_access: boolean; perms: UdsPerms | null; my_cert: UdsCert | null }>("me", "GET", login, token),
+    udsRequest<{ login: string; panel_role: string | null; panel_role_label: string | null; operator_number: number | null; is_panel: boolean; uds_registered: boolean; uds_access: boolean; perms: UdsPerms | null; my_cert: UdsCert | null; my_mail: { email_address: string; status: string; password_set: boolean } | null }>("me", "GET", login, token),
 
   employees: (login: string, token: string) =>
     udsRequest<{ employees: UdsEmployee[] }>("employees", "GET", login, token),
@@ -420,7 +464,7 @@ export const udsApi = {
     udsRequest<{ employee: UdsEmployee; logs: UdsAuditEntry[] }>("employee", "GET", login, token, undefined, { target_login: targetLogin }),
 
   registerEmployee: (login: string, token: string, payload: { first_name: string; last_name: string; middle_name?: string; email?: string; phone?: string; panel_role: string }) =>
-    udsRequest<{ ok: boolean; login: string; password: string; iis_code: string; operator_number: number; full_name: string; panel_role: string }>("register-employee", "POST", login, token, payload),
+    udsRequest<{ ok: boolean; login: string; password: string; iis_code: string; operator_number: number; full_name: string; panel_role: string; mail_address: string | null; mail_status: string | null }>("register-employee", "POST", login, token, payload),
 
   setRole: (login: string, token: string, targetLogin: string, panelRole: string) =>
     udsRequest<{ ok: boolean }>("set-role", "POST", login, token, { target_login: targetLogin, panel_role: panelRole }),
@@ -501,6 +545,27 @@ export const udsApi = {
   verifySmsCode: (loginName: string, password: string, iisCode: string, code: string) =>
     udsPost<{ ok: boolean; login: string; token: string; panel_role: string; panel_role_label: string; operator_number: number; perms: UdsPerms }>(
       "verify-sms-code", { login: loginName, password, iis_code: iisCode, code }
+    ),
+
+  // ── Корпоративная почта ──
+  mailStatus: (login: string, token: string) =>
+    udsRequest<MailStatus>("mail-status", "GET", login, token),
+
+  setMailPassword: (login: string, token: string, password: string) =>
+    udsRequest<{ ok: boolean; email_address: string }>("set-mail-password", "POST", login, token, { password }),
+
+  mailContacts: (login: string, token: string, q = "") =>
+    udsRequest<{ contacts: MailContact[] }>("mail-contacts", "GET", login, token, undefined, { q }),
+
+  mailThreads: (login: string, token: string) =>
+    udsRequest<{ threads: MailThread[]; my_address?: string }>("mail-threads", "GET", login, token),
+
+  mailThread: (login: string, token: string, peer: string) =>
+    udsRequest<{ messages: MailMessage[]; my_address: string }>("mail-thread", "GET", login, token, undefined, { peer }),
+
+  mailSend: (login: string, token: string, to: string, subject: string, body: string) =>
+    udsRequest<{ ok: boolean; id: number; created_at: string; external_sent: boolean }>(
+      "mail-send", "POST", login, token, { to, subject, body }
     ),
 };
 

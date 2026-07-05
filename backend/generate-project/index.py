@@ -446,6 +446,58 @@ def _render_markdown(doc, md_text: str):
 
 # ─── PDF (reportlab) ─────────────────────────────────────────────────────────
 
+# URL шрифтов DejaVu (поддержка кириллицы) — стабильные raw-ссылки GitHub
+_FONT_SOURCES = {
+    "DejaVuSans.ttf": "https://raw.githubusercontent.com/dejavu-fonts/dejavu-fonts/version_2_37/ttf/DejaVuSans.ttf",
+    "DejaVuSans-Bold.ttf": "https://raw.githubusercontent.com/dejavu-fonts/dejavu-fonts/version_2_37/ttf/DejaVuSans-Bold.ttf",
+}
+
+
+def _download_font(fname: str) -> str | None:
+    """Скачивает шрифт в /tmp (с кэшем). Возвращает путь или None."""
+    # Сначала проверяем системные пути
+    for sys_path in (f"/usr/share/fonts/truetype/dejavu/{fname}",):
+        if os.path.exists(sys_path):
+            return sys_path
+    dst = f"/tmp/{fname}"
+    if os.path.exists(dst) and os.path.getsize(dst) > 10000:
+        return dst
+    url = _FONT_SOURCES.get(fname)
+    if not url:
+        return None
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            data = r.read()
+        if len(data) < 10000:
+            return None
+        with open(dst, "wb") as f:
+            f.write(data)
+        return dst
+    except Exception as e:
+        print(f"[generate-project] font download error {fname}: {e}")
+        return None
+
+
+def _ensure_cyrillic_font(pdfmetrics, TTFont) -> str:
+    """Регистрирует кириллический шрифт (обычный + жирный) и возвращает имя семейства."""
+    try:
+        regular = _download_font("DejaVuSans.ttf")
+        bold = _download_font("DejaVuSans-Bold.ttf")
+        if not regular:
+            return "Helvetica"
+        pdfmetrics.registerFont(TTFont("DejaVu", regular))
+        if bold:
+            pdfmetrics.registerFont(TTFont("DejaVu-Bold", bold))
+            from reportlab.pdfbase.pdfmetrics import registerFontFamily
+            registerFontFamily("DejaVu", normal="DejaVu", bold="DejaVu-Bold",
+                               italic="DejaVu", boldItalic="DejaVu-Bold")
+        return "DejaVu"
+    except Exception as e:
+        print(f"[generate-project] font register error: {e}")
+        return "Helvetica"
+
+
 def build_pdf(work: dict, topic: str, subject: str, author_name: str, school: str,
               chapters: list, bodies: list, simple_text: str) -> bytes:
     from reportlab.lib.pagesizes import A4
@@ -456,18 +508,8 @@ def build_pdf(work: dict, topic: str, subject: str, author_name: str, school: st
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
 
-    # Регистрируем шрифт с кириллицей
-    font_name = "DejaVu"
-    try:
-        for path in ("/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
-                     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"):
-            if os.path.exists(path):
-                pdfmetrics.registerFont(TTFont(font_name, path))
-                break
-        else:
-            font_name = "Helvetica"
-    except Exception:
-        font_name = "Helvetica"
+    # Регистрируем шрифт с кириллицей (скачиваем и кэшируем в /tmp)
+    font_name = _ensure_cyrillic_font(pdfmetrics, TTFont)
 
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=2 * cm, bottomMargin=2 * cm,

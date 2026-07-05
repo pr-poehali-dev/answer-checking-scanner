@@ -7,6 +7,7 @@ import UdsSupport from "@/pages/uds/UdsSupport";
 import UdsLkView from "@/pages/uds/UdsLkView";
 import UdsMaintenance from "@/pages/uds/UdsMaintenance";
 import UdsMail from "@/pages/uds/UdsMail";
+import UdsMaterials from "@/pages/uds/UdsMaterials";
 import MyWards from "@/pages/uds/MyWards";
 import { PANEL_ROLE_LABELS, Session, Tab } from "@/pages/uds/udsSession";
 
@@ -21,9 +22,11 @@ interface UdsDashboardProps {
 
 export default function UdsDashboard({ session, tab, setTab, logout, onProfileUpdated, myMailAddress }: UdsDashboardProps) {
   const { perms } = session;
+  const canModerate = ["advisor", "deputy", "head"].includes(session.panel_role) || session.login === "admin";
   const TABS: { id: Tab; label: string; icon: string; show: boolean; badge?: number }[] = [
     { id: "employees", label: "Сотрудники", icon: "Users", show: true },
     { id: "wards", label: "Мои подопечные", icon: "UserCheck", show: !!perms.is_curator, badge: session.pending_transfers },
+    { id: "materials", label: "Материалы", icon: "FileCheck", show: canModerate },
     { id: "users", label: "Пользователи", icon: "UserSearch", show: true },
     { id: "mail", label: "Почта", icon: "Mail", show: !!myMailAddress },
     { id: "support", label: "Тех. поддержка", icon: "Headphones", show: perms.can_support },
@@ -96,6 +99,9 @@ export default function UdsDashboard({ session, tab, setTab, logout, onProfileUp
         )}
         {tab === "mail" && (
           <UdsMail login={session.login} token={session.token} myAddress={myMailAddress} />
+        )}
+        {tab === "materials" && (
+          <UdsMaterials login={session.login} token={session.token} />
         )}
         {tab === "audit" && (
           <UdsAuditLog login={session.login} token={session.token} />

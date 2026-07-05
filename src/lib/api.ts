@@ -9,6 +9,7 @@ const WORKSHEET_URL = "https://functions.poehali.dev/34530eb2-3d3c-485e-b7f8-63d
 const SUBSCRIPTION_URL = "https://functions.poehali.dev/0dc83bdb-3da2-4cb9-b9d9-f0b48cfb25da";
 const STUDENT_LINK_URL = "https://functions.poehali.dev/23f6c20d-f0bd-4bfb-84fe-75c97564d076";
 const UDS_URL = "https://functions.poehali.dev/3f54b399-3af0-45fa-a2b6-0736484f6059";
+const MATERIALS_URL = "https://functions.poehali.dev/b8c11774-1a89-4bd2-a962-df36ddc786d7";
 
 export type UserRole = "admin" | "teacher" | "tester" | "student";
 export type SubscriptionStatus = "none" | "active" | "expired" | "trial";
@@ -622,6 +623,87 @@ export const udsApi = {
     udsRequest<{ ok: boolean; endpoint?: string; message?: string; reason?: string }>(
       "mail-test-isp", "GET", login, token
     ),
+};
+
+// ── Materials API (общедоступная база материалов) ─────────────────────────────
+
+export interface MaterialItem {
+  id: number;
+  title: string;
+  description: string | null;
+  subject: string | null;
+  grade: string | null;
+  material_type: string | null;
+  preview_url: string | null;
+  file_ext: string | null;
+  file_size: number;
+  author_name: string | null;
+  author_role: string | null;
+  downloads_count: number;
+  created_at: string;
+}
+
+export interface MyMaterialItem {
+  id: number;
+  title: string;
+  subject: string | null;
+  status: string;
+  reject_reason: string | null;
+  downloads_count: number;
+  bonus_granted: boolean;
+  created_at: string;
+}
+
+export interface ModerationItem extends MaterialItem {
+  file_url: string;
+  file_name: string;
+  author_login: string;
+}
+
+async function matRequest<T>(action: string, method: string, opts: { login?: string; token?: string; body?: object; query?: Record<string, string> } = {}): Promise<T> {
+  const { login, token, body, query } = opts;
+  const isGet = method === "GET";
+  const qs = new URLSearchParams({ action });
+  if (isGet) {
+    if (login) qs.set("login", login);
+    Object.entries(query || {}).forEach(([k, v]) => qs.set(k, v));
+  }
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) headers["X-Authorization"] = token;
+  const res = await fetch(`${MATERIALS_URL}?${qs.toString()}`, {
+    method,
+    headers,
+    ...(isGet ? {} : { body: JSON.stringify({ ...(login ? { login } : {}), ...(body || {}) }) }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw { status: res.status, ...data };
+  return data as T;
+}
+
+export const materialsApi = {
+  list: (q?: string, subject?: string) =>
+    matRequest<{ items: MaterialItem[]; subjects: string[] }>("list", "GET", { query: { ...(q ? { q } : {}), ...(subject ? { subject } : {}) } }),
+
+  item: (id: number) =>
+    matRequest<{ item: MaterialItem }>("item", "GET", { query: { id: String(id) } }),
+
+  accessStatus: (login?: string, token?: string) =>
+    matRequest<{ authorized: boolean; unlimited: boolean; role?: string; used?: number; limit: number; remaining?: number }>("access-status", "GET", { login, token }),
+
+  upload: (login: string, token: string, payload: { title: string; description?: string; subject?: string; grade?: string; material_type?: string; file_name: string; file_base64: string }) =>
+    matRequest<{ ok: boolean; id: number; message: string }>("upload", "POST", { login, token, body: payload }),
+
+  my: (login: string, token: string) =>
+    matRequest<{ items: MyMaterialItem[] }>("my", "GET", { login, token }),
+
+  download: (id: number, login?: string, token?: string) =>
+    matRequest<{ ok: boolean; file_url: string; file_name: string }>("download", "POST", { login, token, body: { id } }),
+
+  moderation: (login: string, token: string) =>
+    matRequest<{ items: ModerationItem[] }>("moderation", "GET", { login, token }),
+
+  moderate: (login: string, token: string, id: number, approve: boolean, reason?: string) =>
+    matRequest<{ ok: boolean; status: string; bonus_granted: boolean; bonus: number }>("moderate", "POST", { login, token, body: { id, approve, reason: reason || "" } }),
 };
 
 // ── Institution API ───────────────────────────────────────────────────────────

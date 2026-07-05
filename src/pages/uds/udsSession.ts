@@ -47,4 +47,4 @@ export function removeCookie() {
 // Таймаут сессии — 5 минут простоя
 export const SESSION_TIMEOUT_MS = 5 * 60 * 1000;
 
-export type Tab = "employees" | "wards" | "users" | "audit" | "support" | "profile" | "lkview" | "maintenance" | "mail";
+export type Tab = "employees" | "wards" | "users" | "audit" | "support" | "profile" | "lkview" | "maintenance" | "mail" | "materials";

@@ -1,0 +1,63 @@
+{
+  "tests": [
+    {
+      "name": "OPTIONS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    },
+    {
+      "name": "list returns 200",
+      "method": "GET",
+      "path": "/?action=list",
+      "expectedStatus": 200
+    },
+    {
+      "name": "access-status for anonymous",
+      "method": "GET",
+      "path": "/?action=access-status",
+      "expectedStatus": 200,
+      "expectedBody": {"authorized": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "item without id returns 400",
+      "method": "GET",
+      "path": "/?action=item",
+      "expectedStatus": 400
+    },
+    {
+      "name": "upload without auth returns 401",
+      "method": "POST",
+      "path": "/?action=upload",
+      "body": {"title": "Test", "file_base64": "AAAA", "file_name": "a.pdf"},
+      "expectedStatus": 401
+    },
+    {
+      "name": "download without id returns 400",
+      "method": "POST",
+      "path": "/?action=download",
+      "body": {},
+      "expectedStatus": 400
+    },
+    {
+      "name": "moderation without access returns 403",
+      "method": "GET",
+      "path": "/?action=moderation",
+      "expectedStatus": 403
+    },
+    {
+      "name": "moderate without access returns 403",
+      "method": "POST",
+      "path": "/?action=moderate",
+      "body": {"id": 1, "approve": true},
+      "expectedStatus": 403
+    },
+    {
+      "name": "unknown action returns 404",
+      "method": "GET",
+      "path": "/?action=whatever",
+      "expectedStatus": 404
+    }
+  ]
+}

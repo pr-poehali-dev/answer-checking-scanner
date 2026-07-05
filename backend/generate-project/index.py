@@ -365,24 +365,24 @@ def build_docx(work: dict, topic: str, subject: str, author_name: str, school: s
         _set_font(p.add_run(text), size=size, bold=bold)
         return p
 
-    centered(school or "Образовательное учреждение", size=12, before=0, after=200)
+    centered(school or "Образовательное учреждение", size=14, before=0, after=200)
     for _ in range(5):
-        centered("", size=12)
+        centered("", size=14)
     centered(work["label"].upper(), size=16, bold=True, after=120)
     centered(f"на тему: «{topic}»", size=14, after=40)
     if subject:
-        centered(f"по дисциплине: {subject}", size=12, after=40)
+        centered(f"по дисциплине: {subject}", size=14, after=40)
     for _ in range(6):
-        centered("", size=12)
+        centered("", size=14)
     if author_name:
         p = doc.add_paragraph()
         p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
         _spacing(p, after=20)
-        _set_font(p.add_run(f"Выполнил(а): {author_name}"), size=12)
+        _set_font(p.add_run(f"Выполнил(а): {author_name}"), size=14)
     for _ in range(4):
-        centered("", size=12)
+        centered("", size=14)
     import datetime
-    centered(str(datetime.datetime.now().year), size=12)
+    centered(f"{datetime.datetime.now().year} г.", size=14)
 
     doc.add_page_break()
 
@@ -399,18 +399,50 @@ def build_docx(work: dict, topic: str, subject: str, author_name: str, school: s
         doc.add_page_break()
 
     # Тело
+    def _is_structural(title: str) -> bool:
+        t = title.lower()
+        return any(k in t for k in ("введени", "заключени", "литератур", "источник")) or t.startswith("глава")
+
     if simple_text:
         _render_markdown(doc, simple_text)
     else:
-        for ch, body in zip(chapters, bodies):
+        for idx, (ch, body) in enumerate(zip(chapters, bodies)):
             hp = doc.add_paragraph()
-            _spacing(hp, before=120, after=80)
-            _set_font(hp.add_run(ch), size=14, bold=True)
+            hp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            _spacing(hp, before=0, after=120, line=360)
+            _set_font(hp.add_run(ch.upper()), size=14, bold=True, color=(0, 0, 0))
             _render_markdown(doc, body)
+            # Каждый структурный раздел — с новой страницы (ГОСТ 7.32)
+            if idx < len(chapters) - 1 and _is_structural(chapters[idx + 1]):
+                doc.add_page_break()
+
+    # Нумерация страниц внизу по центру (титульный лист по ГОСТ включён в счёт, но без номера)
+    _add_page_numbers(doc)
 
     buf = io.BytesIO()
     doc.save(buf)
     return buf.getvalue()
+
+
+def _add_page_numbers(doc):
+    """Добавляет номера страниц внизу по центру. Титульный (первая страница) — без номера."""
+    section = doc.sections[0]
+    section.different_first_page_header_footer = True
+    footer = section.footer
+    p = footer.paragraphs[0] if footer.paragraphs else footer.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run()
+    _set_font(run, size=12)
+    fldBegin = OxmlElement("w:fldChar")
+    fldBegin.set(qn("w:fldCharType"), "begin")
+    instr = OxmlElement("w:instrText")
+    instr.set(qn("xml:space"), "preserve")
+    instr.text = "PAGE"
+    fldEnd = OxmlElement("w:fldChar")
+    fldEnd.set(qn("w:fldCharType"), "end")
+    run._r.append(fldBegin)
+    run._r.append(instr)
+    run._r.append(fldEnd)
 
 
 def _render_markdown(doc, md_text: str):
@@ -419,8 +451,9 @@ def _render_markdown(doc, md_text: str):
         if line.startswith("### ") or line.startswith("## ") or line.startswith("# ") or line.startswith("#### "):
             title = line.lstrip("#").strip()
             p = doc.add_paragraph()
-            _spacing(p, before=100, after=40)
-            _set_font(p.add_run(title), size=14, bold=True, color=(31, 55, 100))
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            _spacing(p, before=120, after=120, line=360)
+            _set_font(p.add_run(title.upper()), size=14, bold=True, color=(0, 0, 0))
             continue
         if line.strip() in ("---", "***", "___"):
             continue
@@ -446,17 +479,23 @@ def _render_markdown(doc, md_text: str):
 
 # ─── PDF (reportlab) ─────────────────────────────────────────────────────────
 
-# URL шрифтов DejaVu (поддержка кириллицы) — стабильные raw-ссылки GitHub
+# Times New Roman по ГОСТ 7.32-2017. Используем Liberation Serif —
+# свободный шрифт, метрически ИДЕНТИЧНЫЙ Times New Roman, с полной кириллицей.
 _FONT_SOURCES = {
-    "DejaVuSans.ttf": "https://raw.githubusercontent.com/dejavu-fonts/dejavu-fonts/version_2_37/ttf/DejaVuSans.ttf",
-    "DejaVuSans-Bold.ttf": "https://raw.githubusercontent.com/dejavu-fonts/dejavu-fonts/version_2_37/ttf/DejaVuSans-Bold.ttf",
+    "TNR.ttf": "https://github.com/liberationfonts/liberation-fonts/raw/main/src/LiberationSerif-Regular.ttf",
+    "TNR-Bold.ttf": "https://github.com/liberationfonts/liberation-fonts/raw/main/src/LiberationSerif-Bold.ttf",
+    "TNR-Italic.ttf": "https://github.com/liberationfonts/liberation-fonts/raw/main/src/LiberationSerif-Italic.ttf",
+    "TNR-BoldItalic.ttf": "https://github.com/liberationfonts/liberation-fonts/raw/main/src/LiberationSerif-BoldItalic.ttf",
+    # запасной источник DejaVu на случай недоступности
+    "DejaVuSans.ttf": "https://raw.githubusercontent.com/dejavu-fonts/dejavu-fonts/version_2_37/ttf/DejaVuSerif.ttf",
+    "DejaVuSans-Bold.ttf": "https://raw.githubusercontent.com/dejavu-fonts/dejavu-fonts/version_2_37/ttf/DejaVuSerif-Bold.ttf",
 }
 
 
 def _download_font(fname: str) -> str | None:
     """Скачивает шрифт в /tmp (с кэшем). Возвращает путь или None."""
-    # Сначала проверяем системные пути
-    for sys_path in (f"/usr/share/fonts/truetype/dejavu/{fname}",):
+    for sys_path in (f"/usr/share/fonts/truetype/liberation/{fname}",
+                     f"/usr/share/fonts/truetype/dejavu/{fname}"):
         if os.path.exists(sys_path):
             return sys_path
     dst = f"/tmp/{fname}"
@@ -480,19 +519,31 @@ def _download_font(fname: str) -> str | None:
 
 
 def _ensure_cyrillic_font(pdfmetrics, TTFont) -> str:
-    """Регистрирует кириллический шрифт (обычный + жирный) и возвращает имя семейства."""
+    """Регистрирует Times New Roman (Liberation Serif) с кириллицей. Возвращает имя семейства."""
+    from reportlab.pdfbase.pdfmetrics import registerFontFamily
     try:
+        regular = _download_font("TNR.ttf")
+        bold = _download_font("TNR-Bold.ttf")
+        italic = _download_font("TNR-Italic.ttf")
+        bold_italic = _download_font("TNR-BoldItalic.ttf")
+        if regular:
+            pdfmetrics.registerFont(TTFont("TNR", regular))
+            pdfmetrics.registerFont(TTFont("TNR-Bold", bold or regular))
+            pdfmetrics.registerFont(TTFont("TNR-Italic", italic or regular))
+            pdfmetrics.registerFont(TTFont("TNR-BoldItalic", bold_italic or bold or regular))
+            registerFontFamily("TNR", normal="TNR", bold="TNR-Bold",
+                               italic="TNR-Italic", boldItalic="TNR-BoldItalic")
+            return "TNR"
+        # запасной вариант — DejaVu Serif
         regular = _download_font("DejaVuSans.ttf")
         bold = _download_font("DejaVuSans-Bold.ttf")
-        if not regular:
-            return "Helvetica"
-        pdfmetrics.registerFont(TTFont("DejaVu", regular))
-        if bold:
-            pdfmetrics.registerFont(TTFont("DejaVu-Bold", bold))
-            from reportlab.pdfbase.pdfmetrics import registerFontFamily
-            registerFontFamily("DejaVu", normal="DejaVu", bold="DejaVu-Bold",
-                               italic="DejaVu", boldItalic="DejaVu-Bold")
-        return "DejaVu"
+        if regular:
+            pdfmetrics.registerFont(TTFont("TNR", regular))
+            pdfmetrics.registerFont(TTFont("TNR-Bold", bold or regular))
+            registerFontFamily("TNR", normal="TNR", bold="TNR-Bold",
+                               italic="TNR", boldItalic="TNR-Bold")
+            return "TNR"
+        return "Helvetica"
     except Exception as e:
         print(f"[generate-project] font register error: {e}")
         return "Helvetica"
@@ -511,26 +562,37 @@ def build_pdf(work: dict, topic: str, subject: str, author_name: str, school: st
     # Регистрируем шрифт с кириллицей (скачиваем и кэшируем в /tmp)
     font_name = _ensure_cyrillic_font(pdfmetrics, TTFont)
 
+    # Поля по ГОСТ 7.32-2017: левое 30 мм, правое 15 мм, верхнее/нижнее 20 мм
+    LEADING = 14 * 1.5  # полуторный интервал
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=2 * cm, bottomMargin=2 * cm,
                             leftMargin=3 * cm, rightMargin=1.5 * cm)
     styles = getSampleStyleSheet()
+    # Основной текст: TNR 14, полуторный, отступ 1,25 см, по ширине
     body_style = ParagraphStyle("body", parent=styles["Normal"], fontName=font_name,
-                                fontSize=14, leading=21, alignment=TA_JUSTIFY, firstLineIndent=1.25 * cm, spaceAfter=6)
+                                fontSize=14, leading=LEADING, alignment=TA_JUSTIFY,
+                                firstLineIndent=1.25 * cm, spaceAfter=0)
+    # Заголовок раздела: по центру, полужирный, ЧЁРНЫЙ (ГОСТ — без цветов)
     h_style = ParagraphStyle("h", parent=styles["Normal"], fontName=font_name, fontSize=14,
-                             leading=20, spaceBefore=10, spaceAfter=6, textColor="#1f3764")
+                             leading=LEADING, spaceBefore=6, spaceAfter=12, alignment=TA_CENTER,
+                             textColor="#000000")
     center = ParagraphStyle("c", parent=styles["Normal"], fontName=font_name, fontSize=14,
-                            leading=20, alignment=TA_CENTER)
-    right = ParagraphStyle("r", parent=styles["Normal"], fontName=font_name, fontSize=12,
-                           leading=18, alignment=TA_RIGHT)
+                            leading=LEADING, alignment=TA_CENTER)
+    right = ParagraphStyle("r", parent=styles["Normal"], fontName=font_name, fontSize=14,
+                           leading=LEADING, alignment=TA_RIGHT)
 
     def esc(t):
         return (t or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
+    def esc_keep_tags(t):
+        return t.replace("&", "&amp;")
+
+    # ── Титульный лист (ГОСТ 7.32) ──
     story = []
     story.append(Paragraph(esc(school or "Образовательное учреждение"), center))
     story.append(Spacer(1, 6 * cm))
-    story.append(Paragraph(f"<b>{esc(work['label'].upper())}</b>", ParagraphStyle("t", parent=center, fontSize=18)))
+    story.append(Paragraph(f"<b>{esc(work['label'].upper())}</b>",
+                           ParagraphStyle("t", parent=center, fontSize=16, leading=20)))
     story.append(Spacer(1, 0.5 * cm))
     story.append(Paragraph(f"на тему: «{esc(topic)}»", center))
     if subject:
@@ -540,15 +602,19 @@ def build_pdf(work: dict, topic: str, subject: str, author_name: str, school: st
         story.append(Paragraph(f"Выполнил(а): {esc(author_name)}", right))
     import datetime
     story.append(Spacer(1, 3 * cm))
-    story.append(Paragraph(str(datetime.datetime.now().year), center))
+    story.append(Paragraph(f"{datetime.datetime.now().year} г.", center))
     story.append(PageBreak())
 
+    # ── Содержание ──
     if chapters:
-        story.append(Paragraph("<b>СОДЕРЖАНИЕ</b>", center))
-        story.append(Spacer(1, 0.5 * cm))
+        story.append(Paragraph("<b>СОДЕРЖАНИЕ</b>", h_style))
         for ch in chapters:
-            story.append(Paragraph(esc(ch), body_style))
+            story.append(Paragraph(esc(ch), ParagraphStyle("toc", parent=body_style, firstLineIndent=0)))
         story.append(PageBreak())
+
+    def is_structural(title: str) -> bool:
+        t = title.lower()
+        return any(k in t for k in ("введени", "заключени", "литератур", "источник", "содержани"))
 
     def render_md(md):
         for line in md.split("\n"):
@@ -556,7 +622,7 @@ def build_pdf(work: dict, topic: str, subject: str, author_name: str, school: st
             if not line.strip():
                 continue
             if line.lstrip().startswith("#"):
-                story.append(Paragraph("<b>" + esc(line.lstrip("#").strip()) + "</b>", h_style))
+                story.append(Paragraph("<b>" + esc(line.lstrip("#").strip()).upper() + "</b>", h_style))
                 continue
             if line.strip() in ("---", "***", "___"):
                 continue
@@ -565,19 +631,27 @@ def build_pdf(work: dict, topic: str, subject: str, author_name: str, school: st
             clean = re.sub(r"^[-*•]\s+", "• ", clean)
             story.append(Paragraph(esc_keep_tags(clean), body_style))
 
-    def esc_keep_tags(t):
-        # экранируем &, но сохраняем <b>/<i>
-        t = t.replace("&", "&amp;")
-        return t
-
     if simple_text:
         render_md(simple_text)
     else:
         for ch, body in zip(chapters, bodies):
-            story.append(Paragraph("<b>" + esc(ch) + "</b>", h_style))
+            # Введение, заключение, список литературы, главы — с новой страницы (ГОСТ)
+            story.append(Paragraph("<b>" + esc(ch).upper() + "</b>", h_style))
             render_md(body)
+            if is_structural(ch) or ch.lower().startswith("глава"):
+                story.append(PageBreak())
 
-    doc.build(story)
+    # Нумерация страниц: внизу по центру, титульный без номера (ГОСТ 7.32)
+    def _page_number(canvas, doc_):
+        page = canvas.getPageNumber()
+        if page == 1:
+            return
+        canvas.saveState()
+        canvas.setFont(font_name, 12)
+        canvas.drawCentredString(A4[0] / 2.0, 1 * cm, str(page))
+        canvas.restoreState()
+
+    doc.build(story, onFirstPage=_page_number, onLaterPages=_page_number)
     return buf.getvalue()
 
 

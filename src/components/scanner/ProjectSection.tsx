@@ -14,6 +14,8 @@ export function ProjectSection() {
   const [selected, setSelected] = useState<WorkTypeMeta>(WORK_TYPE_LIST[0]);
   const [topic, setTopic] = useState("");
   const [subject, setSubject] = useState("");
+  const [city, setCity] = useState("");
+  const [supervisor, setSupervisor] = useState("");
   const [description, setDescription] = useState("");
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState<{ stage: string; current?: number; total?: number } | null>(null);
@@ -49,6 +51,8 @@ export function ProjectSection() {
         description: description.trim(),
         author_name: teacher.name,
         school: teacher.school,
+        city: city.trim(),
+        supervisor: supervisor.trim(),
         login: teacher.login,
       }, (info) => setProgress(info));
       setResult(res);
@@ -136,6 +140,14 @@ export function ProjectSection() {
           <div>
             <Label>Предмет / дисциплина</Label>
             <Input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Обществознание" maxLength={128} />
+          </div>
+          <div>
+            <Label>Город</Label>
+            <Input value={city} onChange={(e) => setCity(e.target.value)} placeholder="Москва" maxLength={64} />
+          </div>
+          <div>
+            <Label>Руководитель / проверяющий</Label>
+            <Input value={supervisor} onChange={(e) => setSupervisor(e.target.value)} placeholder="ФИО преподавателя" maxLength={128} />
           </div>
         </div>
         <div>

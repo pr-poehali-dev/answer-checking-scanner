@@ -349,7 +349,8 @@ def _inline(para, text: str, size=14):
 
 
 def build_docx(work: dict, topic: str, subject: str, author_name: str, school: str,
-               chapters: list, bodies: list, simple_text: str) -> bytes:
+               chapters: list, bodies: list, simple_text: str,
+               city: str = "", supervisor: str = "") -> bytes:
     doc = Document()
     for section in doc.sections:
         section.top_margin = Cm(2)
@@ -365,6 +366,13 @@ def build_docx(work: dict, topic: str, subject: str, author_name: str, school: s
         _set_font(p.add_run(text), size=size, bold=bold)
         return p
 
+    def right_line(text, size=14, after=0):
+        p = doc.add_paragraph()
+        p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        _spacing(p, after=after, line=360)
+        _set_font(p.add_run(text), size=size)
+        return p
+
     centered(school or "Образовательное учреждение", size=14, before=0, after=200)
     for _ in range(5):
         centered("", size=14)
@@ -372,17 +380,19 @@ def build_docx(work: dict, topic: str, subject: str, author_name: str, school: s
     centered(f"на тему: «{topic}»", size=14, after=40)
     if subject:
         centered(f"по дисциплине: {subject}", size=14, after=40)
-    for _ in range(6):
+    for _ in range(5):
         centered("", size=14)
+    # Блок «Выполнил / Проверил» — прижат вправо (образец ГОСТ)
     if author_name:
-        p = doc.add_paragraph()
-        p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-        _spacing(p, after=20)
-        _set_font(p.add_run(f"Выполнил(а): {author_name}"), size=14)
-    for _ in range(4):
+        right_line(f"Выполнил(а): {author_name}", after=40)
+    if supervisor:
+        right_line(f"Проверил(а) (руководитель): {supervisor}", after=40)
+        right_line("Оценка: ______________________", after=40)
+        right_line("Подпись: ______________________", after=40)
+    for _ in range(3):
         centered("", size=14)
     import datetime
-    centered(f"{datetime.datetime.now().year} г.", size=14)
+    centered(f"{city or 'Город'} — {datetime.datetime.now().year} г.", size=14)
 
     doc.add_page_break()
 
@@ -550,7 +560,8 @@ def _ensure_cyrillic_font(pdfmetrics, TTFont) -> str:
 
 
 def build_pdf(work: dict, topic: str, subject: str, author_name: str, school: str,
-              chapters: list, bodies: list, simple_text: str) -> bytes:
+              chapters: list, bodies: list, simple_text: str,
+              city: str = "", supervisor: str = "") -> bytes:
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import cm
     from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_RIGHT
@@ -597,12 +608,19 @@ def build_pdf(work: dict, topic: str, subject: str, author_name: str, school: st
     story.append(Paragraph(f"на тему: «{esc(topic)}»", center))
     if subject:
         story.append(Paragraph(f"по дисциплине: {esc(subject)}", center))
-    story.append(Spacer(1, 4 * cm))
+    story.append(Spacer(1, 3.5 * cm))
     if author_name:
         story.append(Paragraph(f"Выполнил(а): {esc(author_name)}", right))
+        story.append(Spacer(1, 0.2 * cm))
+    if supervisor:
+        story.append(Paragraph(f"Проверил(а) (руководитель): {esc(supervisor)}", right))
+        story.append(Spacer(1, 0.2 * cm))
+        story.append(Paragraph("Оценка: ______________________", right))
+        story.append(Spacer(1, 0.2 * cm))
+        story.append(Paragraph("Подпись: ______________________", right))
     import datetime
-    story.append(Spacer(1, 3 * cm))
-    story.append(Paragraph(f"{datetime.datetime.now().year} г.", center))
+    story.append(Spacer(1, 2.5 * cm))
+    story.append(Paragraph(f"{esc(city) or 'Город'} — {datetime.datetime.now().year} г.", center))
     story.append(PageBreak())
 
     # ── Содержание ──
@@ -758,6 +776,8 @@ def handler(event: dict, context) -> dict:
     if action == "build":
         author_name = (body.get("author_name") or "").strip()
         school = (body.get("school") or "").strip()
+        city = (body.get("city") or "").strip()
+        supervisor = (body.get("supervisor") or "").strip()
         chapters = body.get("chapters") or []
         bodies = body.get("bodies") or []
         simple_text = (body.get("simple_text") or "").strip()
@@ -766,9 +786,11 @@ def handler(event: dict, context) -> dict:
         word_count = len(full_text.split())
         page_estimate = max(work["min_pages"], round(word_count / WORDS_PER_PAGE))
 
-        docx_bytes = build_docx(work, topic, subject, author_name, school, chapters, bodies, simple_text)
+        docx_bytes = build_docx(work, topic, subject, author_name, school, chapters, bodies,
+                                simple_text, city, supervisor)
         try:
-            pdf_bytes = build_pdf(work, topic, subject, author_name, school, chapters, bodies, simple_text)
+            pdf_bytes = build_pdf(work, topic, subject, author_name, school, chapters, bodies,
+                                  simple_text, city, supervisor)
             pdf_b64 = base64.b64encode(pdf_bytes).decode()
         except Exception as e:
             print(f"[generate-project] PDF error: {e}")

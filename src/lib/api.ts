@@ -905,6 +905,8 @@ export const projectApi = {
       description?: string;
       author_name?: string;
       school?: string;
+      city?: string;
+      supervisor?: string;
       login?: string;
     },
     onProgress?: (info: { stage: string; current?: number; total?: number }) => void,

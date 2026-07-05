@@ -933,19 +933,20 @@ export const projectApi = {
       }
     };
 
-    // Шаг 1: план
-    onProgress?.({ stage: "ИИ составляет план работы…" });
-    const outline = await call("outline", {}) as { chapters: string[]; sections: boolean };
+    // Шаг 1: план + список литературы
+    onProgress?.({ stage: "ИИ составляет план и список литературы…" });
+    const outline = await call("outline", {}) as { chapters: string[]; sections: boolean; references?: string };
     const chapters = outline.chapters || [];
     const hasSections = outline.sections;
+    const references = outline.references || "";
 
-    // Шаг 2: главы
+    // Шаг 2: главы (со сносками [N] на источники из общего списка литературы)
     const bodies: string[] = [];
     let simpleText = "";
     if (hasSections && chapters.length) {
       for (let i = 0; i < chapters.length; i++) {
         onProgress?.({ stage: `Пишем раздел: ${chapters[i]}`, current: i + 1, total: chapters.length });
-        const ch = await call("chapter", { chapter: chapters[i], all_chapters: chapters }) as { body: string };
+        const ch = await call("chapter", { chapter: chapters[i], all_chapters: chapters, references }) as { body: string };
         bodies.push(ch.body || "");
       }
     } else {

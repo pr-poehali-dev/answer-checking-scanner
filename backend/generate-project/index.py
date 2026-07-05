@@ -79,9 +79,14 @@ def _resp(status: int, body: dict) -> dict:
 
 # ─── ТОКЕНЫ ───────────────────────────────────────────────────────────────────
 
-def spend_ai_tokens(login: str, amount: int, action_label: str) -> tuple[bool, str, float, float]:
+def spend_ai_tokens(login: str, amount: int, action_label: str) -> tuple[bool, str, int, float, float]:
+    """
+    Списывает средства за работу ИИ.
+    Возвращает: (ok, error_message, http_code, spent_rub, balance_rub).
+    Если ok=False — ИИ выполнять НЕЛЬЗЯ (нет баланса или подписки).
+    """
     if not login:
-        return True, "", 0.0, 0.0
+        return False, "Требуется авторизация для использования ИИ.", 401, 0.0, 0.0
     try:
         req = urllib.request.Request(
             f"{AUTH_URL}?action=spend-tokens",
@@ -91,7 +96,7 @@ def spend_ai_tokens(login: str, amount: int, action_label: str) -> tuple[bool, s
         )
         with urllib.request.urlopen(req, timeout=10) as r:
             resp = json.loads(r.read().decode())
-        return True, "", float(resp.get("spent_rub") or 0), float(resp.get("balance_rub") or 0)
+        return True, "", 200, float(resp.get("spent_rub") or 0), float(resp.get("balance_rub") or 0)
     except urllib.error.HTTPError as e:
         err_body = {}
         try:
@@ -99,12 +104,12 @@ def spend_ai_tokens(login: str, amount: int, action_label: str) -> tuple[bool, s
         except Exception:
             pass
         if e.code == 402:
-            return False, err_body.get("error", "Недостаточно средств"), 0.0, 0.0
+            return False, err_body.get("error", "Недостаточно средств на балансе ИИ. Пополните баланс."), 402, 0.0, 0.0
         if e.code == 403:
-            return False, err_body.get("error", "Для использования ИИ необходима активная подписка."), 0.0, 0.0
-        return True, "", 0.0, 0.0
+            return False, err_body.get("error", "Для использования ИИ необходима активная подписка."), 403, 0.0, 0.0
+        return False, "Не удалось проверить баланс ИИ. Попробуйте позже.", 502, 0.0, 0.0
     except Exception:
-        return True, "", 0.0, 0.0
+        return False, "Сервис списания недоступен. Попробуйте позже.", 502, 0.0, 0.0
 
 
 # ─── ИИ API (YandexGPT) ───────────────────────────────────────────────────────
@@ -146,15 +151,38 @@ def ai_chat(messages: list, max_tokens: int = 8000, temperature: float = 0.6,
 # ─── ГЕНЕРАЦИЯ СТРУКТУРЫ (план глав) ─────────────────────────────────────────
 
 SYSTEM_BASE = (
-    "Ты — эксперт по академическому письму, полностью соблюдающий требования "
+    "Ты — эксперт по академическому письму, СТРОГО соблюдающий требования "
     "Министерства науки и высшего образования РФ и Министерства просвещения РФ, "
-    "стандарты ГОСТ 7.32 и ФГОС. Ты пишешь оригинальные, уникальные, авторские "
+    "стандарты ГОСТ 7.32-2017, ГОСТ Р 7.0.5-2008 (библиографическая ссылка), "
+    "ГОСТ Р 7.0.100-2018 и ФГОС. Ты пишешь оригинальные, уникальные, авторские "
     "тексты научно-учебного стиля на русском языке. Текст должен легко проходить "
     "проверку на антиплагиат: используй разнообразные формулировки, избегай клише "
     "и прямого копирования источников, перефразируй факты своими словами. "
+    "ОБЯЗАТЕЛЬНО: при использовании данных, определений, фактов или цитат из "
+    "источников проставляй ссылку на источник в квадратных скобках с номером — "
+    "например [1], [3], [5] — согласно ГОСТ Р 7.0.5-2008. Номер в скобках должен "
+    "соответствовать номеру источника в списке литературы. "
     "НИКОГДА не упоминай, что текст создан учеником, студентом или искусственным "
     "интеллектом. Пиши от нейтрального авторского лица. Формат вывода — Markdown."
 )
+
+
+def generate_references(work: dict, topic: str, subject: str) -> str:
+    """Генерирует нумерованный список литературы (используется и для сносок [N])."""
+    sub = f" по дисциплине «{subject}»" if subject.strip() else ""
+    user = (
+        f"Составь СПИСОК ЛИТЕРАТУРЫ (ровно 10 источников) по теме «{topic}»{sub} "
+        f"для работы «{work['label']}». Оформи СТРОГО по ГОСТ Р 7.0.100-2018: "
+        "фамилия и инициалы автора, название, город, издательство, год, объём страниц. "
+        "Используй разные типы источников: учебники, научные статьи, монографии, "
+        "нормативные документы РФ, электронные ресурсы с датой обращения. "
+        "Верни ТОЛЬКО нумерованный список от 1 до 10, каждый источник с новой строки, "
+        "формат строки: «1. Иванов И. И. Название. — Москва : Издательство, 2022. — 320 с.». "
+        "Без заголовков и пояснений."
+    )
+    text, _ = ai_chat(messages=[{"role": "system", "content": SYSTEM_BASE},
+                                {"role": "user", "content": user}], max_tokens=2000, temperature=0.4)
+    return text.strip()
 
 
 def generate_outline(work: dict, topic: str, subject: str, description: str) -> list:
@@ -196,22 +224,17 @@ def _parse_json_chapters(raw: str) -> list:
 
 
 def generate_chapter(work: dict, topic: str, subject: str, chapter: str,
-                     min_words: int, context_titles: list) -> str:
-    """Генерирует содержимое одной главы/раздела."""
+                     min_words: int, context_titles: list, references: str = "") -> str:
+    """Генерирует содержимое одной главы/раздела со сносками [N] на список литературы."""
     is_intro = "введени" in chapter.lower()
     is_concl = "заключени" in chapter.lower()
     is_refs = "литератур" in chapter.lower() or "источник" in chapter.lower()
 
+    # Раздел «Список литературы» — возвращаем уже сгенерированный список
     if is_refs:
-        user = (
-            f"Составь список литературы (не менее 8 источников) по теме «{topic}» "
-            f"для работы «{work['label']}». Оформи по ГОСТ Р 7.0.100-2018: авторы, название, "
-            "город, издательство, год, страницы. Используй реальные типы источников "
-            "(учебники, научные статьи, монографии, электронные ресурсы). Верни нумерованный список."
-        )
-        text, _ = ai_chat(messages=[{"role": "system", "content": SYSTEM_BASE},
-                                     {"role": "user", "content": user}], max_tokens=2000, temperature=0.4)
-        return text
+        if references.strip():
+            return references
+        return generate_references(work, topic, subject)
 
     plan_note = ""
     if context_titles:
@@ -222,11 +245,24 @@ def generate_chapter(work: dict, topic: str, subject: str, chapter: str,
                  "цель и задачи, методы, практическая значимость.")
     elif is_concl:
         focus = ("Напиши заключение: основные выводы по каждой задаче, итоговый вывод, "
-                 "практическая значимость и перспективы. Без нумерации задач в лоб.")
+                 "практическая значимость и перспективы. Без нумерации задач в лоб. "
+                 "В заключении ссылки на источники не нужны.")
     else:
         focus = ("Раскрой раздел подробно и содержательно: определения ключевых понятий, "
                  "теория, факты, примеры, анализ, при необходимости — сравнения и аргументы. "
                  "Пиши связным научным текстом абзацами, без воды.")
+
+    # Требование сносок [N] на конкретные источники
+    refs_note = ""
+    if references.strip() and not is_concl:
+        refs_note = (
+            "\n\nСПИСОК ЛИТЕРАТУРЫ работы (используй эти номера для ссылок):\n"
+            f"{references}\n\n"
+            "ОБЯЗАТЕЛЬНО расставь по тексту ссылки на источники в квадратных скобках с их "
+            "номером из списка выше — например [1], [4], [7] — после предложений, где приводятся "
+            "определения, факты, данные, классификации или цитаты. В этом разделе должно быть "
+            "минимум 3-5 таких ссылок. Номер в скобках обязан соответствовать номеру источника."
+        )
 
     sub = f" по предмету «{subject}»" if subject.strip() else ""
     user = (
@@ -235,6 +271,7 @@ def generate_chapter(work: dict, topic: str, subject: str, chapter: str,
         f"Объём этого раздела — не менее {min_words} слов. "
         "Пиши оригинальным авторским текстом, уникально, чтобы проходило антиплагиат. "
         "Не используй заголовок повторно, не пиши мета-комментарии. Только содержимое раздела в Markdown."
+        f"{refs_note}"
     )
     text, _ = ai_chat(messages=[{"role": "system", "content": SYSTEM_BASE},
                                 {"role": "user", "content": user}],
@@ -553,39 +590,58 @@ def handler(event: dict, context) -> dict:
     topic = (body.get("topic") or "").strip()
     subject = (body.get("subject") or "").strip()
     description = (body.get("description") or "").strip()
+    login = (body.get("login") or "").strip()
     work = WORK_TYPES.get(work_type)
     if not work:
         return _resp(400, {"error": "Неизвестный тип работы"})
     if not topic:
         return _resp(400, {"error": "Укажите тему работы"})
 
-    # ── ШАГ 1: план глав ─────────────────────────────────────────────────────
+    # ── ШАГ 1: план глав + список литературы ─────────────────────────────────
     if action == "outline":
+        # Списываем за составление плана; при отсутствии баланса ИИ не запускаем
+        ok, err, code, spent, balance = spend_ai_tokens(login, 2500, f"{work['label']}: план")
+        if not ok:
+            return _resp(code, {"error": err})
         if work["sections"]:
             chapters = generate_outline(work, topic, subject, description)
+            references = generate_references(work, topic, subject)
         else:
             chapters = []  # сочинение/текст — единым куском
-        return _resp(200, {"chapters": chapters, "work_label": work["label"], "sections": work["sections"]})
+            references = ""
+        return _resp(200, {
+            "chapters": chapters, "references": references,
+            "work_label": work["label"], "sections": work["sections"],
+            "spent_rub": spent, "balance_rub": balance,
+        })
 
     # ── ШАГ 2: одна глава (или весь простой текст) ───────────────────────────
     if action == "chapter":
         if not work["sections"]:
+            # Сочинение/текст — единым куском: списываем полную стоимость
+            ok, err, code, spent, balance = spend_ai_tokens(login, max(3000, work["min_words"] * 2), work["label"])
+            if not ok:
+                return _resp(code, {"error": err})
             text = generate_simple(work, topic, subject, description)
-            return _resp(200, {"chapter": "", "body": text})
+            return _resp(200, {"chapter": "", "body": text, "spent_rub": spent, "balance_rub": balance})
         chapter = (body.get("chapter") or "").strip()
         all_chapters = body.get("all_chapters") or []
+        references = (body.get("references") or "").strip()
         if not chapter:
             return _resp(400, {"error": "chapter обязателен"})
         content_chapters = [c for c in all_chapters if "литератур" not in c.lower() and "источник" not in c.lower()]
         per = max(350, int(work["min_words"] / max(1, len(content_chapters))))
-        text = generate_chapter(work, topic, subject, chapter, per, all_chapters)
-        return _resp(200, {"chapter": chapter, "body": text})
+        # Списываем за каждый раздел; без баланса — не генерируем
+        ok, err, code, spent, balance = spend_ai_tokens(login, max(1500, per * 2), f"{work['label']}: раздел")
+        if not ok:
+            return _resp(code, {"error": err})
+        text = generate_chapter(work, topic, subject, chapter, per, all_chapters, references)
+        return _resp(200, {"chapter": chapter, "body": text, "spent_rub": spent, "balance_rub": balance})
 
-    # ── ШАГ 3: сборка файлов + сохранение ────────────────────────────────────
+    # ── ШАГ 3: сборка файлов + сохранение (ИИ уже не вызывается, средства списаны выше) ──
     if action == "build":
         author_name = (body.get("author_name") or "").strip()
         school = (body.get("school") or "").strip()
-        login = (body.get("login") or "").strip()
         chapters = body.get("chapters") or []
         bodies = body.get("bodies") or []
         simple_text = (body.get("simple_text") or "").strip()
@@ -593,9 +649,6 @@ def handler(event: dict, context) -> dict:
         full_text = simple_text or "\n\n".join(f"{c}\n{b}" for c, b in zip(chapters, bodies))
         word_count = len(full_text.split())
         page_estimate = max(work["min_pages"], round(word_count / WORDS_PER_PAGE))
-
-        tokens = max(3000, int(word_count * 2.2))
-        _, _, spent_rub, balance_rub = spend_ai_tokens(login, tokens, work["label"])
 
         docx_bytes = build_docx(work, topic, subject, author_name, school, chapters, bodies, simple_text)
         try:
@@ -648,8 +701,6 @@ def handler(event: dict, context) -> dict:
             "page_estimate": page_estimate,
             "work_label": work["label"],
             "topic": topic,
-            "spent_rub": spent_rub,
-            "balance_rub": balance_rub,
         })
 
     return _resp(400, {"error": "Неизвестное действие. Используйте action=outline|chapter|build"})

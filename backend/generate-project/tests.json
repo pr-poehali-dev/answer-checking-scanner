@@ -25,6 +25,18 @@
       "path": "/",
       "body": {"work_type": "essay", "topic": ""},
       "expectedStatus": 400
+    },
+    {
+      "name": "my-works without login returns 400",
+      "method": "GET",
+      "path": "/?action=my-works",
+      "expectedStatus": 400
+    },
+    {
+      "name": "my-works with login returns 200",
+      "method": "GET",
+      "path": "/?action=my-works&login=testuser",
+      "expectedStatus": 200
     }
   ]
 }

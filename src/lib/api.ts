@@ -857,6 +857,8 @@ export type ProjectWorkType = "project" | "referat" | "coursework" | "report" | 
 export interface ProjectResponse {
   docx_b64?: string;
   pdf_b64?: string | null;
+  docx_url?: string | null;
+  pdf_url?: string | null;
   filename: string;
   text: string;
   chapters: string[];
@@ -868,7 +870,27 @@ export interface ProjectResponse {
   balance_rub?: number;
 }
 
+export interface ProjectWorkItem {
+  id: number;
+  work_type: string;
+  work_label: string;
+  topic: string;
+  subject: string | null;
+  word_count: number;
+  page_estimate: number;
+  docx_url: string | null;
+  pdf_url: string | null;
+  created_at: string;
+}
+
 export const projectApi = {
+  myWorks: async (login: string): Promise<{ items: ProjectWorkItem[] }> => {
+    const res = await fetch(`${PROJECT_URL}?action=my-works&login=${encodeURIComponent(login)}`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Ошибка ${res.status}`);
+    return data as { items: ProjectWorkItem[] };
+  },
+
   generate: async (
     params: {
       work_type: ProjectWorkType;

@@ -16,7 +16,10 @@ import re
 import base64
 import urllib.request
 import urllib.error
+from datetime import datetime
 
+import psycopg2
+import boto3
 from docx import Document
 from docx.shared import Pt, Cm, RGBColor as DocxRGB
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -24,6 +27,26 @@ from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 
 AUTH_URL = os.environ.get("AUTH_FUNCTION_URL", "https://functions.poehali.dev/b08ae7cf-6c0b-4178-acc9-4b62b2c2a61b")
+SCHEMA = os.environ.get("MAIN_DB_SCHEMA", "t_p31556921_answer_checking_scan")
+
+
+def get_conn():
+    return psycopg2.connect(os.environ["DATABASE_URL"])
+
+
+def s3_client():
+    return boto3.client(
+        "s3",
+        endpoint_url="https://bucket.poehali.dev",
+        aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
+        aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
+    )
+
+
+def upload_to_s3(data: bytes, key: str, content_type: str) -> str:
+    s3 = s3_client()
+    s3.put_object(Bucket="files", Key=key, Body=data, ContentType=content_type)
+    return f"https://cdn.poehali.dev/projects/{os.environ['AWS_ACCESS_KEY_ID']}/bucket/{key}"
 
 CORS = {
     "Access-Control-Allow-Origin": "*",
@@ -490,6 +513,34 @@ def handler(event: dict, context) -> dict:
     """Генерирует индивидуальную работу (проект/реферат/курсовая/доклад/сочинение/текст) в DOCX и PDF."""
     if event.get("httpMethod") == "OPTIONS":
         return {"statusCode": 200, "headers": CORS, "body": ""}
+
+    qs = event.get("queryStringParameters") or {}
+    action = (qs.get("action") or "").strip().lower()
+
+    # ── GET my-works — история работ ученика ──────────────────────────────────
+    if event.get("httpMethod") == "GET" and action == "my-works":
+        login = (qs.get("login") or "").strip()
+        if not login:
+            return _resp(400, {"error": "Укажите login"})
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"""SELECT id, work_type, work_label, topic, subject, word_count,
+                           page_estimate, docx_url, pdf_url, created_at
+                    FROM {SCHEMA}.project_works WHERE author_login = %s
+                    ORDER BY created_at DESC LIMIT 100""",
+                (login,),
+            )
+            items = [{
+                "id": x[0], "work_type": x[1], "work_label": x[2], "topic": x[3],
+                "subject": x[4], "word_count": x[5], "page_estimate": x[6],
+                "docx_url": x[7], "pdf_url": x[8], "created_at": str(x[9]),
+            } for x in cur.fetchall()]
+            return _resp(200, {"items": items})
+        finally:
+            conn.close()
+
     if event.get("httpMethod") != "POST":
         return _resp(405, {"error": "Method not allowed"})
 
@@ -543,9 +594,41 @@ def handler(event: dict, context) -> dict:
 
     filename = f"{work['label']}_{safe_filename(topic)}"
 
+    # Сохраняем файлы в S3 и запись в историю (не мешаем ответу при сбое)
+    docx_url = None
+    pdf_url = None
+    try:
+        ts = int(datetime.utcnow().timestamp())
+        base_key = f"projects/{login or 'anon'}/{ts}_{safe_filename(topic)}"
+        docx_url = upload_to_s3(
+            docx_bytes, f"{base_key}.docx",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+        if pdf_b64:
+            pdf_url = upload_to_s3(base64.b64decode(pdf_b64), f"{base_key}.pdf", "application/pdf")
+        if login:
+            conn = get_conn()
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    f"""INSERT INTO {SCHEMA}.project_works
+                        (author_login, work_type, work_label, topic, subject,
+                         word_count, page_estimate, docx_url, pdf_url)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    (login, work_type, work["label"], topic, subject or None,
+                     word_count, page_estimate, docx_url, pdf_url),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+    except Exception as e:
+        print(f"[generate-project] save history error: {e}")
+
     return _resp(200, {
         "docx_b64": base64.b64encode(docx_bytes).decode(),
         "pdf_b64": pdf_b64,
+        "docx_url": docx_url,
+        "pdf_url": pdf_url,
         "filename": filename,
         "text": full_text,
         "chapters": chapters,

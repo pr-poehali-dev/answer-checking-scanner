@@ -1,11 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Icon from "@/components/ui/icon";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { useAppStore } from "@/store/appStore";
-import { projectApi, presentationApi, type ProjectResponse } from "@/lib/api";
+import { projectApi, presentationApi, type ProjectResponse, type ProjectWorkItem } from "@/lib/api";
 import { downloadBase64File, DOCX_MIME, PDF_MIME, WORK_TYPE_LIST, type WorkTypeMeta } from "./projectUtils";
 import { toast } from "sonner";
 
@@ -26,6 +26,17 @@ export function ProjectSection() {
   const [stage, setStage] = useState(0);
   const [result, setResult] = useState<ProjectResponse | null>(null);
   const [makingPpt, setMakingPpt] = useState(false);
+  const [history, setHistory] = useState<ProjectWorkItem[]>([]);
+
+  const loadHistory = useCallback(async () => {
+    if (!teacher) return;
+    try {
+      const res = await projectApi.myWorks(teacher.login);
+      setHistory(res.items);
+    } catch { /* ignore */ }
+  }, [teacher]);
+
+  useEffect(() => { loadHistory(); }, [loadHistory]);
 
   if (!teacher) return null;
 
@@ -50,6 +61,7 @@ export function ProjectSection() {
       });
       setResult(res);
       toast.success(`${res.work_label} готова`, { description: `Объём: ~${res.page_estimate} стр. (${res.word_count} слов)` });
+      loadHistory();
     } catch (e) {
       toast.error("Не удалось создать работу", { description: (e as Error).message });
     } finally {
@@ -215,6 +227,59 @@ export function ProjectSection() {
           </div>
         </div>
       )}
+
+      {/* История работ */}
+      <div className="bg-white border border-border rounded-sm overflow-hidden">
+        <div className="px-5 py-3 border-b border-border flex items-center justify-between bg-muted">
+          <div className="flex items-center gap-2.5">
+            <Icon name="History" size={15} className="text-muted-foreground" />
+            <p className="text-sm font-bold">Мои работы</p>
+          </div>
+          {history.length > 0 && (
+            <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary">{history.length}</span>
+          )}
+        </div>
+
+        {history.length === 0 ? (
+          <div className="p-8 text-center text-sm text-muted-foreground">
+            Здесь появятся созданные работы — можно будет скачать их снова в любой момент.
+          </div>
+        ) : (
+          <div className="divide-y divide-border">
+            {history.map((w) => (
+              <div key={w.id} className="px-5 py-3 flex items-center justify-between gap-3 flex-wrap">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium truncate">{w.topic}</p>
+                  <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground flex-wrap">
+                    <span className="text-primary font-medium">{w.work_label}</span>
+                    {w.subject && <span>· {w.subject}</span>}
+                    <span>· ~{w.page_estimate} стр.</span>
+                    <span>· {new Date(w.created_at).toLocaleDateString("ru-RU")}</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 flex-shrink-0">
+                  {w.docx_url && (
+                    <a href={w.docx_url} target="_blank" rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 border border-border rounded-sm text-xs hover:bg-muted transition-colors"
+                      title="Скачать Word">
+                      <Icon name="FileText" size={13} className="text-blue-600" />
+                      DOCX
+                    </a>
+                  )}
+                  {w.pdf_url && (
+                    <a href={w.pdf_url} target="_blank" rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 border border-border rounded-sm text-xs hover:bg-muted transition-colors"
+                      title="Скачать PDF">
+                      <Icon name="FileText" size={13} className="text-red-600" />
+                      PDF
+                    </a>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       <p className="text-[11px] text-muted-foreground text-center">
         Работа сгенерирована ИИ как оригинальный авторский текст. Проверьте содержание перед сдачей.

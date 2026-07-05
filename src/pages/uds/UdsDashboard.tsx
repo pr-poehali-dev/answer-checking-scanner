@@ -7,6 +7,7 @@ import UdsSupport from "@/pages/uds/UdsSupport";
 import UdsLkView from "@/pages/uds/UdsLkView";
 import UdsMaintenance from "@/pages/uds/UdsMaintenance";
 import UdsMail from "@/pages/uds/UdsMail";
+import MyWards from "@/pages/uds/MyWards";
 import { PANEL_ROLE_LABELS, Session, Tab } from "@/pages/uds/udsSession";
 
 interface UdsDashboardProps {
@@ -20,8 +21,9 @@ interface UdsDashboardProps {
 
 export default function UdsDashboard({ session, tab, setTab, logout, onProfileUpdated, myMailAddress }: UdsDashboardProps) {
   const { perms } = session;
-  const TABS: { id: Tab; label: string; icon: string; show: boolean }[] = [
+  const TABS: { id: Tab; label: string; icon: string; show: boolean; badge?: number }[] = [
     { id: "employees", label: "Сотрудники", icon: "Users", show: true },
+    { id: "wards", label: "Мои подопечные", icon: "UserCheck", show: !!perms.is_curator, badge: session.pending_transfers },
     { id: "users", label: "Пользователи", icon: "UserSearch", show: true },
     { id: "mail", label: "Почта", icon: "Mail", show: !!myMailAddress },
     { id: "support", label: "Тех. поддержка", icon: "Headphones", show: perms.can_support },
@@ -66,12 +68,17 @@ export default function UdsDashboard({ session, tab, setTab, logout, onProfileUp
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
-              className={`inline-flex items-center gap-2 px-4 py-3 text-xs font-medium border-b-2 transition-colors whitespace-nowrap ${
+              className={`relative inline-flex items-center gap-2 px-4 py-3 text-xs font-medium border-b-2 transition-colors whitespace-nowrap ${
                 tab === t.id ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
               <Icon name={t.icon} size={13} fallback="Circle" />
               {t.label}
+              {!!t.badge && t.badge > 0 && (
+                <span className="ml-0.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold">
+                  {t.badge}
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -80,6 +87,9 @@ export default function UdsDashboard({ session, tab, setTab, logout, onProfileUp
       <main className="max-w-5xl mx-auto px-4 md:px-6 py-6">
         {tab === "employees" && (
           <UdsEmployees login={session.login} token={session.token} perms={perms} myRole={session.panel_role} />
+        )}
+        {tab === "wards" && (
+          <MyWards login={session.login} token={session.token} perms={perms} myRole={session.panel_role} />
         )}
         {tab === "users" && (
           <UdsUsers login={session.login} token={session.token} perms={perms} />

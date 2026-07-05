@@ -1350,28 +1350,47 @@ async function subRequest<T>(action: string, options: RequestInit & { login?: st
   }
 }
 
+export interface AutorenewStatus {
+  autorenew_enabled: boolean;
+  autorenew_plan: string | null;
+  payment_method_title: string | null;
+  subscription_until: string | null;
+  last_charge_at: string | null;
+  last_error: string | null;
+}
+
 export const subscriptionApi = {
   plans: () =>
     subRequest<{ plans: SubscriptionPlan[]; available: boolean }>("plans", { method: "GET" }),
 
-  create: (login: string, plan: string, return_url: string) =>
+  create: (login: string, plan: string, return_url: string, autorenew = false) =>
     subRequest<{ payment_id: string; confirmation_url: string; status: string; amount: number; plan: string }>(
       "create",
       {
         method: "POST",
         login,
-        body: JSON.stringify({ plan, login, return_url }),
+        body: JSON.stringify({ plan, login, return_url, autorenew }),
       }
     ),
 
   check: (payment_id: string) =>
-    subRequest<{ status: string; subscription_until?: string; subscription_active: boolean }>(
+    subRequest<{ status: string; subscription_until?: string; subscription_active: boolean; autorenew_enabled?: boolean }>(
       "check",
       {
         method: "POST",
         body: JSON.stringify({ payment_id }),
       }
     ),
+
+  autorenewStatus: (login: string) =>
+    subRequest<AutorenewStatus>("autorenew-status", { method: "GET", login }),
+
+  cancelAutorenew: (login: string) =>
+    subRequest<{ ok: boolean; autorenew_enabled: boolean }>("cancel-autorenew", {
+      method: "POST",
+      login,
+      body: JSON.stringify({ login }),
+    }),
 
   history: (login: string) =>
     subRequest<{ history: PaymentRow[] }>("history", {

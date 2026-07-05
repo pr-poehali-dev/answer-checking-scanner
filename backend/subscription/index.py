@@ -18,7 +18,7 @@ from datetime import datetime, timedelta
 CORS = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, X-User-Login, X-Authorization",
+    "Access-Control-Allow-Headers": "Content-Type, X-User-Login, X-Authorization, X-Cron-Secret",
 }
 
 SCHEMA = os.environ.get("MAIN_DB_SCHEMA", "t_p31556921_answer_checking_scan")
@@ -106,8 +106,13 @@ def yookassa_request(method: str, path: str, body: dict | None = None, idempoten
 SUBSCRIPTION_TOKENS_GIFT = 3000
 
 
-def grant_subscription(login: str, plan_code: str, months: int, payment_id: str | None) -> datetime:
-    """Активирует подписку: продлевает или начинает новую. Начисляет 3000 токенов. Возвращает дату окончания."""
+def grant_subscription(login: str, plan_code: str, months: int, payment_id: str | None,
+                       autorenew: bool = False, payment_method_id: str | None = None,
+                       payment_method_title: str | None = None, is_recurrent: bool = False) -> datetime:
+    """Активирует подписку: продлевает или начинает новую. Начисляет 3000 токенов. Возвращает дату окончания.
+
+    Если autorenew=True и передан payment_method_id — включает автопродление (сохраняет карту).
+    """
     conn = get_conn()
     try:
         cur = conn.cursor()
@@ -135,12 +140,32 @@ def grant_subscription(login: str, plan_code: str, months: int, payment_id: str 
             (plan_code, new_until, SUBSCRIPTION_TOKENS_GIFT, SUBSCRIPTION_TOKENS_GIFT, login)
         )
 
+        # Автопродление: включаем и сохраняем способ оплаты (с явного согласия пользователя)
+        if autorenew and payment_method_id:
+            cur.execute(
+                f"""UPDATE {SCHEMA}.users
+                    SET autorenew_enabled = true, autorenew_plan = %s,
+                        payment_method_id = %s, payment_method_title = %s,
+                        autorenew_consent_at = COALESCE(autorenew_consent_at, NOW()),
+                        autorenew_last_charge_at = NOW(), autorenew_last_error = NULL
+                    WHERE login = %s""",
+                (plan_code, payment_method_id, payment_method_title, login)
+            )
+        elif is_recurrent:
+            # Успешное автосписание — обновляем отметку и чистим ошибку
+            cur.execute(
+                f"""UPDATE {SCHEMA}.users
+                    SET autorenew_last_charge_at = NOW(), autorenew_last_error = NULL
+                    WHERE login = %s""",
+                (login,)
+            )
+
         if payment_id:
             cur.execute(
                 f"""UPDATE {SCHEMA}.payments
-                    SET status='succeeded', paid_at=NOW(), subscription_until=%s
+                    SET status='succeeded', paid_at=NOW(), subscription_until=%s, is_recurrent=%s
                     WHERE provider_payment_id = %s""",
-                (new_until, payment_id)
+                (new_until, is_recurrent, payment_id)
             )
         conn.commit()
         return new_until
@@ -187,6 +212,9 @@ def handler(event: dict, context) -> dict:
 
         return_url = (body.get("return_url") or "").strip() or "https://poehali.dev"
 
+        # Автопродление: только для месячного тарифа и при явном согласии пользователя
+        autorenew = bool(body.get("autorenew")) and plan_code == "monthly"
+
         # Проверим, что пользователь существует и не админ
         conn = get_conn()
         try:
@@ -208,8 +236,14 @@ def handler(event: dict, context) -> dict:
                 "capture": True,
                 "confirmation": {"type": "redirect", "return_url": return_url},
                 "description": f"АОУСПТ · {plan['name']} · {full_name}",
-                "metadata": {"login": user_login, "plan": plan_code, "months": str(plan["months"])},
+                "metadata": {
+                    "login": user_login, "plan": plan_code, "months": str(plan["months"]),
+                    "autorenew": "1" if autorenew else "0",
+                },
             }
+            # Сохраняем способ оплаты для будущих безакцептных списаний (54-ФЗ: с согласия)
+            if autorenew:
+                payment_body["save_payment_method"] = True
             if email:
                 payment_body["receipt"] = {
                     "customer": {"email": email},
@@ -273,13 +307,24 @@ def handler(event: dict, context) -> dict:
         except (TypeError, ValueError):
             months = 1
 
+        # Сохранённый способ оплаты (для автопродления)
+        autorenew = meta.get("autorenew") == "1"
+        pm = result.get("payment_method") or {}
+        pm_id = pm.get("id") if pm.get("saved") else None
+        card = pm.get("card") or {}
+        pm_title = (pm.get("title") or (f"•••• {card.get('last4')}" if card.get("last4") else None))
+
         if status == "succeeded" and login and plan_code:
             try:
-                until = grant_subscription(login, plan_code, months, payment_id)
+                until = grant_subscription(
+                    login, plan_code, months, payment_id,
+                    autorenew=autorenew, payment_method_id=pm_id, payment_method_title=pm_title,
+                )
                 return _resp(200, {
                     "status": "succeeded",
                     "subscription_until": until.isoformat(),
                     "subscription_active": True,
+                    "autorenew_enabled": bool(autorenew and pm_id),
                 })
             except Exception as e:
                 return _resp(500, {"error": f"Ошибка активации подписки: {e}"})
@@ -467,4 +512,159 @@ def handler(event: dict, context) -> dict:
 
         return _resp(200, {"status": status, "amount_rub": amount_rub})
 
+    # ── GET autorenew-status — состояние автопродления пользователя ────────────
+    if route in ("autorenew-status", "autorenew_status"):
+        if not user_login:
+            return _resp(400, {"error": "Не указан пользователь"})
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"""SELECT autorenew_enabled, autorenew_plan, payment_method_title,
+                           subscription_until, autorenew_last_charge_at, autorenew_last_error
+                    FROM {SCHEMA}.users WHERE login = %s""",
+                (user_login,)
+            )
+            r = cur.fetchone()
+            if not r:
+                return _resp(404, {"error": "Пользователь не найден"})
+            return _resp(200, {
+                "autorenew_enabled": bool(r[0]),
+                "autorenew_plan": r[1],
+                "payment_method_title": r[2],
+                "subscription_until": str(r[3]) if r[3] else None,
+                "last_charge_at": str(r[4]) if r[4] else None,
+                "last_error": r[5],
+            })
+        finally:
+            conn.close()
+
+    # ── POST cancel-autorenew — отключить автопродление (кнопка пользователя) ──
+    if method == "POST" and route in ("cancel-autorenew", "cancel_autorenew"):
+        if not user_login:
+            return _resp(400, {"error": "Не указан пользователь"})
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            # Полностью отключаем автопродление и забываем сохранённую карту
+            cur.execute(
+                f"""UPDATE {SCHEMA}.users
+                    SET autorenew_enabled = false, autorenew_plan = NULL,
+                        payment_method_id = NULL, payment_method_title = NULL,
+                        autorenew_consent_at = NULL, autorenew_last_error = NULL
+                    WHERE login = %s""",
+                (user_login,)
+            )
+            conn.commit()
+            return _resp(200, {"ok": True, "autorenew_enabled": False})
+        finally:
+            conn.close()
+
+    # ── POST charge-recurring — безакцептные автосписания (вызывается по cron) ──
+    if method == "POST" and route in ("charge-recurring", "charge_recurring"):
+        # Защита эндпоинта секретным токеном
+        cron_secret = os.environ.get("CRON_SECRET", "").strip()
+        provided = (headers.get("x-cron-secret") or body.get("cron_secret") or "").strip()
+        if not cron_secret or provided != cron_secret:
+            return _resp(403, {"error": "Доступ запрещён"})
+
+        return_url = (body.get("return_url") or "").strip() or "https://poehali.dev"
+        # За сколько часов до окончания начинаем списывать (по умолчанию — в день окончания)
+        try:
+            window_hours = int(body.get("window_hours") or 24)
+        except (TypeError, ValueError):
+            window_hours = 24
+
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            # Берём подписки с включённым автопродлением, срок которых истекает в ближайшее окно
+            cur.execute(
+                f"""SELECT login, autorenew_plan, payment_method_id, email, full_name
+                    FROM {SCHEMA}.users
+                    WHERE autorenew_enabled = true
+                      AND payment_method_id IS NOT NULL
+                      AND subscription_until IS NOT NULL
+                      AND subscription_until <= (NOW() + (%s || ' hours')::interval)
+                    ORDER BY subscription_until ASC
+                    LIMIT 50""",
+                (str(window_hours),)
+            )
+            due = cur.fetchall()
+        finally:
+            conn.close()
+
+        charged, failed = [], []
+        for login, plan_code, pm_id, email, full_name in due:
+            plan = get_plan(plan_code or "monthly")
+            if not plan:
+                continue
+            try:
+                pay_body = {
+                    "amount": {"value": f"{plan['amount']:.2f}", "currency": "RUB"},
+                    "capture": True,
+                    "payment_method_id": pm_id,
+                    "description": f"АОУСПТ · Автопродление · {plan['name']} · {full_name}",
+                    "metadata": {
+                        "login": login, "plan": plan_code, "months": str(plan["months"]),
+                        "autorenew": "0", "recurrent": "1",
+                    },
+                }
+                if email:
+                    pay_body["receipt"] = {
+                        "customer": {"email": email},
+                        "items": [{
+                            "description": plan["name"][:128],
+                            "quantity": "1.00",
+                            "amount": {"value": f"{plan['amount']:.2f}", "currency": "RUB"},
+                            "vat_code": 1,
+                            "payment_subject": "service",
+                            "payment_mode": "full_payment",
+                        }],
+                    }
+                result = yookassa_request("POST", "/payments", pay_body, idempotence=str(uuid.uuid4()))
+                pay_id = result.get("id")
+                status = result.get("status", "pending")
+
+                # Логируем платёж
+                conn = get_conn()
+                try:
+                    cur = conn.cursor()
+                    cur.execute(
+                        f"""INSERT INTO {SCHEMA}.payments
+                            (user_login, plan, amount, months, provider, provider_payment_id, status, source, is_recurrent)
+                            VALUES (%s, %s, %s, %s, 'yookassa', %s, %s, 'autorenew', true)""",
+                        (login, plan_code, plan["amount"], plan["months"], pay_id, status)
+                    )
+                    conn.commit()
+                finally:
+                    conn.close()
+
+                if status == "succeeded":
+                    grant_subscription(login, plan_code, plan["months"], pay_id, is_recurrent=True)
+                    charged.append({"login": login, "payment_id": pay_id, "amount": plan["amount"]})
+                else:
+                    # Платёж не прошёл сразу (например, требует действий) — не продлеваем
+                    _mark_autorenew_error(login, f"Статус платежа: {status}")
+                    failed.append({"login": login, "reason": status})
+            except Exception as e:
+                _mark_autorenew_error(login, str(e)[:400])
+                failed.append({"login": login, "reason": str(e)[:200]})
+
+        return _resp(200, {"charged": charged, "failed": failed, "due_count": len(due)})
+
     return _resp(404, {"error": "Метод не найден"})
+
+
+def _mark_autorenew_error(login: str, msg: str) -> None:
+    """Сохраняет последнюю ошибку автосписания (для диагностики, без отключения)."""
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            f"UPDATE {SCHEMA}.users SET autorenew_last_error = %s WHERE login = %s",
+            (msg, login)
+        )
+        conn.commit()
+    finally:
+        conn.close()

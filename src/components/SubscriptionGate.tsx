@@ -30,6 +30,7 @@ export default function SubscriptionGate() {
   const [info, setInfo] = useState<string | null>(null);
   const [returnedPaymentId, setReturnedPaymentId] = useState<string | null>(null);
   const [agreedSub, setAgreedSub] = useState(false);
+  const [autoRenew, setAutoRenew] = useState(true);
   const [activatingTrial, setActivatingTrial] = useState(false);
 
   useEffect(() => {
@@ -70,7 +71,9 @@ export default function SubscriptionGate() {
       const res = await subscriptionApi.check(pid);
       if (res.subscription_active) {
         await appStore.refreshSubscription();
-        setInfo("Подписка активирована! Все разделы доступны.");
+        setInfo(res.autorenew_enabled
+          ? "Подписка активирована! Автопродление включено — отключить можно в разделе «Подписка»."
+          : "Подписка активирована! Все разделы доступны.");
       } else if (res.status === "canceled") {
         setError("Платёж был отменён. Попробуйте оформить подписку ещё раз.");
       } else {
@@ -90,7 +93,9 @@ export default function SubscriptionGate() {
     setInfo(null);
     try {
       const returnUrl = `${window.location.origin}${window.location.pathname}`;
-      const result = await subscriptionApi.create(teacher.login, plan.code, returnUrl);
+      // Автопродление доступно только для месячного тарифа
+      const wantAutoRenew = plan.code === "monthly" && autoRenew;
+      const result = await subscriptionApi.create(teacher.login, plan.code, returnUrl, wantAutoRenew);
       if (result.confirmation_url) {
         window.location.href = result.confirmation_url;
       } else {
@@ -252,6 +257,21 @@ export default function SubscriptionGate() {
             <a href="/oferta" target="_blank" className="underline underline-offset-2 hover:text-primary">Договора-оферты</a>
             {" "}и даю согласие на обработку персональных данных согласно{" "}
             <a href="/privacy" target="_blank" className="underline underline-offset-2 hover:text-primary">Политике конфиденциальности</a>
+          </span>
+        </label>
+
+        {/* Автопродление (только для месячного тарифа) */}
+        <label className="flex items-start gap-2.5 mb-4 cursor-pointer group border border-border rounded-sm p-3 bg-white">
+          <input
+            type="checkbox"
+            checked={autoRenew}
+            onChange={e => setAutoRenew(e.target.checked)}
+            className="mt-0.5 w-4 h-4 flex-shrink-0 accent-primary cursor-pointer"
+          />
+          <span className="text-xs text-muted-foreground leading-relaxed group-hover:text-foreground transition-colors">
+            <span className="font-semibold text-foreground">Автопродление подписки</span> (только для тарифа «Месяц»).
+            Даю согласие на автоматическое ежемесячное списание {formatRub(199)} с моей карты
+            в день окончания подписки. Списания можно отключить в любой момент в разделе «Подписка».
           </span>
         </label>
 

@@ -55,6 +55,32 @@
       "expectedStatus": 400,
       "expectedBody": {"error": "string"},
       "bodyMatcher": "partial"
+    },
+    {
+      "name": "GET autorenew-status без логина",
+      "method": "GET",
+      "path": "/?action=autorenew-status",
+      "expectedStatus": 400,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "POST cancel-autorenew без логина",
+      "method": "POST",
+      "path": "/?action=cancel-autorenew",
+      "body": {},
+      "expectedStatus": 400,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "POST charge-recurring без секрета запрещён",
+      "method": "POST",
+      "path": "/?action=charge-recurring",
+      "body": {},
+      "expectedStatus": 403,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
     }
   ]
 }

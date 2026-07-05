@@ -266,19 +266,33 @@ SMTP_HOST = os.environ.get("UDS_SMTP_HOST", "").strip()
 SMTP_PORT = int(os.environ.get("UDS_SMTP_PORT") or "465")
 
 
+def _server_host_from_isp():
+    """Извлекает хост сервера хостинга из ISPMANAGER_URL (напр. server185.hosting.reg.ru).
+
+    Именно персональный сервер хостинга обычно принимает SMTP-авторизацию ящиков,
+    тогда как общий mail.hosting.reg.ru может обрывать соединение.
+    """
+    url = os.environ.get("ISPMANAGER_URL", "").strip()
+    if not url:
+        return None
+    host = url.replace("https://", "").replace("http://", "")
+    host = host.split("/")[0].split(":")[0]  # убираем порт и путь
+    return host or None
+
+
 def _smtp_candidates():
     """Список вариантов (host, port, mode) для перебора при отправке.
 
-    mode: 'ssl' (SMTPS 465) или 'starttls' (587/25). Рег.ру принимает оба,
-    но иногда 465 обрывает соединение — тогда работает 587 STARTTLS.
+    mode: 'ssl' (SMTPS 465) или 'starttls' (587). Рег.ру принимает оба, но
+    один из хостов/портов может обрывать соединение — перебираем рабочий.
     """
     hosts = []
-    for h in [SMTP_HOST, "mail.hosting.reg.ru", "smtp.hosting.reg.ru"]:
+    # Приоритет: заданный SMTP-хост, затем персональный сервер хостинга, затем общий
+    for h in [SMTP_HOST, _server_host_from_isp(), "mail.hosting.reg.ru"]:
         if h and h not in hosts:
             hosts.append(h)
     candidates = []
     for h in hosts:
-        # Сначала заданный порт, потом альтернативы
         if SMTP_PORT == 465:
             candidates.append((h, 465, "ssl"))
             candidates.append((h, 587, "starttls"))

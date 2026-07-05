@@ -553,89 +553,103 @@ def handler(event: dict, context) -> dict:
     topic = (body.get("topic") or "").strip()
     subject = (body.get("subject") or "").strip()
     description = (body.get("description") or "").strip()
-    author_name = (body.get("author_name") or "").strip()
-    school = (body.get("school") or "").strip()
-    login = (body.get("login") or "").strip()
-
     work = WORK_TYPES.get(work_type)
     if not work:
         return _resp(400, {"error": "Неизвестный тип работы"})
     if not topic:
         return _resp(400, {"error": "Укажите тему работы"})
 
-    # Генерация контента
-    chapters, bodies, simple_text = [], [], ""
-    if work["sections"]:
-        chapters = generate_outline(work, topic, subject, description)
-        # объём на главу так, чтобы суммарно >= min_words
-        content_chapters = [c for c in chapters if "литератур" not in c.lower() and "источник" not in c.lower()]
+    # ── ШАГ 1: план глав ─────────────────────────────────────────────────────
+    if action == "outline":
+        if work["sections"]:
+            chapters = generate_outline(work, topic, subject, description)
+        else:
+            chapters = []  # сочинение/текст — единым куском
+        return _resp(200, {"chapters": chapters, "work_label": work["label"], "sections": work["sections"]})
+
+    # ── ШАГ 2: одна глава (или весь простой текст) ───────────────────────────
+    if action == "chapter":
+        if not work["sections"]:
+            text = generate_simple(work, topic, subject, description)
+            return _resp(200, {"chapter": "", "body": text})
+        chapter = (body.get("chapter") or "").strip()
+        all_chapters = body.get("all_chapters") or []
+        if not chapter:
+            return _resp(400, {"error": "chapter обязателен"})
+        content_chapters = [c for c in all_chapters if "литератур" not in c.lower() and "источник" not in c.lower()]
         per = max(350, int(work["min_words"] / max(1, len(content_chapters))))
-        for ch in chapters:
-            bodies.append(generate_chapter(work, topic, subject, ch, per, chapters))
-    else:
-        simple_text = generate_simple(work, topic, subject, description)
+        text = generate_chapter(work, topic, subject, chapter, per, all_chapters)
+        return _resp(200, {"chapter": chapter, "body": text})
 
-    # Подсчёт объёма
-    full_text = simple_text or "\n\n".join(f"{c}\n{b}" for c, b in zip(chapters, bodies))
-    word_count = len(full_text.split())
-    page_estimate = max(work["min_pages"], round(word_count / WORDS_PER_PAGE))
+    # ── ШАГ 3: сборка файлов + сохранение ────────────────────────────────────
+    if action == "build":
+        author_name = (body.get("author_name") or "").strip()
+        school = (body.get("school") or "").strip()
+        login = (body.get("login") or "").strip()
+        chapters = body.get("chapters") or []
+        bodies = body.get("bodies") or []
+        simple_text = (body.get("simple_text") or "").strip()
 
-    # Списание (пропорционально объёму)
-    tokens = max(3000, int(word_count * 2.2))
-    _, _, spent_rub, balance_rub = spend_ai_tokens(login, tokens, work["label"])
+        full_text = simple_text or "\n\n".join(f"{c}\n{b}" for c, b in zip(chapters, bodies))
+        word_count = len(full_text.split())
+        page_estimate = max(work["min_pages"], round(word_count / WORDS_PER_PAGE))
 
-    docx_bytes = build_docx(work, topic, subject, author_name, school, chapters, bodies, simple_text)
-    try:
-        pdf_bytes = build_pdf(work, topic, subject, author_name, school, chapters, bodies, simple_text)
-        pdf_b64 = base64.b64encode(pdf_bytes).decode()
-    except Exception as e:
-        print(f"[generate-project] PDF error: {e}")
-        pdf_b64 = None
+        tokens = max(3000, int(word_count * 2.2))
+        _, _, spent_rub, balance_rub = spend_ai_tokens(login, tokens, work["label"])
 
-    filename = f"{work['label']}_{safe_filename(topic)}"
+        docx_bytes = build_docx(work, topic, subject, author_name, school, chapters, bodies, simple_text)
+        try:
+            pdf_bytes = build_pdf(work, topic, subject, author_name, school, chapters, bodies, simple_text)
+            pdf_b64 = base64.b64encode(pdf_bytes).decode()
+        except Exception as e:
+            print(f"[generate-project] PDF error: {e}")
+            pdf_b64 = None
 
-    # Сохраняем файлы в S3 и запись в историю (не мешаем ответу при сбое)
-    docx_url = None
-    pdf_url = None
-    try:
-        ts = int(datetime.utcnow().timestamp())
-        base_key = f"projects/{login or 'anon'}/{ts}_{safe_filename(topic)}"
-        docx_url = upload_to_s3(
-            docx_bytes, f"{base_key}.docx",
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        )
-        if pdf_b64:
-            pdf_url = upload_to_s3(base64.b64decode(pdf_b64), f"{base_key}.pdf", "application/pdf")
-        if login:
-            conn = get_conn()
-            try:
-                cur = conn.cursor()
-                cur.execute(
-                    f"""INSERT INTO {SCHEMA}.project_works
-                        (author_login, work_type, work_label, topic, subject,
-                         word_count, page_estimate, docx_url, pdf_url)
-                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                    (login, work_type, work["label"], topic, subject or None,
-                     word_count, page_estimate, docx_url, pdf_url),
-                )
-                conn.commit()
-            finally:
-                conn.close()
-    except Exception as e:
-        print(f"[generate-project] save history error: {e}")
+        filename = f"{work['label']}_{safe_filename(topic)}"
 
-    return _resp(200, {
-        "docx_b64": base64.b64encode(docx_bytes).decode(),
-        "pdf_b64": pdf_b64,
-        "docx_url": docx_url,
-        "pdf_url": pdf_url,
-        "filename": filename,
-        "text": full_text,
-        "chapters": chapters,
-        "word_count": word_count,
-        "page_estimate": page_estimate,
-        "work_label": work["label"],
-        "topic": topic,
-        "spent_rub": spent_rub,
-        "balance_rub": balance_rub,
-    })
+        docx_url = None
+        pdf_url = None
+        try:
+            ts = int(datetime.utcnow().timestamp())
+            base_key = f"projects/{login or 'anon'}/{ts}_{safe_filename(topic)}"
+            docx_url = upload_to_s3(
+                docx_bytes, f"{base_key}.docx",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+            if pdf_b64:
+                pdf_url = upload_to_s3(base64.b64decode(pdf_b64), f"{base_key}.pdf", "application/pdf")
+            if login:
+                conn = get_conn()
+                try:
+                    cur = conn.cursor()
+                    cur.execute(
+                        f"""INSERT INTO {SCHEMA}.project_works
+                            (author_login, work_type, work_label, topic, subject,
+                             word_count, page_estimate, docx_url, pdf_url)
+                            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                        (login, work_type, work["label"], topic, subject or None,
+                         word_count, page_estimate, docx_url, pdf_url),
+                    )
+                    conn.commit()
+                finally:
+                    conn.close()
+        except Exception as e:
+            print(f"[generate-project] save history error: {e}")
+
+        return _resp(200, {
+            "docx_b64": base64.b64encode(docx_bytes).decode(),
+            "pdf_b64": pdf_b64,
+            "docx_url": docx_url,
+            "pdf_url": pdf_url,
+            "filename": filename,
+            "text": full_text,
+            "chapters": chapters,
+            "word_count": word_count,
+            "page_estimate": page_estimate,
+            "work_label": work["label"],
+            "topic": topic,
+            "spent_rub": spent_rub,
+            "balance_rub": balance_rub,
+        })
+
+    return _resp(400, {"error": "Неизвестное действие. Используйте action=outline|chapter|build"})

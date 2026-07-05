@@ -891,6 +891,12 @@ export const projectApi = {
     return data as { items: ProjectWorkItem[] };
   },
 
+  /**
+   * Пошаговая генерация работы, чтобы уложиться в таймаут функции (30 сек/запрос):
+   * 1) outline — план глав
+   * 2) chapter — каждая глава отдельным запросом
+   * 3) build — сборка DOCX/PDF + сохранение в историю
+   */
   generate: async (
     params: {
       work_type: ProjectWorkType;
@@ -901,43 +907,59 @@ export const projectApi = {
       school?: string;
       login?: string;
     },
-    onRetry?: (attempt: number) => void,
+    onProgress?: (info: { stage: string; current?: number; total?: number }) => void,
   ): Promise<ProjectResponse> => {
-    const MAX_ATTEMPTS = 2;
-    const TIMEOUT_MS = 580_000; // до 9-10 минут — большие работы
-    let lastError: Error = new Error("Не удалось создать работу");
-
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-      if (attempt > 1 && onRetry) onRetry(attempt);
+    const call = async (action: string, extra: object): Promise<Record<string, unknown>> => {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+      const timer = setTimeout(() => controller.abort(), 55_000);
       try {
-        const res = await fetch(PROJECT_URL, {
+        const res = await fetch(`${PROJECT_URL}?action=${action}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(params),
+          body: JSON.stringify({ ...params, ...extra }),
           signal: controller.signal,
         });
         clearTimeout(timer);
         const data = await res.json().catch(() => ({}));
-        if (res.status === 429 || res.status >= 500) {
-          lastError = new Error(data.error || `Ошибка сервера (${res.status})`);
-          if (attempt < MAX_ATTEMPTS) { await new Promise(r => setTimeout(r, 2500)); continue; }
-        }
-        if (!res.ok) throw new Error(data.error || `Ошибка ${res.status}`);
-        return data as ProjectResponse;
+        if (!res.ok) throw new Error((data as { error?: string }).error || `Ошибка ${res.status}`);
+        return data;
       } catch (e) {
         clearTimeout(timer);
         const err = e as Error;
-        if (err.name === "AbortError") {
-          lastError = new Error("Работа генерируется дольше обычного. Попробуйте ещё раз.");
-          if (attempt < MAX_ATTEMPTS) continue;
-          throw lastError;
-        }
+        if (err.name === "AbortError") throw new Error("Этап генерации не успел завершиться. Попробуйте ещё раз.");
         throw err;
+      } finally {
+        clearTimeout(timer);
       }
+    };
+
+    // Шаг 1: план
+    onProgress?.({ stage: "ИИ составляет план работы…" });
+    const outline = await call("outline", {}) as { chapters: string[]; sections: boolean };
+    const chapters = outline.chapters || [];
+    const hasSections = outline.sections;
+
+    // Шаг 2: главы
+    const bodies: string[] = [];
+    let simpleText = "";
+    if (hasSections && chapters.length) {
+      for (let i = 0; i < chapters.length; i++) {
+        onProgress?.({ stage: `Пишем раздел: ${chapters[i]}`, current: i + 1, total: chapters.length });
+        const ch = await call("chapter", { chapter: chapters[i], all_chapters: chapters }) as { body: string };
+        bodies.push(ch.body || "");
+      }
+    } else {
+      onProgress?.({ stage: "Пишем текст работы…" });
+      const ch = await call("chapter", {}) as { body: string };
+      simpleText = ch.body || "";
     }
-    throw lastError;
+
+    // Шаг 3: сборка файлов
+    onProgress?.({ stage: "Оформляем по стандартам РФ и готовим файлы…" });
+    const built = await call("build", {
+      chapters, bodies, simple_text: simpleText,
+    }) as unknown as ProjectResponse;
+    return built;
   },
 };
 

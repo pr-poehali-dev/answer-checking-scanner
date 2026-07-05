@@ -9,13 +9,6 @@ import { projectApi, presentationApi, type ProjectResponse, type ProjectWorkItem
 import { downloadBase64File, DOCX_MIME, PDF_MIME, WORK_TYPE_LIST, type WorkTypeMeta } from "./projectUtils";
 import { toast } from "sonner";
 
-const LOADING_STAGES = [
-  "ИИ анализирует тему и составляет план…",
-  "Пишем оригинальный авторский текст…",
-  "Оформляем по стандартам Минобрнауки РФ…",
-  "Готовим файлы DOCX и PDF…",
-];
-
 export function ProjectSection() {
   const { teacher } = useAppStore();
   const [selected, setSelected] = useState<WorkTypeMeta>(WORK_TYPE_LIST[0]);
@@ -23,7 +16,7 @@ export function ProjectSection() {
   const [subject, setSubject] = useState("");
   const [description, setDescription] = useState("");
   const [loading, setLoading] = useState(false);
-  const [stage, setStage] = useState(0);
+  const [progress, setProgress] = useState<{ stage: string; current?: number; total?: number } | null>(null);
   const [result, setResult] = useState<ProjectResponse | null>(null);
   const [makingPpt, setMakingPpt] = useState(false);
   const [history, setHistory] = useState<ProjectWorkItem[]>([]);
@@ -47,8 +40,7 @@ export function ProjectSection() {
     }
     setLoading(true);
     setResult(null);
-    setStage(0);
-    const stageTimer = setInterval(() => setStage((s) => Math.min(s + 1, LOADING_STAGES.length - 1)), 12000);
+    setProgress({ stage: "Запускаем генерацию…" });
     try {
       const res = await projectApi.generate({
         work_type: selected.id,
@@ -58,14 +50,14 @@ export function ProjectSection() {
         author_name: teacher.name,
         school: teacher.school,
         login: teacher.login,
-      });
+      }, (info) => setProgress(info));
       setResult(res);
       toast.success(`${res.work_label} готова`, { description: `Объём: ~${res.page_estimate} стр. (${res.word_count} слов)` });
       loadHistory();
     } catch (e) {
       toast.error("Не удалось создать работу", { description: (e as Error).message });
     } finally {
-      clearInterval(stageTimer);
+      setProgress(null);
       setLoading(false);
     }
   };
@@ -97,7 +89,7 @@ export function ProjectSection() {
   };
 
   return (
-    <div className="animate-slide-up space-y-6 max-w-3xl">
+    <div className="animate-slide-up space-y-6 w-full">
       {/* Hero */}
       <div className="border border-border rounded-sm bg-white p-5">
         <div className="flex items-start gap-3">
@@ -117,7 +109,7 @@ export function ProjectSection() {
       {/* Выбор типа работы */}
       <div>
         <Label className="mb-2 block">Тип работы</Label>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           {WORK_TYPE_LIST.map((w) => (
             <button
               key={w.id}
@@ -136,11 +128,11 @@ export function ProjectSection() {
 
       {/* Форма */}
       <div className="border border-border rounded-sm bg-white p-5 space-y-4">
-        <div>
-          <Label>Тема работы *</Label>
-          <Input value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="Например: Влияние социальных сетей на подростков" maxLength={300} />
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div>
+            <Label>Тема работы *</Label>
+            <Input value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="Например: Влияние социальных сетей на подростков" maxLength={300} />
+          </div>
           <div>
             <Label>Предмет / дисциплина</Label>
             <Input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Обществознание" maxLength={128} />
@@ -158,8 +150,19 @@ export function ProjectSection() {
             <><Icon name="Sparkles" size={18} className="mr-2" /> Создать «{selected.label}»</>
           )}
         </Button>
-        {loading && (
-          <p className="text-xs text-center text-muted-foreground animate-pulse">{LOADING_STAGES[stage]}</p>
+        {loading && progress && (
+          <div className="text-center space-y-1.5">
+            <p className="text-xs text-muted-foreground animate-pulse">{progress.stage}</p>
+            {progress.total ? (
+              <>
+                <div className="h-1.5 rounded-full bg-muted overflow-hidden max-w-xs mx-auto">
+                  <div className="h-full bg-primary transition-all" style={{ width: `${Math.round((progress.current! / progress.total) * 100)}%` }} />
+                </div>
+                <p className="text-[11px] text-muted-foreground">Раздел {progress.current} из {progress.total}</p>
+              </>
+            ) : null}
+            <p className="text-[11px] text-muted-foreground">Большая работа готовится несколько минут — не закрывайте страницу</p>
+          </div>
         )}
       </div>
 

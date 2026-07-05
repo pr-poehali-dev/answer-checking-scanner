@@ -37,6 +37,13 @@
       "method": "GET",
       "path": "/?action=my-works&login=testuser",
       "expectedStatus": 200
+    },
+    {
+      "name": "no action returns 400",
+      "method": "POST",
+      "path": "/",
+      "body": {"work_type": "essay", "topic": "Дружба"},
+      "expectedStatus": 400
     }
   ]
 }

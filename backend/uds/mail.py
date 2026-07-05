@@ -201,8 +201,11 @@ def _isp_call(params: dict) -> dict:
     return parsed
 
 
-# Возможные имена функции создания ящика (зависит от сборки ISPmanager хостинга)
-_MAILBOX_FUNCS = ["emailbox.edit", "email.box.edit", "mail.box.edit"]
+# Возможные имена функции создания ящика (зависит от сборки ISPmanager хостинга).
+# "email.edit" — основной кандидат: раздел в панели называется "email" (видно
+# по дочерним функциям email.sorter/email.sorter.cond), а ISPmanager всегда
+# называет функцию создания/правки объекта как "<раздел>.edit" (ср. domain.edit).
+_MAILBOX_FUNCS = ["email.edit", "mailbox.edit", "emailbox.edit", "email.box.edit", "mail.box.edit"]
 
 
 def _isp_mailbox(base_params: dict) -> None:

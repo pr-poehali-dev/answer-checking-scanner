@@ -176,6 +176,15 @@ export default function StudentCabinet() {
             <h1 className="text-sm md:text-base font-bold leading-none mb-0.5 truncate">{SECTION_TITLES[active]}</h1>
             <p className="text-[10px] md:text-xs text-muted-foreground hidden md:block">Личный кабинет ученика</p>
           </div>
+          <a
+            href="/home"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 px-3 py-2 border border-border text-xs font-semibold rounded-sm hover:bg-muted transition-colors whitespace-nowrap text-muted-foreground"
+          >
+            <Icon name="Home" size={13} />
+            <span className="hidden sm:inline">На главную</span>
+          </a>
         </header>
 
         <main className="flex-1 overflow-y-auto pb-16 md:pb-0">

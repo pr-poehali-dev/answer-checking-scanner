@@ -18,6 +18,7 @@ import SjouParentPage from "./pages/SjouParentPage";
 import UdsPage from "./pages/UdsPage";
 import KnowledgeBasePage from "./pages/KnowledgeBasePage";
 import MaterialsPage from "./pages/MaterialsPage";
+import PublicHomePage from "./pages/PublicHomePage";
 
 const queryClient = new QueryClient();
 
@@ -34,6 +35,7 @@ const App = () => (
           <Route path="/privacy" element={<PrivacyPage />} />
           <Route path="/knowledge-base" element={<KnowledgeBasePage />} />
           <Route path="/materials" element={<MaterialsPage />} />
+          <Route path="/home" element={<PublicHomePage />} />
           <Route path="/sjou" element={<SjouPage />} />
           <Route path="/sjou-operator" element={<SjouOperatorPage />} />
           <Route path="/sjou-cabinet" element={<SjouCabinetPage />} />

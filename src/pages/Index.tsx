@@ -343,6 +343,15 @@ export default function Index() {
 
           <div className="flex items-center gap-2">
             {isTester && <TesterLogger />}
+            <a
+              href="/home"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 px-3 py-2 border border-border text-xs font-semibold rounded-sm hover:bg-muted transition-colors whitespace-nowrap text-muted-foreground"
+            >
+              <Icon name="Home" size={13} />
+              <span className="hidden sm:inline">На главную</span>
+            </a>
             <button
               onClick={() => navigate("upload")}
               className="inline-flex items-center gap-1.5 px-3 py-2 bg-primary text-primary-foreground text-xs font-semibold rounded-sm hover:opacity-90 transition-opacity whitespace-nowrap"

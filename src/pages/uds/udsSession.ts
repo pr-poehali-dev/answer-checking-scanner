@@ -9,6 +9,11 @@ export const PANEL_ROLE_LABELS: Record<string, string> = {
   operator: "Оператор ТП",
 };
 
+export const SUBROLE_LABELS: Record<string, string> = {
+  curator: "Куратор",
+  manager: "Менеджер",
+};
+
 export interface Session {
   login: string;
   token: string;
@@ -16,6 +21,9 @@ export interface Session {
   panel_role_label: string;
   operator_number: number;
   perms: UdsPerms;
+  subrole_label?: string | null;
+  curator_name?: string | null;
+  pending_transfers?: number;
 }
 
 export const LS_KEY = "uds_session_v3";

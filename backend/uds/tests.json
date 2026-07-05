@@ -99,6 +99,40 @@
       "path": "/?action=set-mail-password",
       "body": { "password": "12345678" },
       "expectedStatus": 403
+    },
+    {
+      "name": "set-subrole without auth returns 403",
+      "method": "POST",
+      "path": "/?action=set-subrole",
+      "body": { "target_login": "x", "subrole": "curator" },
+      "expectedStatus": 403
+    },
+    {
+      "name": "set-curator without auth returns 403",
+      "method": "POST",
+      "path": "/?action=set-curator",
+      "body": { "target_login": "x", "curator_login": "y" },
+      "expectedStatus": 403
+    },
+    {
+      "name": "transfers without auth returns 403",
+      "method": "GET",
+      "path": "/?action=transfers",
+      "expectedStatus": 403
+    },
+    {
+      "name": "transfer-respond without auth returns 403",
+      "method": "POST",
+      "path": "/?action=transfer-respond",
+      "body": { "transfer_id": 1, "accept": true },
+      "expectedStatus": 403
+    },
+    {
+      "name": "create-my-mailbox without auth returns 403",
+      "method": "POST",
+      "path": "/?action=create-my-mailbox",
+      "body": {},
+      "expectedStatus": 403
     }
   ]
 }

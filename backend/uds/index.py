@@ -49,6 +49,12 @@ PANEL_ROLE_LABELS = {
     "advisor": "Советник", "operator": "Оператор ТП",
 }
 
+# Подроли (назначаются РЯДОМ с ролью, не заменяют её)
+SUBROLES = {"curator", "manager"}
+SUBROLE_LABELS = {"curator": "Куратор", "manager": "Менеджер"}
+# Глава и Зам имеют доступ ко всему (в т.ч. как «супер-кураторы»)
+FULL_ACCESS_ROLES = {"head", "deputy"}
+
 # Кто какие роли может НАЗНАЧАТЬ
 CAN_ASSIGN = {
     "advisor":   ["operator"],
@@ -157,21 +163,44 @@ def get_caller(login: str, token: str, conn):
         return None
 
     cur.execute(
-        f"SELECT panel_role, operator_number, uds_registered FROM {SCHEMA}.panel_operators WHERE login = %s",
+        f"""SELECT panel_role, operator_number, uds_registered, subrole, curator_login
+            FROM {SCHEMA}.panel_operators WHERE login = %s""",
         (login,)
     )
     op = cur.fetchone()
     if sys_role == "admin":
         return {"login": login, "panel_role": "head", "operator_number": (op[1] if op else 1),
-                "is_panel": True, "is_admin": True, "uds_registered": True, "sys_role": "admin"}
+                "is_panel": True, "is_admin": True, "uds_registered": True, "sys_role": "admin",
+                "subrole": None, "curator_login": None}
     if not op or not op[0] or op[0] == "removed":
         return {"login": login, "panel_role": None, "is_panel": False,
-                "uds_registered": False, "sys_role": sys_role}
+                "uds_registered": False, "sys_role": sys_role,
+                "subrole": None, "curator_login": None}
     return {
         "login": login, "panel_role": op[0], "operator_number": op[1],
         "is_panel": True, "is_admin": False,
         "uds_registered": bool(op[2]), "sys_role": sys_role,
+        "subrole": op[3], "curator_login": op[4],
     }
+
+
+def is_curator_role(caller) -> bool:
+    """Может ли вызывающий быть куратором: подроль 'curator' ИЛИ Глава/Зам."""
+    return bool(caller and (caller.get("panel_role") in FULL_ACCESS_ROLES
+                            or caller.get("subrole") == "curator"))
+
+
+def can_manage_employee(caller, target_curator_login: str, target_role: str) -> bool:
+    """Может ли вызывающий смотреть/менять данные сотрудника.
+
+    Глава и Зам — всё. Иначе — только куратор именно этого сотрудника.
+    """
+    if not caller:
+        return False
+    if caller.get("panel_role") in FULL_ACCESS_ROLES or caller.get("is_admin"):
+        return True
+    # Куратор управляет только своими подопечными
+    return bool(caller.get("login") and caller["login"] == target_curator_login)
 
 
 def has_uds_access(caller) -> bool:
@@ -179,7 +208,8 @@ def has_uds_access(caller) -> bool:
     return bool(caller and caller.get("is_panel") and (caller.get("is_admin") or caller.get("uds_registered")))
 
 
-def perms_for(role: str) -> dict:
+def perms_for(role: str, subrole: str = None) -> dict:
+    is_curator = (role in FULL_ACCESS_ROLES) or (subrole == "curator")
     return {
         "can_register": role in CAN_REGISTER,
         "can_assign_roles": CAN_ASSIGN.get(role, []),
@@ -188,9 +218,13 @@ def perms_for(role: str) -> dict:
         "can_maintenance": role in CAN_LKVIEW,
         "can_subscription": True,         # подписку пользователю могут все
         "can_support": True,              # тех. поддержка у всех
-        "can_block": PANEL_ROLE_RANK.get(role, 0) >= 5,   # блокировка СОТРУДНИКОВ — зам/глава
+        # Блокировка СОТРУДНИКОВ: Глава/Зам — всех, куратор — своих подопечных
+        "can_block": (PANEL_ROLE_RANK.get(role, 0) >= 5) or is_curator,
         "can_block_user": True,           # блокировка/смена пароля ПОЛЬЗОВАТЕЛЕЙ — все
         "can_cert": role in CAN_CERT,     # выпуск/отзыв сертификатов — Глава и Зам
+        "is_curator": is_curator,         # является куратором (подроль или Глава/Зам)
+        "can_assign_subrole": PANEL_ROLE_RANK.get(role, 0) >= 5,  # подроли назначают Глава/Зам
+        "subrole": subrole,
     }
 
 
@@ -774,6 +808,25 @@ def handler(event: dict, context) -> dict:
                 rm = curm.fetchone()
                 if rm:
                     my_mail = {"email_address": rm[0], "status": rm[1], "password_set": bool(rm[2])}
+            # Мой куратор (ФИО) — для профиля
+            my_curator = None
+            sub = caller.get("subrole")
+            if access and caller.get("curator_login"):
+                curcu = conn.cursor()
+                curcu.execute(
+                    f"SELECT full_name FROM {SCHEMA}.users WHERE login = %s", (caller["curator_login"],)
+                )
+                rcu = curcu.fetchone()
+                my_curator = {"login": caller["curator_login"], "full_name": rcu[0] if rcu else caller["curator_login"]}
+            # Кол-во входящих запросов на передачу (если я куратор)
+            pending_transfers = 0
+            if access and is_curator_role(caller):
+                curt = conn.cursor()
+                curt.execute(
+                    f"SELECT COUNT(*) FROM {SCHEMA}.curator_transfers WHERE to_curator = %s AND status = 'pending'",
+                    (caller["login"],)
+                )
+                pending_transfers = curt.fetchone()[0]
             return _resp(200, {
                 "login": caller["login"],
                 "panel_role": role,
@@ -782,9 +835,13 @@ def handler(event: dict, context) -> dict:
                 "is_panel": caller.get("is_panel", False),
                 "uds_registered": caller.get("uds_registered", False),
                 "uds_access": access,
-                "perms": perms_for(role) if (access and role) else None,
+                "perms": perms_for(role, sub) if (access and role) else None,
                 "my_cert": my_cert,
                 "my_mail": my_mail,
+                "subrole": sub,
+                "subrole_label": SUBROLE_LABELS.get(sub) if sub else None,
+                "my_curator": my_curator,
+                "pending_transfers": pending_transfers,
             })
 
         # ── update-profile — смена своего логина/пароля ──────────────────────
@@ -849,7 +906,7 @@ def handler(event: dict, context) -> dict:
 
         my_role = caller["panel_role"]
         my_rank = PANEL_ROLE_RANK.get(my_role, 0)
-        perms = perms_for(my_role)
+        perms = perms_for(my_role, caller.get("subrole"))
 
         # ── employees — список сотрудников УДС ───────────────────────────────
         if action == "employees" and method == "GET":
@@ -858,15 +915,18 @@ def handler(event: dict, context) -> dict:
                 f"""SELECT po.login, po.panel_role, po.operator_number, po.assigned_by, po.assigned_at,
                            po.uds_registered, po.phone, po.email, po.iis_code,
                            u.full_name, u.is_active, u.last_seen_at,
-                           mb.email_address, mb.status
+                           mb.email_address, mb.status,
+                           po.subrole, po.curator_login, cu.full_name
                     FROM {SCHEMA}.panel_operators po
                     LEFT JOIN {SCHEMA}.users u ON u.login = po.login
                     LEFT JOIN {SCHEMA}.mailboxes mb ON mb.login = po.login
+                    LEFT JOIN {SCHEMA}.users cu ON cu.login = po.curator_login
                     WHERE po.panel_role IS NOT NULL AND po.panel_role != 'removed'
                     ORDER BY po.operator_number"""
             )
             emps = []
             for r in cur.fetchall():
+                can_manage = can_manage_employee(caller, r[15], r[1])
                 emps.append({
                     "login": r[0], "panel_role": r[1],
                     "panel_role_label": PANEL_ROLE_LABELS.get(r[1], r[1]),
@@ -875,6 +935,9 @@ def handler(event: dict, context) -> dict:
                     "full_name": r[9] or r[0], "is_active": bool(r[10]) if r[10] is not None else True,
                     "last_seen_at": str(r[11]) if r[11] else None,
                     "mail_address": r[12], "mail_status": r[13],
+                    "subrole": r[14], "subrole_label": SUBROLE_LABELS.get(r[14]) if r[14] else None,
+                    "curator_login": r[15], "curator_name": r[16],
+                    "can_manage": can_manage,
                 })
             return _resp(200, {"employees": emps})
 
@@ -885,14 +948,22 @@ def handler(event: dict, context) -> dict:
             cur.execute(
                 f"""SELECT po.login, po.panel_role, po.operator_number, po.assigned_by, po.assigned_at,
                            po.uds_registered, po.phone, po.email, po.iis_code,
-                           u.full_name, u.is_active, u.last_seen_at, u.created_at
+                           u.full_name, u.is_active, u.last_seen_at, u.created_at,
+                           po.subrole, po.curator_login, cu.full_name
                     FROM {SCHEMA}.panel_operators po
                     LEFT JOIN {SCHEMA}.users u ON u.login = po.login
+                    LEFT JOIN {SCHEMA}.users cu ON cu.login = po.curator_login
                     WHERE po.login = %s""", (tl,)
             )
             r = cur.fetchone()
             if not r:
                 return _resp(404, {"error": "Сотрудник не найден"})
+
+            # Детальные данные сотрудника видит ТОЛЬКО его куратор (или Глава/Зам)
+            can_manage = can_manage_employee(caller, r[14], r[1])
+            if not can_manage:
+                return _resp(403, {"error": "Данные сотрудника доступны только его куратору, Главе или Зам. Главы"})
+
             cur.execute(
                 f"""SELECT actor_login, actor_role, action, target_login, details, created_at
                     FROM {SCHEMA}.uds_audit_log
@@ -912,6 +983,9 @@ def handler(event: dict, context) -> dict:
                     "is_active": bool(r[10]) if r[10] is not None else True,
                     "last_seen_at": str(r[11]) if r[11] else None,
                     "created_at": str(r[12]) if r[12] else None,
+                    "subrole": r[13], "subrole_label": SUBROLE_LABELS.get(r[13]) if r[13] else None,
+                    "curator_login": r[14], "curator_name": r[15],
+                    "can_manage": can_manage,
                 },
                 "logs": logs,
             })
@@ -926,6 +1000,7 @@ def handler(event: dict, context) -> dict:
             email = (body.get("email") or "").strip().lower()
             phone = (body.get("phone") or "").strip()[:32]
             panel_role = (body.get("panel_role") or "operator").strip()
+            subrole = (body.get("subrole") or "").strip().lower() or None
 
             if not first_name or not last_name:
                 return _resp(400, {"error": "Укажите имя и фамилию"})
@@ -933,6 +1008,18 @@ def handler(event: dict, context) -> dict:
                 return _resp(400, {"error": "Неверная роль"})
             if panel_role not in perms["can_assign_roles"]:
                 return _resp(403, {"error": "Вы не можете назначить эту роль"})
+            if subrole and subrole not in SUBROLES:
+                return _resp(400, {"error": "Неверная подроль"})
+            # Подроли назначают только Глава/Зам
+            if subrole and not perms["can_assign_subrole"]:
+                return _resp(403, {"error": "Подроль может назначить только Глава или Зам. Главы"})
+
+            # Куратор нового сотрудника: если создатель — куратор, то он сам;
+            # иначе — куратор создателя (или Глава/Зам как супердоступ → они кураторы).
+            if is_curator_role(caller):
+                curator_login = caller["login"]
+            else:
+                curator_login = caller.get("curator_login") or None
 
             cur = conn.cursor()
             if email:
@@ -959,9 +1046,11 @@ def handler(event: dict, context) -> dict:
             op_num = next_operator_number(cur)
             cur.execute(
                 f"""INSERT INTO {SCHEMA}.panel_operators
-                    (login, panel_role, operator_number, assigned_by, uds_registered, phone, email, iis_code)
-                    VALUES (%s, %s, %s, %s, TRUE, %s, %s, %s)""",
-                (new_login, panel_role, op_num, caller["login"], phone or None, email or None, iis_code)
+                    (login, panel_role, operator_number, assigned_by, uds_registered, phone, email, iis_code,
+                     subrole, curator_login)
+                    VALUES (%s, %s, %s, %s, TRUE, %s, %s, %s, %s, %s)""",
+                (new_login, panel_role, op_num, caller["login"], phone or None, email or None, iis_code,
+                 subrole, curator_login)
             )
             # ── Создаём корпоративный почтовый ящик @ooo29.ru ──────────────────
             mail_address = None
@@ -995,7 +1084,8 @@ def handler(event: dict, context) -> dict:
                 print(f"[UDS MAIL] Ошибка создания ящика: {me}")
 
             log_action(cur, caller["login"], my_role, "register_employee", new_login,
-                       {"panel_role": panel_role, "operator_number": op_num, "mail": mail_address})
+                       {"panel_role": panel_role, "operator_number": op_num, "mail": mail_address,
+                        "subrole": subrole, "curator": curator_login})
             conn.commit()
             return _resp(200, {
                 "ok": True,
@@ -1005,6 +1095,8 @@ def handler(event: dict, context) -> dict:
                 "operator_number": op_num,
                 "full_name": full_name,
                 "panel_role": panel_role,
+                "subrole": subrole,
+                "curator_login": curator_login,
                 "mail_address": mail_address,
                 "mail_status": mail_status,
             })
@@ -1062,15 +1154,193 @@ def handler(event: dict, context) -> dict:
             if not tl or tl == "admin":
                 return _resp(400, {"error": "Недопустимый сотрудник"})
             cur = conn.cursor()
-            cur.execute(f"SELECT panel_role FROM {SCHEMA}.panel_operators WHERE login = %s", (tl,))
+            cur.execute(f"SELECT panel_role, curator_login FROM {SCHEMA}.panel_operators WHERE login = %s", (tl,))
             ex = cur.fetchone()
             if ex and not caller.get("is_admin") and my_role != "head":
                 if PANEL_ROLE_RANK.get(ex[0], 0) >= my_rank:
                     return _resp(403, {"error": "Нельзя блокировать равного или вышестоящего"})
+            # Куратор (не Глава/Зам) блокирует только своих подопечных
+            if ex and my_role not in FULL_ACCESS_ROLES and not caller.get("is_admin"):
+                if not can_manage_employee(caller, ex[1], ex[0]):
+                    return _resp(403, {"error": "Блокировать можно только своих подопечных"})
             cur.execute(f"UPDATE {SCHEMA}.users SET is_active = %s WHERE login = %s", (not blocked, tl))
             log_action(cur, caller["login"], my_role, "block" if blocked else "unblock", tl, None)
             conn.commit()
             return _resp(200, {"ok": True})
+
+        # ── set-subrole — назначить/снять подроль (Глава/Зам) ────────────────
+        if action == "set-subrole" and method == "POST":
+            if not perms["can_assign_subrole"]:
+                return _resp(403, {"error": "Подроль назначают только Глава и Зам. Главы"})
+            tl = (body.get("target_login") or "").strip()
+            subrole = (body.get("subrole") or "").strip().lower() or None
+            if not tl:
+                return _resp(400, {"error": "Укажите сотрудника"})
+            if subrole and subrole not in SUBROLES:
+                return _resp(400, {"error": "Неверная подроль"})
+            cur = conn.cursor()
+            cur.execute(
+                f"UPDATE {SCHEMA}.panel_operators SET subrole = %s WHERE login = %s AND panel_role != 'removed' RETURNING login",
+                (subrole, tl)
+            )
+            if not cur.fetchone():
+                return _resp(404, {"error": "Сотрудник не найден"})
+            log_action(cur, caller["login"], my_role, "set_subrole", tl, {"subrole": subrole})
+            conn.commit()
+            return _resp(200, {"ok": True, "subrole": subrole,
+                               "subrole_label": SUBROLE_LABELS.get(subrole) if subrole else None})
+
+        # ── set-curator — назначить куратора сотруднику (Глава/Зам) ───────────
+        if action == "set-curator" and method == "POST":
+            if my_role not in FULL_ACCESS_ROLES and not caller.get("is_admin"):
+                return _resp(403, {"error": "Куратора назначают Глава и Зам. Главы"})
+            tl = (body.get("target_login") or "").strip()
+            curator = (body.get("curator_login") or "").strip() or None
+            if not tl:
+                return _resp(400, {"error": "Укажите сотрудника"})
+            cur = conn.cursor()
+            if curator:
+                # Новый куратор должен иметь подроль 'curator' или быть Главой/Замом
+                cur.execute(
+                    f"SELECT panel_role, subrole FROM {SCHEMA}.panel_operators WHERE login = %s AND panel_role != 'removed'",
+                    (curator,)
+                )
+                cr = cur.fetchone()
+                if not cr:
+                    return _resp(404, {"error": "Куратор не найден среди сотрудников"})
+                if cr[0] not in FULL_ACCESS_ROLES and cr[1] != "curator":
+                    return _resp(400, {"error": "Куратором может быть только сотрудник с подролью «Куратор» (или Глава/Зам)"})
+            cur.execute(
+                f"UPDATE {SCHEMA}.panel_operators SET curator_login = %s WHERE login = %s AND panel_role != 'removed' RETURNING login",
+                (curator, tl)
+            )
+            if not cur.fetchone():
+                return _resp(404, {"error": "Сотрудник не найден"})
+            log_action(cur, caller["login"], my_role, "set_curator", tl, {"curator": curator})
+            conn.commit()
+            return _resp(200, {"ok": True})
+
+        # ── transfer-request — куратор просит передать сотрудника другому ────
+        if action == "transfer-request" and method == "POST":
+            if not is_curator_role(caller):
+                return _resp(403, {"error": "Передавать сотрудников могут только кураторы"})
+            emp_login = (body.get("employee_login") or "").strip()
+            to_curator = (body.get("to_curator") or "").strip()
+            note = (body.get("note") or "").strip()[:500]
+            if not emp_login or not to_curator:
+                return _resp(400, {"error": "Укажите сотрудника и нового куратора"})
+            cur = conn.cursor()
+            cur.execute(
+                f"SELECT curator_login FROM {SCHEMA}.panel_operators WHERE login = %s AND panel_role != 'removed'",
+                (emp_login,)
+            )
+            er = cur.fetchone()
+            if not er:
+                return _resp(404, {"error": "Сотрудник не найден"})
+            # Глава/Зам передают напрямую (без согласия)
+            if my_role in FULL_ACCESS_ROLES or caller.get("is_admin"):
+                cur.execute(
+                    f"UPDATE {SCHEMA}.panel_operators SET curator_login = %s WHERE login = %s",
+                    (to_curator, emp_login)
+                )
+                log_action(cur, caller["login"], my_role, "transfer_direct", emp_login, {"to": to_curator})
+                conn.commit()
+                return _resp(200, {"ok": True, "direct": True})
+            # Обычный куратор — только своего подопечного и только через согласие
+            if er[0] != caller["login"]:
+                return _resp(403, {"error": "Можно передавать только своих подопечных"})
+            # Целевой должен быть куратором
+            cur.execute(
+                f"SELECT panel_role, subrole FROM {SCHEMA}.panel_operators WHERE login = %s AND panel_role != 'removed'",
+                (to_curator,)
+            )
+            tr = cur.fetchone()
+            if not tr or (tr[0] not in FULL_ACCESS_ROLES and tr[1] != "curator"):
+                return _resp(400, {"error": "Новый куратор должен иметь подроль «Куратор»"})
+            cur.execute(
+                f"""INSERT INTO {SCHEMA}.curator_transfers (employee_login, from_curator, to_curator, note)
+                    VALUES (%s, %s, %s, %s) RETURNING id""",
+                (emp_login, caller["login"], to_curator, note or None)
+            )
+            log_action(cur, caller["login"], my_role, "transfer_request", emp_login, {"to": to_curator})
+            conn.commit()
+            return _resp(200, {"ok": True, "direct": False})
+
+        # ── transfers — входящие/исходящие запросы на передачу ───────────────
+        if action == "transfers" and method == "GET":
+            cur = conn.cursor()
+            cur.execute(
+                f"""SELECT t.id, t.employee_login, e.full_name, t.from_curator, fc.full_name,
+                           t.to_curator, tc.full_name, t.status, t.note, t.created_at
+                    FROM {SCHEMA}.curator_transfers t
+                    LEFT JOIN {SCHEMA}.users e ON e.login = t.employee_login
+                    LEFT JOIN {SCHEMA}.users fc ON fc.login = t.from_curator
+                    LEFT JOIN {SCHEMA}.users tc ON tc.login = t.to_curator
+                    WHERE (t.to_curator = %s OR t.from_curator = %s) AND t.status = 'pending'
+                    ORDER BY t.created_at DESC LIMIT 100""",
+                (caller["login"], caller["login"])
+            )
+            transfers = []
+            for x in cur.fetchall():
+                transfers.append({
+                    "id": x[0], "employee_login": x[1], "employee_name": x[2] or x[1],
+                    "from_curator": x[3], "from_name": x[4] or x[3],
+                    "to_curator": x[5], "to_name": x[6] or x[5],
+                    "status": x[7], "note": x[8], "created_at": str(x[9]),
+                    "incoming": x[5] == caller["login"],
+                })
+            return _resp(200, {"transfers": transfers})
+
+        # ── transfer-respond — принять/отклонить запрос ──────────────────────
+        if action == "transfer-respond" and method == "POST":
+            tid = body.get("transfer_id")
+            accept = bool(body.get("accept"))
+            if not tid:
+                return _resp(400, {"error": "Укажите запрос"})
+            cur = conn.cursor()
+            cur.execute(
+                f"""SELECT employee_login, from_curator, to_curator, status
+                    FROM {SCHEMA}.curator_transfers WHERE id = %s""", (tid,)
+            )
+            t = cur.fetchone()
+            if not t or t[3] != "pending":
+                return _resp(404, {"error": "Запрос не найден или уже обработан"})
+            emp_login, from_c, to_c = t[0], t[1], t[2]
+            # Отвечает получатель (to_curator) либо Глава/Зам
+            if caller["login"] != to_c and my_role not in FULL_ACCESS_ROLES and not caller.get("is_admin"):
+                return _resp(403, {"error": "Ответить может только приглашённый куратор"})
+            new_status = "accepted" if accept else "declined"
+            if accept:
+                cur.execute(
+                    f"UPDATE {SCHEMA}.panel_operators SET curator_login = %s WHERE login = %s",
+                    (to_c, emp_login)
+                )
+            cur.execute(
+                f"UPDATE {SCHEMA}.curator_transfers SET status = %s, resolved_at = NOW() WHERE id = %s",
+                (new_status, tid)
+            )
+            log_action(cur, caller["login"], my_role, f"transfer_{new_status}", emp_login,
+                       {"from": from_c, "to": to_c})
+            conn.commit()
+            return _resp(200, {"ok": True, "status": new_status})
+
+        # ── curators — список доступных кураторов (для передачи/назначения) ──
+        if action == "curators" and method == "GET":
+            cur = conn.cursor()
+            cur.execute(
+                f"""SELECT po.login, u.full_name, po.panel_role, po.subrole
+                    FROM {SCHEMA}.panel_operators po
+                    LEFT JOIN {SCHEMA}.users u ON u.login = po.login
+                    WHERE po.panel_role != 'removed'
+                      AND (po.panel_role IN ('head','deputy') OR po.subrole = 'curator')
+                      AND po.login != %s
+                    ORDER BY u.full_name""",
+                (caller["login"],)
+            )
+            curators = [{"login": x[0], "full_name": x[1] or x[0],
+                         "panel_role_label": PANEL_ROLE_LABELS.get(x[2], x[2]),
+                         "is_curator_subrole": x[3] == "curator"} for x in cur.fetchall()]
+            return _resp(200, {"curators": curators})
 
         # ── audit-log — логи действий ────────────────────────────────────────
         if action == "audit-log" and method == "GET":
@@ -1286,6 +1556,14 @@ def handler(event: dict, context) -> dict:
             if tl == "admin":
                 return _resp(403, {"error": "Нельзя изменить пароль администратора"})
             cur = conn.cursor()
+            # Если цель — сотрудник УДС, менять пароль может только его куратор (или Глава/Зам)
+            cur.execute(
+                f"SELECT panel_role, curator_login FROM {SCHEMA}.panel_operators WHERE login = %s AND panel_role != 'removed'",
+                (tl,)
+            )
+            emp = cur.fetchone()
+            if emp and not can_manage_employee(caller, emp[1], emp[0]):
+                return _resp(403, {"error": "Пароль сотрудника может сменить только его куратор, Глава или Зам. Главы"})
             cur.execute(
                 f"UPDATE {SCHEMA}.users SET password_hash = %s, auth_token_hash = NULL WHERE login = %s RETURNING id",
                 (hash_password(new_password), tl)
@@ -1526,6 +1804,51 @@ def handler(event: dict, context) -> dict:
                 return _resp(200, {"ok": True, "endpoint": endpoint, "message": "Авторизация в ISPmanager успешна"})
             except Exception as e:
                 return _resp(200, {"ok": False, "reason": str(e)[:500]})
+
+        # ── create-my-mailbox — создать себе ящик (для Главы/Зама без ящика) ─
+        if action == "create-my-mailbox" and method == "POST":
+            cur = conn.cursor()
+            cur.execute(f"SELECT 1 FROM {SCHEMA}.mailboxes WHERE login = %s", (caller["login"],))
+            if cur.fetchone():
+                return _resp(409, {"error": "У вас уже есть почтовый ящик"})
+            cur.execute(
+                f"SELECT first_name, last_name, full_name FROM {SCHEMA}.users WHERE login = %s",
+                (caller["login"],)
+            )
+            u = cur.fetchone()
+            fn = (u[0] if u else "") or ""
+            ln = (u[1] if u else "") or ""
+            if not fn and not ln and u and u[2]:
+                parts = u[2].split()
+                ln = parts[0] if parts else caller["login"]
+                fn = parts[1] if len(parts) > 1 else ""
+            try:
+                mail_address = mail.generate_email(fn, ln, "", cur, SCHEMA)
+                cur.execute(
+                    f"INSERT INTO {SCHEMA}.mailboxes (login, email_address, status) VALUES (%s, %s, 'pending')",
+                    (caller["login"], mail_address)
+                )
+                mail_status = "pending"
+                if mail.isp_available():
+                    try:
+                        temp_pass = gen_password(14)
+                        mail.create_mailbox(mail_address, temp_pass)
+                        cur.execute(
+                            f"UPDATE {SCHEMA}.mailboxes SET status='active', password_enc=%s, provider_status='created' WHERE login=%s",
+                            (mail.encrypt_password(temp_pass), caller["login"])
+                        )
+                        mail_status = "active"
+                    except Exception as me:
+                        cur.execute(
+                            f"UPDATE {SCHEMA}.mailboxes SET status='error', provider_status=%s WHERE login=%s",
+                            (str(me)[:400], caller["login"])
+                        )
+                        mail_status = "error"
+                conn.commit()
+                return _resp(200, {"ok": True, "email_address": mail_address, "status": mail_status})
+            except Exception as e:
+                conn.rollback()
+                return _resp(503, {"error": f"Не удалось создать ящик: {e}"})
 
         # ── mail-status — есть ли ящик, установлен ли пароль ────────────────
         if action == "mail-status" and method == "GET":

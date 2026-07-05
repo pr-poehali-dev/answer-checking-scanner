@@ -105,6 +105,8 @@ export default function UdsDashboard({ session, tab, setTab, logout, onProfileUp
             token={session.token}
             panelRoleLabel={session.panel_role_label || PANEL_ROLE_LABELS[session.panel_role]}
             operatorNumber={session.operator_number}
+            subroleLabel={session.subrole_label}
+            curatorName={session.curator_name}
             onUpdated={onProfileUpdated}
           />
         )}

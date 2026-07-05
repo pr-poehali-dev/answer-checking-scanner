@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Icon from "@/components/ui/icon";
 import { udsApi } from "@/lib/api";
 
@@ -7,10 +7,12 @@ interface Props {
   token: string;
   panelRoleLabel: string;
   operatorNumber: number | null;
+  subroleLabel?: string | null;
+  curatorName?: string | null;
   onUpdated: (login: string, token: string) => void;
 }
 
-export default function UdsProfile({ login, token, panelRoleLabel, operatorNumber, onUpdated }: Props) {
+export default function UdsProfile({ login, token, panelRoleLabel, operatorNumber, subroleLabel, curatorName, onUpdated }: Props) {
   const [newLogin, setNewLogin] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -18,6 +20,29 @@ export default function UdsProfile({ login, token, panelRoleLabel, operatorNumbe
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [ok, setOk] = useState(false);
+
+  // Корпоративная почта
+  const [mail, setMail] = useState<{ has_mailbox: boolean; email_address?: string } | null>(null);
+  const [mailBusy, setMailBusy] = useState(false);
+  const [mailMsg, setMailMsg] = useState("");
+
+  useEffect(() => {
+    udsApi.mailStatus(login, token)
+      .then(m => setMail({ has_mailbox: m.has_mailbox, email_address: m.email_address }))
+      .catch(() => {});
+  }, [login, token]);
+
+  const createMailbox = async () => {
+    setMailBusy(true); setMailMsg("");
+    try {
+      const r = await udsApi.createMyMailbox(login, token);
+      setMail({ has_mailbox: true, email_address: r.email_address });
+      setMailMsg(r.status === "active"
+        ? "Ящик создан. Задайте пароль почты при следующем входе."
+        : "Адрес зарезервирован. Ящик будет создан автоматически.");
+    } catch (e) { setMailMsg((e as Error).message); }
+    finally { setMailBusy(false); }
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -60,12 +85,41 @@ export default function UdsProfile({ login, token, panelRoleLabel, operatorNumbe
           <Icon name="UserCog" size={18} className="text-blue-600" fallback="User" />
         </div>
         <div>
-          <p className="text-sm font-semibold">{login}</p>
+          <div className="flex items-center gap-1.5">
+            <p className="text-sm font-semibold">{login}</p>
+            {subroleLabel && (
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700">{subroleLabel}</span>
+            )}
+          </div>
           <p className="text-xs text-muted-foreground">
             {panelRoleLabel}{operatorNumber != null ? ` · №${operatorNumber}` : ""}
           </p>
+          {curatorName && (
+            <p className="text-[11px] text-muted-foreground/80 flex items-center gap-1 mt-0.5">
+              <Icon name="UserCheck" size={10} /> Мой куратор: {curatorName}
+            </p>
+          )}
         </div>
       </div>
+
+      {/* Корпоративная почта */}
+      {mail && (
+        <div className="border border-border rounded-lg bg-white p-4 space-y-2">
+          <p className="text-xs font-semibold flex items-center gap-1.5"><Icon name="Mail" size={13} className="text-blue-600" /> Корпоративная почта</p>
+          {mail.has_mailbox ? (
+            <p className="text-sm font-mono text-blue-700 break-all">{mail.email_address}</p>
+          ) : (
+            <>
+              <p className="text-xs text-muted-foreground">У вас пока нет корпоративного ящика @ooo29.ru.</p>
+              <button onClick={createMailbox} disabled={mailBusy}
+                className="inline-flex items-center gap-2 px-3 py-2 bg-primary text-primary-foreground text-xs font-semibold rounded-sm hover:opacity-90 disabled:opacity-50">
+                {mailBusy ? <><Icon name="Loader2" size={13} className="animate-spin" /> Создаём…</> : <><Icon name="MailPlus" size={13} fallback="Plus" /> Создать себе почту</>}
+              </button>
+            </>
+          )}
+          {mailMsg && <p className="text-[11px] text-green-600">{mailMsg}</p>}
+        </div>
+      )}
 
       <form onSubmit={submit} className="border border-border rounded-lg bg-white p-5 space-y-3">
         <div>

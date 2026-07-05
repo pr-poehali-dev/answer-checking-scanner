@@ -69,7 +69,14 @@ export default function UdsPage() {
   const refreshMe = useCallback((s: Session) => {
     udsApi.me(s.login, s.token).then(me => {
       if (me.uds_access && me.perms) {
-        setSession(prev => prev ? { ...prev, panel_role: me.panel_role || prev.panel_role, perms: me.perms! } : prev);
+        setSession(prev => prev ? {
+          ...prev,
+          panel_role: me.panel_role || prev.panel_role,
+          perms: me.perms!,
+          subrole_label: me.subrole_label,
+          curator_name: me.my_curator?.full_name ?? null,
+          pending_transfers: me.pending_transfers ?? 0,
+        } : prev);
         setMyCert(me.my_cert);
         setMyMail(me.my_mail);
       } else {

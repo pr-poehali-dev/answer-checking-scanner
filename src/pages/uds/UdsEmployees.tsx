@@ -3,6 +3,7 @@ import Icon from "@/components/ui/icon";
 import { udsApi, UdsPerms, UdsEmployee, UdsAuditEntry } from "@/lib/api";
 import EmployeeRegisterForm from "./EmployeeRegisterForm";
 import EmployeeDetail from "./EmployeeDetail";
+import CuratorTransfers from "./CuratorTransfers";
 
 const ROLE_OPTIONS: { value: string; label: string }[] = [
   { value: "operator", label: "Оператор ТП" },
@@ -68,6 +69,8 @@ export default function UdsEmployees({ login, token, perms, myRole }: Props) {
         </div>
       )}
 
+      <CuratorTransfers login={login} token={token} onChanged={load} />
+
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-sm font-bold">Сотрудники УДС ({employees.length})</h2>
@@ -91,6 +94,7 @@ export default function UdsEmployees({ login, token, perms, myRole }: Props) {
 
       {showForm && perms.can_register && (
         <EmployeeRegisterForm login={login} token={token} assignable={assignable}
+          canAssignSubrole={!!perms.can_assign_subrole}
           onDone={() => { setShowForm(false); load(); }} />
       )}
 
@@ -104,12 +108,24 @@ export default function UdsEmployees({ login, token, perms, myRole }: Props) {
               <span className="text-xs font-bold text-blue-600">№{emp.operator_number}</span>
             </div>
             <button onClick={() => openDetail(emp.login)} className="flex-1 min-w-0 text-left">
-              <p className="text-sm font-semibold truncate">{emp.full_name}</p>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <p className="text-sm font-semibold truncate">{emp.full_name}</p>
+                {emp.subrole_label && (
+                  <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${emp.subrole === "curator" ? "bg-purple-100 text-purple-700" : "bg-amber-100 text-amber-700"}`}>
+                    {emp.subrole_label}
+                  </span>
+                )}
+              </div>
               <p className="text-xs text-muted-foreground">
                 {emp.login} · {emp.panel_role_label}
                 {!emp.is_active && <span className="ml-1 text-red-500 font-medium">· заблокирован</span>}
                 {!emp.uds_registered && <span className="ml-1 text-orange-500 font-medium">· не через УДС</span>}
               </p>
+              {emp.curator_name && (
+                <p className="text-[11px] text-muted-foreground/80 flex items-center gap-1 mt-0.5">
+                  <Icon name="UserCheck" size={10} /> Куратор: {emp.curator_name}
+                </p>
+              )}
             </button>
             {/* Смена роли */}
             {assignable.length > 0 && emp.login !== login && (
@@ -125,7 +141,7 @@ export default function UdsEmployees({ login, token, perms, myRole }: Props) {
                 <option value="">Снять роль</option>
               </select>
             )}
-            {perms.can_block && emp.login !== login && emp.login !== "admin" && (
+            {perms.can_block && emp.can_manage !== false && emp.login !== login && emp.login !== "admin" && (
               <button onClick={() => toggleBlock(emp)} title={emp.is_active ? "Заблокировать" : "Разблокировать"}
                 className={`p-2 rounded transition-colors ${emp.is_active ? "hover:bg-red-50 text-red-500" : "hover:bg-green-50 text-green-600"}`}>
                 <Icon name={emp.is_active ? "Lock" : "LockOpen"} size={14} />
@@ -136,7 +152,9 @@ export default function UdsEmployees({ login, token, perms, myRole }: Props) {
       </div>
 
       {detail && (
-        <EmployeeDetail data={detail} login={login} token={token} perms={perms} onClose={() => setDetail(null)} />
+        <EmployeeDetail data={detail} login={login} token={token} perms={perms} myRole={myRole}
+          onChanged={() => { openDetail(detail.emp.login); load(); }}
+          onClose={() => setDetail(null)} />
       )}
     </div>
   );

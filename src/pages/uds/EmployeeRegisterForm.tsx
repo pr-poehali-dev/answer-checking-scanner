@@ -40,16 +40,18 @@ interface Props {
   login: string;
   token: string;
   assignable: string[];
+  canAssignSubrole?: boolean;
   onDone: () => void;
 }
 
-export default function EmployeeRegisterForm({ login, token, assignable, onDone }: Props) {
+export default function EmployeeRegisterForm({ login, token, assignable, canAssignSubrole, onDone }: Props) {
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [middleName, setMiddleName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [role, setRole] = useState(assignable[0] || "operator");
+  const [subrole, setSubrole] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   // Шаг email-верификации
@@ -69,6 +71,7 @@ export default function EmployeeRegisterForm({ login, token, assignable, onDone 
         middle_name: middleName.trim() || undefined,
         email: email.trim() || undefined, phone: phone.trim() || undefined,
         panel_role: role,
+        subrole: subrole || undefined,
       });
       const reg = { login: res.login, password: res.password, iis_code: res.iis_code, operator_number: res.operator_number, mail_address: res.mail_address, mail_status: res.mail_status };
       if (email.trim()) {
@@ -217,7 +220,23 @@ export default function EmployeeRegisterForm({ login, token, assignable, onDone 
             ))}
           </select>
         </div>
+        {canAssignSubrole && (
+          <div>
+            <label className="text-xs text-gray-500 block mb-1">Подроль (рядом с ролью)</label>
+            <select value={subrole} onChange={e => setSubrole(e.target.value)}
+              className="w-full border border-gray-200 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <option value="">Без подроли</option>
+              <option value="curator">Куратор</option>
+              <option value="manager">Менеджер</option>
+            </select>
+          </div>
+        )}
       </div>
+      {subrole === "curator" && (
+        <p className="text-[11px] text-blue-600 bg-blue-50 border border-blue-100 rounded-lg px-2.5 py-1.5">
+          «Куратор» сможет отвечать за сотрудников: видеть их данные, менять пароль и блокировать своих подопечных.
+        </p>
+      )}
       <p className="text-[11px] text-gray-400">
         Логин, пароль и код ИИС (5 символов) сгенерируются автоматически.
         {email.trim() && " На указанный email придёт 6-значный код подтверждения."}

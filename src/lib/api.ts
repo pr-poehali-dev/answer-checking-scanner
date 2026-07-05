@@ -267,6 +267,30 @@ export interface UdsPerms {
   can_support: boolean;
   can_block: boolean;
   can_block_user: boolean;
+  is_curator?: boolean;
+  can_assign_subrole?: boolean;
+  subrole?: string | null;
+}
+
+export interface UdsCurator {
+  login: string;
+  full_name: string;
+  panel_role_label: string;
+  is_curator_subrole: boolean;
+}
+
+export interface UdsTransfer {
+  id: number;
+  employee_login: string;
+  employee_name: string;
+  from_curator: string;
+  from_name: string;
+  to_curator: string;
+  to_name: string;
+  status: string;
+  note: string | null;
+  created_at: string;
+  incoming: boolean;
 }
 
 export interface UdsUserDetail {
@@ -349,6 +373,11 @@ export interface UdsEmployee {
   last_seen_at: string | null;
   mail_address?: string | null;
   mail_status?: string | null;
+  subrole?: string | null;
+  subrole_label?: string | null;
+  curator_login?: string | null;
+  curator_name?: string | null;
+  can_manage?: boolean;
 }
 
 // ── Корпоративная почта УДС ──
@@ -455,7 +484,7 @@ export const udsApi = {
     ),
 
   me: (login: string, token: string) =>
-    udsRequest<{ login: string; panel_role: string | null; panel_role_label: string | null; operator_number: number | null; is_panel: boolean; uds_registered: boolean; uds_access: boolean; perms: UdsPerms | null; my_cert: UdsCert | null; my_mail: { email_address: string; status: string; password_set: boolean } | null }>("me", "GET", login, token),
+    udsRequest<{ login: string; panel_role: string | null; panel_role_label: string | null; operator_number: number | null; is_panel: boolean; uds_registered: boolean; uds_access: boolean; perms: UdsPerms | null; my_cert: UdsCert | null; my_mail: { email_address: string; status: string; password_set: boolean } | null; subrole: string | null; subrole_label: string | null; my_curator: { login: string; full_name: string } | null; pending_transfers: number }>("me", "GET", login, token),
 
   employees: (login: string, token: string) =>
     udsRequest<{ employees: UdsEmployee[] }>("employees", "GET", login, token),
@@ -463,8 +492,29 @@ export const udsApi = {
   employee: (login: string, token: string, targetLogin: string) =>
     udsRequest<{ employee: UdsEmployee; logs: UdsAuditEntry[] }>("employee", "GET", login, token, undefined, { target_login: targetLogin }),
 
-  registerEmployee: (login: string, token: string, payload: { first_name: string; last_name: string; middle_name?: string; email?: string; phone?: string; panel_role: string }) =>
-    udsRequest<{ ok: boolean; login: string; password: string; iis_code: string; operator_number: number; full_name: string; panel_role: string; mail_address: string | null; mail_status: string | null }>("register-employee", "POST", login, token, payload),
+  registerEmployee: (login: string, token: string, payload: { first_name: string; last_name: string; middle_name?: string; email?: string; phone?: string; panel_role: string; subrole?: string }) =>
+    udsRequest<{ ok: boolean; login: string; password: string; iis_code: string; operator_number: number; full_name: string; panel_role: string; subrole: string | null; curator_login: string | null; mail_address: string | null; mail_status: string | null }>("register-employee", "POST", login, token, payload),
+
+  setSubrole: (login: string, token: string, targetLogin: string, subrole: string) =>
+    udsRequest<{ ok: boolean; subrole: string | null; subrole_label: string | null }>("set-subrole", "POST", login, token, { target_login: targetLogin, subrole }),
+
+  setCurator: (login: string, token: string, targetLogin: string, curatorLogin: string) =>
+    udsRequest<{ ok: boolean }>("set-curator", "POST", login, token, { target_login: targetLogin, curator_login: curatorLogin }),
+
+  curators: (login: string, token: string) =>
+    udsRequest<{ curators: UdsCurator[] }>("curators", "GET", login, token),
+
+  transferRequest: (login: string, token: string, employeeLogin: string, toCurator: string, note?: string) =>
+    udsRequest<{ ok: boolean; direct: boolean }>("transfer-request", "POST", login, token, { employee_login: employeeLogin, to_curator: toCurator, note: note || "" }),
+
+  transfers: (login: string, token: string) =>
+    udsRequest<{ transfers: UdsTransfer[] }>("transfers", "GET", login, token),
+
+  transferRespond: (login: string, token: string, transferId: number, accept: boolean) =>
+    udsRequest<{ ok: boolean; status: string }>("transfer-respond", "POST", login, token, { transfer_id: transferId, accept }),
+
+  createMyMailbox: (login: string, token: string) =>
+    udsRequest<{ ok: boolean; email_address: string; status: string }>("create-my-mailbox", "POST", login, token, {}),
 
   setRole: (login: string, token: string, targetLogin: string, panelRole: string) =>
     udsRequest<{ ok: boolean }>("set-role", "POST", login, token, { target_login: targetLogin, panel_role: panelRole }),

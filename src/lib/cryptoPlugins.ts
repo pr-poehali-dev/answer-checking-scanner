@@ -71,11 +71,33 @@ let cpCache: any = null;
 const EXT_MISSING = "Не найдено расширение «CryptoPro Extension for CAdES» в браузере. Установите КриптоПро ЭЦП Browser plug-in 2.0, добавьте расширение в браузер и перезапустите его.";
 const CSP_NOT_READY = "КриптоПро ЭЦП Browser plug-in не готов. Проверьте, что установлен КриптоПро CSP, плагин 2.0 и включено расширение браузера, затем перезапустите браузер.";
 
+// Ждём, пока на объекте cadesplugin появятся рабочие методы. Расширению нужно
+// время на подгрузку nmcades_plugin_api.js — поэтому опрашиваем с запасом.
+function waitForMethods(ms: number): Promise<boolean> {
+  const started = Date.now();
+  return new Promise((resolve) => {
+    const tick = () => {
+      const cp = window.cadesplugin;
+      if (cp && typeof cp.async_spawn === "function" && typeof cp.CreateObjectAsync === "function") {
+        resolve(true);
+        return;
+      }
+      if (Date.now() - started >= ms) {
+        resolve(false);
+        return;
+      }
+      setTimeout(tick, 150);
+    };
+    tick();
+  });
+}
+
 const cryptopro = {
   async api(): Promise<any> {
     if (cpCache) return cpCache;
 
-    // 1. Загружаем cadesplugin_api.js (если ещё не загружен) и ждём появления объекта.
+    // 1. Загружаем cadesplugin_api.js (если ещё не загружен) и ждём появления
+    //    самого объекта window.cadesplugin.
     if (!window.cadesplugin) {
       await loadScript(cadespluginUrl).catch(() => {
         throw new Error(EXT_MISSING);
@@ -88,35 +110,32 @@ const cryptopro = {
       throw new Error(EXT_MISSING);
     }
 
-    // 2. window.cadesplugin — thenable (Promise готовности). Дожидаемся его
-    //    инициализации. ВАЖНО: после await повторно берём window.cadesplugin,
-    //    т.к. рабочие методы (async_spawn/CreateObjectAsync) появляются на
-    //    объекте только после успешного «рукопожатия» с расширением.
-    try {
-      await Promise.resolve(window.cadesplugin);
-    } catch {
-      throw new Error(CSP_NOT_READY);
-    }
+    // 2. window.cadesplugin — Promise готовности (как на ФНС). Он резолвится,
+    //    когда расширение подгрузило свой мост. ВАЖНО: этот Promise может
+    //    зареджектиться по таймауту при слишком ранней проверке и «залипнуть»
+    //    навсегда. Поэтому НЕ полагаемся только на него: параллельно ждём
+    //    появления рабочих методов на объекте (они и есть признак готовности).
+    const ready = window.cadesplugin
+      .then(() => true)
+      .catch(() => false);
+
+    // Ждём либо резолва Promise, либо появления методов — что наступит раньше,
+    // но не дольше 15 секунд (расширению нужно время на «рукопожатие»).
+    const hasMethods = await Promise.race([
+      ready.then((ok: boolean) => ok && waitForMethods(0)),
+      waitForMethods(15000),
+    ]).catch(() => false);
 
     const cp = window.cadesplugin;
-    if (!cp || typeof cp.async_spawn !== "function" || typeof cp.CreateObjectAsync !== "function") {
-      throw new Error(CSP_NOT_READY);
-    }
-
-    // 3. Пробный вызов — убеждаемся, что мост реально работает, а не «полуготов».
-    //    Именно на «полуготовом» объекте возникает ошибка async_spawn.
-    try {
-      await cp.async_spawn(function* (this: any): any {
-        const about = yield cp.CreateObjectAsync("CAdESCOM.About");
-        yield about.Version;
-      });
-    } catch (e) {
-      const msg = (e as Error)?.message || "";
-      // Техническую ошибку async_spawn превращаем в понятную пользователю.
-      if (/async_spawn|undefined|Cannot read/i.test(msg)) {
+    if (!hasMethods || !cp || typeof cp.async_spawn !== "function" || typeof cp.CreateObjectAsync !== "function") {
+      // Даём последний шанс — вдруг методы появились только что.
+      const late = await waitForMethods(3000);
+      const cp2 = window.cadesplugin;
+      if (!late || !cp2 || typeof cp2.async_spawn !== "function") {
         throw new Error(CSP_NOT_READY);
       }
-      throw new Error(CSP_NOT_READY + (msg ? ` (${msg})` : ""));
+      cpCache = cp2;
+      return cp2;
     }
 
     cpCache = cp;

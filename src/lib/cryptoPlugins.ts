@@ -68,39 +68,88 @@ const CADES_STORE_MY = "My";
 
 let cpCache: any = null;
 
+const EXT_MISSING = "Не найдено расширение «CryptoPro Extension for CAdES» в браузере. Установите КриптоПро ЭЦП Browser plug-in 2.0, добавьте расширение в браузер и перезапустите его.";
+const CSP_NOT_READY = "КриптоПро ЭЦП Browser plug-in не готов. Проверьте, что установлен КриптоПро CSP, плагин 2.0 и включено расширение браузера, затем перезапустите браузер.";
+
 const cryptopro = {
   async api(): Promise<any> {
     if (cpCache) return cpCache;
+
+    // 1. Загружаем cadesplugin_api.js (если ещё не загружен) и ждём появления объекта.
     if (!window.cadesplugin) {
-      await loadScript(cadespluginUrl);
-      for (let i = 0; i < 50 && !window.cadesplugin; i++) {
+      await loadScript(cadespluginUrl).catch(() => {
+        throw new Error(EXT_MISSING);
+      });
+      for (let i = 0; i < 60 && !window.cadesplugin; i++) {
         await new Promise((r) => setTimeout(r, 100));
       }
     }
-    const cadesplugin = window.cadesplugin;
-    if (!cadesplugin) {
-      throw new Error("Не найдено расширение «CryptoPro Extension for CAdES» в браузере. Установите КриптоПро ЭЦП Browser plug-in и включите расширение.");
+    if (!window.cadesplugin) {
+      throw new Error(EXT_MISSING);
     }
-    // window.cadesplugin — Promise готовности; методы остаются на самом объекте.
+
+    // 2. window.cadesplugin — thenable (Promise готовности). Дожидаемся его
+    //    инициализации. ВАЖНО: после await повторно берём window.cadesplugin,
+    //    т.к. рабочие методы (async_spawn/CreateObjectAsync) появляются на
+    //    объекте только после успешного «рукопожатия» с расширением.
     try {
-      await cadesplugin;
+      await Promise.resolve(window.cadesplugin);
     } catch {
-      throw new Error("КриптоПро ЭЦП Browser plug-in не готов. Установите КриптоПро CSP и плагин, включите расширение и перезапустите браузер.");
+      throw new Error(CSP_NOT_READY);
     }
+
     const cp = window.cadesplugin;
     if (!cp || typeof cp.async_spawn !== "function" || typeof cp.CreateObjectAsync !== "function") {
-      throw new Error("КриптоПро ЭЦП Browser plug-in недоступен. Проверьте установку КриптоПро CSP и плагина, включите расширение и перезапустите браузер.");
+      throw new Error(CSP_NOT_READY);
     }
+
+    // 3. Пробный вызов — убеждаемся, что мост реально работает, а не «полуготов».
+    //    Именно на «полуготовом» объекте возникает ошибка async_spawn.
+    try {
+      await cp.async_spawn(function* (this: any): any {
+        const about = yield cp.CreateObjectAsync("CAdESCOM.About");
+        yield about.Version;
+      });
+    } catch (e) {
+      const msg = (e as Error)?.message || "";
+      // Техническую ошибку async_spawn превращаем в понятную пользователю.
+      if (/async_spawn|undefined|Cannot read/i.test(msg)) {
+        throw new Error(CSP_NOT_READY);
+      }
+      throw new Error(CSP_NOT_READY + (msg ? ` (${msg})` : ""));
+    }
+
     cpCache = cp;
     return cp;
+  },
+
+  /**
+   * Безопасная обёртка над cp.async_spawn: перехватывает внутренние сбои моста
+   * КриптоПро (в т.ч. «Cannot read properties of undefined (reading 'async_spawn')»)
+   * и превращает их в понятное сообщение. При сбое сбрасывает кэш, чтобы следующая
+   * попытка переинициализировала плагин.
+   */
+  async spawn<T>(gen: (cp: any) => Generator<any, T, any>): Promise<T> {
+    const cp = await this.api();
+    try {
+      return (await cp.async_spawn(function* (this: any): any {
+        return yield* gen(cp);
+      })) as T;
+    } catch (e) {
+      const msg = (e as Error)?.message || String(e);
+      if (/async_spawn|Cannot read prop|undefined \(reading/i.test(msg)) {
+        cpCache = null; // сброс кэша — плагин был «полуготов»
+        throw new Error(CSP_NOT_READY);
+      }
+      throw e;
+    }
   },
 
   /**
    * Перечисляет сертификаты из личного хранилища «My» (для входа с выбором носителя).
    */
   async listCertificates(): Promise<CryptoProMedia[]> {
-    const cp = await this.api();
-    return await cp.async_spawn(function* (this: any): any {
+    return await this.spawn(function* (cp: any): any {
       const list: CryptoProMedia[] = [];
       const oStore = yield cp.CreateObjectAsync("CAdESCOM.Store");
       yield oStore.Open(2, CADES_STORE_MY, 0); // CAPICOM_CURRENT_USER_STORE, readonly
@@ -142,8 +191,7 @@ const cryptopro = {
    * при появлении диалога КриптоПро (реестр/носитель/токен через CSP).
    */
   async issue(subjectCN: string): Promise<IssueResult> {
-    const cp = await this.api();
-    return await cp.async_spawn(function* (this: any): any {
+    return await this.spawn(function* (cp: any): any {
       const oPrivateKey = yield cp.CreateObjectAsync("X509Enrollment.CX509PrivateKey");
       yield oPrivateKey.propset_ProviderName(GOST_2012_PROVIDER);
       yield oPrivateKey.propset_KeySpec(1);              // AT_KEYEXCHANGE/подпись
@@ -162,9 +210,8 @@ const cryptopro = {
 
   /** ШАГ 3. Устанавливает выпущенный сертификат в контейнер CSP. */
   async install(ctx: any, certPem: string): Promise<void> {
-    const cp = await this.api();
     const certB64 = stripPem(certPem);
-    await cp.async_spawn(function* (this: any): any {
+    await this.spawn(function* (cp: any): any {
       const oEnroll = ctx?.oEnroll || (yield cp.CreateObjectAsync("X509Enrollment.CX509Enrollment"));
       yield oEnroll.InstallResponse(0, certB64, 0, "");
     });
@@ -176,8 +223,7 @@ const cryptopro = {
    * берётся первый доступный.
    */
   async sign(nonce: string, thumbprint?: string): Promise<SignResult> {
-    const cp = await this.api();
-    return await cp.async_spawn(function* (this: any): any {
+    return await this.spawn(function* (cp: any): any {
       const oStore = yield cp.CreateObjectAsync("CAdESCOM.Store");
       yield oStore.Open(2, CADES_STORE_MY, 0);
       const oCerts = yield oStore.Certificates;

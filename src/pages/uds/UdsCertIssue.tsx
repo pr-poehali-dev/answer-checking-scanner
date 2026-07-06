@@ -61,7 +61,17 @@ export default function UdsCertIssue({ login, token, cert, onDone, onLogout }: P
       setStage("");
       setPhase("done");
     } catch (e) {
-      setError((e as Error).message);
+      const raw = (e as Error).message || "";
+      let msg = raw;
+      // Пользователь нажал «Нет» в окне «Подтверждение доступа» КриптоПро
+      if (/access denied|отказано|0x80090010|denied|запрещ/i.test(raw)) {
+        msg = "Вы не разрешили сайту ooo29.ru доступ к ключам. В окне КриптоПро «Подтверждение доступа» нажмите «Да» и повторите выпуск.";
+      } else if (/cancel|отмен|0x8010006E|0x80100069/i.test(raw)) {
+        msg = "Операция отменена в диалоге КриптоПро. Повторите выпуск и подтвердите действие.";
+      } else if (/provider|провайдер|0x80090019|keyset/i.test(raw)) {
+        msg = "КриптоПро CSP не смог создать ГОСТ-ключ. Проверьте, что установлен КриптоПро CSP и подключён носитель, затем повторите.";
+      }
+      setError(msg);
       setPhase("choose");
     } finally {
       setBusy(false);
@@ -180,6 +190,19 @@ export default function UdsCertIssue({ login, token, cert, onDone, onLogout }: P
               </div>
             )}
 
+            {cpState === "ok" && (
+              <div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/30">
+                <p className="text-[11px] text-blue-200 leading-relaxed flex items-start gap-2">
+                  <Icon name="Info" size={13} className="flex-shrink-0 mt-0.5" />
+                  <span>
+                    После нажатия КриптоПро покажет окно <b>«Подтверждение доступа»</b> —
+                    разрешите сайту <b>ooo29.ru</b> операцию с ключами (нажмите «Да»)
+                    и выберите носитель.
+                  </span>
+                </p>
+              </div>
+            )}
+
             <button onClick={issue} disabled={busy || cpState !== "ok"}
               className="relative w-full flex flex-col items-center gap-2 py-6 bg-slate-800 border border-slate-700 rounded-xl hover:border-blue-500 hover:bg-slate-700 disabled:opacity-50 disabled:hover:border-slate-700 transition-colors">
               <PluginBadge state={cpState} />
@@ -219,9 +242,22 @@ export default function UdsCertIssue({ login, token, cert, onDone, onLogout }: P
             <div>
               <h1 className="text-lg font-bold">Идёт выпуск…</h1>
               <p className="text-sm text-slate-400 mt-2">{stage}</p>
-              <p className="text-[11px] text-slate-500 mt-3">
-                Может появиться диалог КриптоПро — выберите носитель и подтвердите.
-                Не закрывайте окно.
+            </div>
+            <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 text-left space-y-2">
+              <p className="text-xs font-semibold text-amber-300 flex items-center gap-2">
+                <Icon name="ShieldQuestion" size={14} fallback="ShieldAlert" />
+                Появится окно КриптоПро «Подтверждение доступа»
+              </p>
+              <p className="text-[11px] text-amber-200/90 leading-relaxed">
+                КриптоПро спросит, разрешить ли сайту{" "}
+                <b className="text-amber-100">ooo29.ru</b> операцию с ключами и
+                сертификатами. Нажмите <b className="text-amber-100">«Да»</b> —
+                иначе выпуск прервётся. Также выберите носитель (реестр, токен
+                или флеш-накопитель), если КриптоПро его запросит.
+              </p>
+              <p className="text-[10px] text-slate-500">
+                Диалоги могут появиться несколько раз (создание ключа и установка
+                сертификата) — подтверждайте каждый. Не закрывайте это окно.
               </p>
             </div>
           </div>

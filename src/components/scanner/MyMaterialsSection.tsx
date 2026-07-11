@@ -11,6 +11,10 @@ const STATUS_META: Record<string, { label: string; icon: string; color: string; 
   rejected: { label: "Отклонено", icon: "XCircle", color: "text-red-600", bg: "bg-red-50" },
 };
 
+// Обрезаем длинные названия: больше 25 символов — ставим троеточие.
+const truncateName = (name: string, max = 25) =>
+  name.length > max ? name.slice(0, max).trimEnd() + "…" : name;
+
 export function MyMaterialsSection() {
   const { teacher } = useAppStore();
   const [items, setItems] = useState<MyMaterialItem[]>([]);
@@ -101,7 +105,7 @@ export function MyMaterialsSection() {
               return (
                 <div key={m.id} className="px-5 py-3.5 flex items-center justify-between gap-3 flex-wrap">
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium truncate">{m.title}</p>
+                    <p className="text-sm font-medium truncate" title={m.title}>{truncateName(m.title)}</p>
                     <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground flex-wrap">
                       {m.subject && <span>{m.subject}</span>}
                       <span>{new Date(m.created_at).toLocaleDateString("ru-RU")}</span>

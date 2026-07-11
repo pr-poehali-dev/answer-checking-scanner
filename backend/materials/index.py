@@ -251,6 +251,41 @@ def handler(event: dict, context) -> dict:
                                "used": used, "limit": FREE_DOWNLOADS_LIMIT,
                                "remaining": max(0, FREE_DOWNLOADS_LIMIT - used)})
 
+        # ── upload-url — выдать ссылку для прямой загрузки файла в S3 ─────────
+        # Крупные файлы (до 25 МБ) грузятся напрямую в хранилище, минуя лимит
+        # тела функции — это устраняет ошибку «не удалось загрузить».
+        if action == "upload-url" and method == "POST":
+            user = get_user(login, token, conn)
+            if not user:
+                return _resp(401, {"error": "Войдите в личный кабинет, чтобы загрузить материал"})
+            file_name = (body.get("file_name") or "file").strip()[:256]
+            ext = (file_name.rsplit(".", 1)[-1] if "." in file_name else "").lower()
+            if ext not in ALLOWED_EXT:
+                return _resp(400, {"error": f"Недопустимый формат. Разрешено: {', '.join(sorted(ALLOWED_EXT))}"})
+            content_types = {
+                "pdf": "application/pdf", "png": "image/png", "jpg": "image/jpeg",
+                "jpeg": "image/jpeg", "txt": "text/plain", "zip": "application/zip",
+                "doc": "application/msword",
+                "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "ppt": "application/vnd.ms-powerpoint",
+                "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                "xls": "application/vnd.ms-excel",
+                "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            }
+            ctype = content_types.get(ext, "application/octet-stream")
+            safe_name = file_name.replace("/", "_").replace("\\", "_")
+            key = f"materials/{login}/{int(datetime.utcnow().timestamp())}_{safe_name}"
+            try:
+                s3 = s3_client()
+                put_url = s3.generate_presigned_url(
+                    "put_object",
+                    Params={"Bucket": "files", "Key": key, "ContentType": ctype},
+                    ExpiresIn=600,
+                )
+            except Exception as e:
+                return _resp(500, {"error": f"Не удалось подготовить загрузку: {e}"})
+            return _resp(200, {"upload_url": put_url, "file_key": key, "content_type": ctype})
+
         # ── upload — загрузить материал (учитель/ученик) ─────────────────────
         if action == "upload" and method == "POST":
             user = get_user(login, token, conn)
@@ -263,28 +298,50 @@ def handler(event: dict, context) -> dict:
             mtype = (body.get("material_type") or "").strip()[:64]
             file_name = (body.get("file_name") or "file").strip()[:256]
             file_b64 = body.get("file_base64") or ""
-            if not title or not file_b64:
-                return _resp(400, {"error": "Укажите название и прикрепите файл"})
+            file_key = (body.get("file_key") or "").strip()
             ext = (file_name.rsplit(".", 1)[-1] if "." in file_name else "").lower()
             if ext not in ALLOWED_EXT:
                 return _resp(400, {"error": f"Недопустимый формат. Разрешено: {', '.join(sorted(ALLOWED_EXT))}"})
-            try:
-                if "," in file_b64:
-                    file_b64 = file_b64.split(",", 1)[1]
-                data = base64.b64decode(file_b64)
-            except Exception:
-                return _resp(400, {"error": "Не удалось прочитать файл"})
-            if len(data) > MAX_FILE_MB * 1024 * 1024:
-                return _resp(400, {"error": f"Файл больше {MAX_FILE_MB} МБ"})
 
-            key = f"materials/{login}/{int(datetime.utcnow().timestamp())}_{file_name}"
-            s3 = s3_client()
             content_types = {
                 "pdf": "application/pdf", "png": "image/png", "jpg": "image/jpeg",
                 "jpeg": "image/jpeg", "txt": "text/plain", "zip": "application/zip",
             }
-            s3.put_object(Bucket="files", Key=key, Body=data,
-                          ContentType=content_types.get(ext, "application/octet-stream"))
+
+            # Путь A: файл уже загружен напрямую в S3 (через upload-url) ─ берём по ключу.
+            if file_key:
+                if not title:
+                    return _resp(400, {"error": "Укажите название"})
+                s3 = s3_client()
+                try:
+                    head = s3.head_object(Bucket="files", Key=file_key)
+                    file_size = int(head.get("ContentLength") or 0)
+                except Exception:
+                    return _resp(400, {"error": "Файл не найден в хранилище. Повторите загрузку."})
+                if file_size <= 0:
+                    return _resp(400, {"error": "Файл пуст. Повторите загрузку."})
+                if file_size > MAX_FILE_MB * 1024 * 1024:
+                    return _resp(400, {"error": f"Файл больше {MAX_FILE_MB} МБ"})
+                key = file_key
+                data_len = file_size
+            # Путь B: небольшой файл передан прямо в теле (base64) ─ прежний способ.
+            else:
+                if not title or not file_b64:
+                    return _resp(400, {"error": "Укажите название и прикрепите файл"})
+                try:
+                    if "," in file_b64:
+                        file_b64 = file_b64.split(",", 1)[1]
+                    data = base64.b64decode(file_b64)
+                except Exception:
+                    return _resp(400, {"error": "Не удалось прочитать файл"})
+                if len(data) > MAX_FILE_MB * 1024 * 1024:
+                    return _resp(400, {"error": f"Файл больше {MAX_FILE_MB} МБ"})
+                key = f"materials/{login}/{int(datetime.utcnow().timestamp())}_{file_name}"
+                s3 = s3_client()
+                s3.put_object(Bucket="files", Key=key, Body=data,
+                              ContentType=content_types.get(ext, "application/octet-stream"))
+                data_len = len(data)
+
             file_url = cdn_url(key)
             # Превью: для картинок — сам файл, иначе фронт покажет иконку по типу
             preview_url = file_url if ext in {"png", "jpg", "jpeg"} else None
@@ -298,7 +355,7 @@ def handler(event: dict, context) -> dict:
                     VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'pending')
                     RETURNING id""",
                 (login, user["full_name"], user["role"], title, description, subject,
-                 grade, mtype, file_url, file_name, ext, len(data), preview_url),
+                 grade, mtype, file_url, file_name, ext, data_len, preview_url),
             )
             mid = cur.fetchone()[0]
             conn.commit()

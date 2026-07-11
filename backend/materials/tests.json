@@ -34,6 +34,13 @@
       "expectedStatus": 401
     },
     {
+      "name": "upload-url without auth returns 401",
+      "method": "POST",
+      "path": "/?action=upload-url",
+      "body": {"file_name": "a.pdf"},
+      "expectedStatus": 401
+    },
+    {
       "name": "download without id returns 400",
       "method": "POST",
       "path": "/?action=download",

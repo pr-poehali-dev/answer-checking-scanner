@@ -32,14 +32,6 @@ export default function UploadMaterialDialog({ open, onClose, session, onUploade
     setTitle(""); setDescription(""); setSubject(""); setGrade(""); setMaterialType(""); setFile(null);
   };
 
-  const readBase64 = (f: File): Promise<string> =>
-    new Promise((resolve, reject) => {
-      const r = new FileReader();
-      r.onload = () => resolve(String(r.result));
-      r.onerror = reject;
-      r.readAsDataURL(f);
-    });
-
   const submit = async () => {
     if (!title.trim() || !file) {
       toast.error("Заполните название и прикрепите файл");
@@ -51,7 +43,18 @@ export default function UploadMaterialDialog({ open, onClose, session, onUploade
     }
     setSaving(true);
     try {
-      const b64 = await readBase64(file);
+      // 1. Получаем ссылку и грузим файл напрямую в хранилище (минуя лимит тела).
+      const { upload_url, file_key, content_type } = await materialsApi.uploadUrl(
+        session.login, session.token, file.name,
+      );
+      const put = await fetch(upload_url, {
+        method: "PUT",
+        headers: { "Content-Type": content_type },
+        body: file,
+      });
+      if (!put.ok) throw { message: "Файл не загрузился в хранилище. Попробуйте ещё раз." };
+
+      // 2. Сохраняем материал с ссылкой на уже загруженный файл.
       const res = await materialsApi.upload(session.login, session.token, {
         title: title.trim(),
         description: description.trim(),
@@ -59,7 +62,7 @@ export default function UploadMaterialDialog({ open, onClose, session, onUploade
         grade: grade.trim(),
         material_type: materialType.trim(),
         file_name: file.name,
-        file_base64: b64,
+        file_key,
       });
       toast.success("Отправлено на проверку", { description: res.message });
       reset();

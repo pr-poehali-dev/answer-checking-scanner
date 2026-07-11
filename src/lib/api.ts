@@ -715,7 +715,10 @@ export const materialsApi = {
   accessStatus: (login?: string, token?: string) =>
     matRequest<{ authorized: boolean; unlimited: boolean; role?: string; used?: number; limit: number; remaining?: number }>("access-status", "GET", { login, token }),
 
-  upload: (login: string, token: string, payload: { title: string; description?: string; subject?: string; grade?: string; material_type?: string; file_name: string; file_base64: string }) =>
+  uploadUrl: (login: string, token: string, file_name: string) =>
+    matRequest<{ upload_url: string; file_key: string; content_type: string }>("upload-url", "POST", { login, token, body: { file_name } }),
+
+  upload: (login: string, token: string, payload: { title: string; description?: string; subject?: string; grade?: string; material_type?: string; file_name: string; file_base64?: string; file_key?: string }) =>
     matRequest<{ ok: boolean; id: number; message: string }>("upload", "POST", { login, token, body: payload }),
 
   my: (login: string, token: string) =>

@@ -70,7 +70,14 @@ def cdn_url(key: str) -> str:
 
 
 def get_user(login: str, token: str, conn):
-    """Проверяет обычного пользователя (учитель/ученик) по auth_token_hash."""
+    """Проверяет пользователя по токену.
+
+    Поддерживает два вида токенов:
+    1) Обычные пользователи (учитель/ученик/тестер): auth_token_hash = sha256(token).
+    2) Сотрудники образовательного учреждения (директор/зам/педагог), вошедшие
+       через функцию institution — их токен вида 'ou:sha256(login+password_hash+ou_salt)'.
+       Пароль в открытом виде недоступен, поэтому сверяем токен на стороне БД.
+    """
     if not login or not token:
         return None
     cur = conn.cursor()
@@ -84,8 +91,28 @@ def get_user(login: str, token: str, conn):
     if not row:
         return None
     _login, full_name, role, is_active, stored_hash, sub_status, sub_until = row
-    if not is_active or not stored_hash or hash_token(token) != stored_hash:
+    if not is_active:
         return None
+
+    ok = False
+    # Вариант 1: обычный auth-токен (учитель/ученик/УДС)
+    if stored_hash and hash_token(token) == stored_hash:
+        ok = True
+    # Вариант 2: токен образовательного учреждения (ou:...)
+    elif token.startswith("ou:"):
+        cur.execute(
+            f"""SELECT CONCAT('ou:', encode(
+                    sha256((login || password_hash || 'ou_salt')::bytea), 'hex'))
+                FROM {SCHEMA}.users WHERE login = %s""",
+            (login,),
+        )
+        ou_row = cur.fetchone()
+        if ou_row and ou_row[0] == token:
+            ok = True
+
+    if not ok:
+        return None
+
     now = datetime.utcnow()
     sub_active = bool(sub_until and isinstance(sub_until, datetime) and sub_until > now)
     return {

@@ -16,6 +16,7 @@ CORS = {
 }
 
 YANDEX_GPT_URL = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
+AUTH_URL = os.environ.get("AUTH_FUNCTION_URL", "https://functions.poehali.dev/b08ae7cf-6c0b-4178-acc9-4b62b2c2a61b")
 
 
 def _resp(status, body):
@@ -24,6 +25,56 @@ def _resp(status, body):
         "headers": {**CORS, "Content-Type": "application/json"},
         "body": json.dumps(body, ensure_ascii=False),
     }
+
+
+def precheck_ai(login: str, est_tokens: int = 1500) -> tuple[bool, int, str]:
+    """Проверяет ДО вызова ИИ, что у пользователя есть подписка и хватает баланса.
+    Возвращает (allowed, http_status, error_msg). При отсутствии login — разрешаем
+    (совместимость), но фронт обязан передавать login."""
+    if not login:
+        return True, 200, ""
+    try:
+        req = urllib.request.Request(
+            f"{AUTH_URL}?action=precheck-ai",
+            data=json.dumps({"login": login, "est_tokens": est_tokens}).encode("utf-8"),
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as r:
+            resp = json.loads(r.read().decode())
+        return bool(resp.get("allowed")), 200, ""
+    except urllib.error.HTTPError as e:
+        err_body = {}
+        try:
+            err_body = json.loads(e.read().decode())
+        except Exception:
+            pass
+        if e.code == 402:
+            return False, 402, err_body.get("error", "Недостаточно средств для ИИ. Пополните баланс.")
+        if e.code == 403:
+            return False, 403, err_body.get("error", "Для использования ИИ необходима активная подписка.")
+        # Прочие ошибки проверки не должны блокировать (fail-open)
+        return True, 200, ""
+    except Exception:
+        return True, 200, ""
+
+
+def spend_ai_tokens(login: str, amount: int, action_label: str = "Чат с ИИ") -> float:
+    """Списывает баланс за реально потреблённые токены. Возвращает остаток в рублях."""
+    if not login or amount <= 0:
+        return 0.0
+    try:
+        req = urllib.request.Request(
+            f"{AUTH_URL}?action=spend-tokens",
+            data=json.dumps({"login": login, "amount": amount, "action_label": action_label}).encode("utf-8"),
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as r:
+            resp = json.loads(r.read().decode())
+        return float(resp.get("balance_rub") or 0)
+    except Exception:
+        return 0.0
 
 
 def handler(event: dict, context) -> dict:
@@ -42,9 +93,15 @@ def handler(event: dict, context) -> dict:
 
     messages = body.get("messages", [])
     system_text = body.get("system", "Ты умный помощник-ассистент. Отвечай на русском языке, развёрнуто и по делу.")
+    login = (body.get("login") or "").strip()
 
     if not messages:
         return _resp(400, {"error": "messages обязателен"})
+
+    # Предусматриваем расход: проверяем баланс и подписку ДО обращения к ИИ.
+    allowed, status, err = precheck_ai(login, est_tokens=1500)
+    if not allowed:
+        return _resp(status, {"error": err})
 
     api_key = os.environ.get("YANDEXGPT_API_KEY", "").strip()
     folder_id = os.environ.get("YANDEXGPT_FOLDER_ID", "").strip()
@@ -82,7 +139,8 @@ def handler(event: dict, context) -> dict:
             )
             with urllib.request.urlopen(req, timeout=25) as r:
                 data = json.loads(r.read().decode())
-            alternatives = (data.get("result") or {}).get("alternatives") or []
+            result = data.get("result") or {}
+            alternatives = result.get("alternatives") or []
             if not alternatives:
                 last_err = f"ИИ API вернул пустой ответ"
                 continue
@@ -90,7 +148,11 @@ def handler(event: dict, context) -> dict:
             if not reply:
                 last_err = "ИИ API вернул пустой текст"
                 continue
-            return _resp(200, {"reply": reply})
+            # Списываем баланс за реально потреблённые токены
+            usage = result.get("usage") or {}
+            tokens_used = int(usage.get("totalTokens") or usage.get("completionTokens") or 0)
+            balance_rub = spend_ai_tokens(login, max(tokens_used, 1))
+            return _resp(200, {"reply": reply, "balance_rub": balance_rub})
         except urllib.error.HTTPError as e:
             err_text = e.read().decode(errors="ignore")[:200]
             if e.code in (401, 403):

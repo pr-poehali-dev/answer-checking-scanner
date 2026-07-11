@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import Icon from "@/components/ui/icon";
 import { usePersistedState } from "@/hooks/usePersistedState";
+import { appStore } from "@/store/appStore";
 
 interface Message {
   role: "user" | "assistant";
@@ -39,14 +40,18 @@ export function ChatSection() {
     setError(null);
 
     try {
+      const login = appStore.getState().teacher?.login || "";
       const resp = await fetch(CHAT_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: newMessages }),
+        body: JSON.stringify({ messages: newMessages, login }),
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || "Ошибка сервера");
       setMessages([...newMessages, { role: "assistant", content: data.reply }]);
+      if (typeof data.balance_rub === "number") {
+        appStore.setAiBalance(Math.round(data.balance_rub * 100));
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ошибка соединения");
       setMessages(newMessages); // оставляем сообщение пользователя
@@ -198,7 +203,7 @@ export function ChatSection() {
             <Icon name="Send" size={14} className="text-white" />
           </button>
         </div>
-        <p className="text-center text-[10px] text-gray-300 mt-1.5">Нэм-Чат · бесплатно</p>
+        <p className="text-center text-[10px] text-gray-300 mt-1.5">Нэм-Чат · расходует баланс ИИ</p>
       </div>
     </div>
   );

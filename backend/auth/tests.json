@@ -68,6 +68,13 @@
       "expectedStatus": 400
     },
     {
+      "name": "precheck-ai without login returns 400",
+      "method": "POST",
+      "path": "/?action=precheck-ai",
+      "body": {},
+      "expectedStatus": 400
+    },
+    {
       "name": "get-tokens-balance without login returns 400",
       "method": "GET",
       "path": "/?action=get-tokens-balance",

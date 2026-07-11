@@ -58,6 +58,36 @@ def spend_ai_tokens(login: str, amount: int, action_label: str = "Презент
         return True, "", 0.0, 0.0
 
 
+def precheck_ai(login: str, est_tokens: int = 3000):
+    """Проверяет ДО обращения к ИИ: подписка и достаточный баланс.
+    Возвращает (allowed, http_status, error). Без login — разрешаем."""
+    if not login:
+        return True, 200, ""
+    try:
+        req = urllib.request.Request(
+            f"{AUTH_URL}?action=precheck-ai",
+            data=json.dumps({"login": login, "est_tokens": est_tokens}).encode("utf-8"),
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as r:
+            resp = json.loads(r.read().decode())
+        return bool(resp.get("allowed")), 200, ""
+    except urllib.error.HTTPError as e:
+        err_body = {}
+        try:
+            err_body = json.loads(e.read().decode())
+        except Exception:
+            pass
+        if e.code == 402:
+            return False, 402, err_body.get("error", "Недостаточно средств на балансе ИИ. Пополните баланс.")
+        if e.code == 403:
+            return False, 403, err_body.get("error", "Для использования ИИ необходима активная подписка.")
+        return True, 200, ""
+    except Exception:
+        return True, 200, ""
+
+
 from pptx import Presentation
 from pptx.util import Inches, Pt, Emu
 from pptx.dml.color import RGBColor
@@ -995,6 +1025,207 @@ def _content_area_w(theme: dict, has_photo: bool) -> float:
     return total_w
 
 
+def _img_framed(slide, img_bytes, x, y, w, h, theme, rnd=None):
+    """Фото с рамкой-акцентом. Стиль рамки слегка варьируется."""
+    style = rnd.choice(["full", "corner", "thin", "none"]) if rnd else "full"
+    if style == "full":
+        pad = Emu(55000)
+        _add_rect(slide, x - pad, y - pad, w + pad * 2, h + pad * 2, theme["accent2"])
+    elif style == "corner":
+        _add_rect(slide, x - Emu(60000), y - Emu(60000), Inches(0.5), Inches(0.5), theme["accent2"])
+        _add_rect(slide, x + w - Inches(0.5) + Emu(60000), y + h - Inches(0.5) + Emu(60000),
+                  Inches(0.5), Inches(0.5), theme["accent2"])
+    elif style == "thin":
+        _add_rect(slide, x - Emu(25000), y - Emu(25000), w + Emu(50000), h + Emu(50000), theme["accent2"])
+    _add_image_to_slide(slide, img_bytes, x, y, w, h)
+
+
+def _fact_card(slide, x, y, w, h, fact, theme, *, size=12, layout_style=None, rnd=None):
+    """Карточка «интересный факт» — вид варьируется (полоса сверху / сбоку / звезда)."""
+    if h <= Inches(0.35) or not fact:
+        return
+    style = layout_style or (rnd.choice(["top_bar", "side_bar", "star", "quote"]) if rnd else "top_bar")
+    _add_rect(slide, x, y, w, h, theme["accent"])
+    if style == "top_bar":
+        _add_rect(slide, x, y, w, Emu(120000), theme["accent2"])
+        _add_text(slide, x + Inches(0.15), y + Emu(12000), w - Inches(0.3), Emu(105000),
+                  "ИНТЕРЕСНЫЙ ФАКТ", size=9, bold=True, color=theme["accent2"])
+        _add_text(slide, x + Inches(0.15), y + Inches(0.3), w - Inches(0.3), h - Inches(0.38),
+                  fact, size=size, color=theme["white"], italic=True, anchor=MSO_ANCHOR.TOP)
+    elif style == "side_bar":
+        _add_rect(slide, x, y, Emu(90000), h, theme["accent2"])
+        _add_text(slide, x + Inches(0.22), y + Inches(0.12), w - Inches(0.35), h - Inches(0.24),
+                  fact, size=size, color=theme["white"], italic=True, anchor=MSO_ANCHOR.MIDDLE)
+    elif style == "quote":
+        _add_text(slide, x + Inches(0.12), y + Emu(10000), Inches(0.8), h,
+                  "❝", size=26, bold=True, color=theme["accent2"], anchor=MSO_ANCHOR.TOP)
+        _add_text(slide, x + Inches(0.7), y + Inches(0.15), w - Inches(0.85), h - Inches(0.3),
+                  fact, size=size, color=theme["white"], italic=True, anchor=MSO_ANCHOR.MIDDLE)
+    else:  # star
+        _add_text(slide, x + Inches(0.12), y, Inches(0.9), h, "★", size=18, bold=True,
+                  color=theme["accent2"], anchor=MSO_ANCHOR.MIDDLE)
+        _add_text(slide, x + Inches(1.0), y + Emu(20000), w - Inches(1.15), h - Emu(40000),
+                  fact, size=size, color=theme["white"], italic=True, anchor=MSO_ANCHOR.MIDDLE)
+
+
+def place_slide_content(slide, theme, rnd, ct, cx, content_h, bullets, fact, imgs):
+    """
+    Процедурно размещает контент слайда: расположение фото, текста и факта
+    выбирается СЛУЧАЙНО для каждого слайда. Один и тот же слайд не повторяет
+    композицию соседнего — нет единого формата.
+    """
+    right_edge = SLIDE_W - Inches(0.25)
+    avail_w = right_edge - cx
+    n = len(imgs)
+
+    if n == 0:
+        # Варианты без фото: факт справа / факт снизу-полосой / только текст по центру
+        modes = ["fact_right", "fact_bottom", "text_full", "fact_left"]
+        mode = rnd.choice(modes) if fact else "text_full"
+        if mode == "fact_right":
+            fw = Inches(rnd.uniform(3.6, 4.3))
+            fx = right_edge - fw
+            fh = Inches(rnd.uniform(2.6, 3.4))
+            _fact_card(slide, fx, ct + Inches(0.1), fw, fh, fact, theme, size=13, rnd=rnd)
+            _add_bullets(slide, cx, ct, fx - cx - Inches(0.3), content_h, bullets,
+                         size=16, color=theme["text"], accent2=theme["accent2"], space_after=10)
+        elif mode == "fact_left":
+            fw = Inches(rnd.uniform(3.4, 4.0))
+            fh = Inches(rnd.uniform(2.6, 3.3))
+            _fact_card(slide, cx, ct + Inches(0.1), fw, fh, fact, theme, size=13, rnd=rnd)
+            tx = cx + fw + Inches(0.3)
+            _add_bullets(slide, tx, ct, right_edge - tx, content_h, bullets,
+                         size=16, color=theme["text"], accent2=theme["accent2"], space_after=10)
+        elif mode == "fact_bottom":
+            th = content_h * rnd.uniform(0.55, 0.66)
+            _add_bullets(slide, cx, ct, avail_w, th, bullets,
+                         size=16, color=theme["text"], accent2=theme["accent2"], space_after=9)
+            fy = ct + th + Inches(0.15)
+            _fact_card(slide, cx, fy, avail_w, SLIDE_H - fy - Inches(0.55), fact, theme, size=13, rnd=rnd)
+        else:
+            _add_bullets(slide, cx, ct, avail_w, content_h, bullets,
+                         size=17, color=theme["text"], accent2=theme["accent2"], space_after=11)
+        return
+
+    if n == 1:
+        # Один снимок: слева/справа/сверху/крупный-фон — выбираем случайно
+        modes = ["photo_right", "photo_left", "photo_top", "photo_hero"]
+        mode = rnd.choice(modes)
+        if mode in ("photo_right", "photo_left"):
+            pw = Inches(rnd.uniform(4.6, 5.6))
+            ph = min(content_h - Inches(0.1), Inches(rnd.uniform(4.2, 5.0)))
+            py = ct + Emu(rnd.randint(0, 40000))
+            if mode == "photo_right":
+                px = right_edge - pw
+                tx, tw = cx, px - cx - Inches(0.25)
+            else:
+                px = cx
+                tx, tw = cx + pw + Inches(0.3), right_edge - (cx + pw + Inches(0.3))
+            _img_framed(slide, imgs[0], px, py, pw, ph, theme, rnd)
+            bh = Inches(3.7) if fact else content_h
+            _add_bullets(slide, tx, ct, max(tw, Inches(3.2)), bh, bullets,
+                         size=15, color=theme["text"], accent2=theme["accent2"], space_after=9)
+            if fact:
+                fy = ct + Inches(3.85)
+                _fact_card(slide, tx, fy, max(tw, Inches(3.2)), SLIDE_H - fy - Inches(0.55),
+                           fact, theme, size=12, rnd=rnd)
+        elif mode == "photo_top":
+            ph = content_h * rnd.uniform(0.42, 0.5)
+            _img_framed(slide, imgs[0], cx, ct, avail_w, ph, theme, rnd)
+            ty = ct + ph + Inches(0.25)
+            _add_bullets(slide, cx, ty, avail_w, SLIDE_H - ty - Inches(0.55), bullets,
+                         size=15, color=theme["text"], accent2=theme["accent2"], space_after=8)
+        else:  # photo_hero — фото крупным блоком слева, текст узкой колонкой
+            pw = Inches(rnd.uniform(6.5, 7.5))
+            _img_framed(slide, imgs[0], cx, ct, pw, content_h, theme, rnd)
+            tx = cx + pw + Inches(0.3)
+            tw = right_edge - tx
+            _add_bullets(slide, tx, ct, tw, content_h, bullets,
+                         size=14, color=theme["text"], accent2=theme["accent2"], space_after=8)
+        return
+
+    if n == 2:
+        modes = ["col_right", "col_left", "top_pair", "diagonal"]
+        mode = rnd.choice(modes)
+        if mode in ("col_right", "col_left"):
+            colw = Inches(rnd.uniform(3.9, 4.6))
+            ph = (content_h - Inches(0.15)) / 2
+            if mode == "col_right":
+                colx = right_edge - colw
+                tx, tw = cx, colx - cx - Inches(0.3)
+            else:
+                colx = cx
+                tx, tw = cx + colw + Inches(0.3), right_edge - (cx + colw + Inches(0.3))
+            _img_framed(slide, imgs[0], colx, ct, colw, ph, theme, rnd)
+            _img_framed(slide, imgs[1], colx, ct + ph + Inches(0.15), colw, ph, theme, rnd)
+            bh = Inches(3.6) if fact else content_h
+            _add_bullets(slide, tx, ct, max(tw, Inches(3.0)), bh, bullets,
+                         size=15, color=theme["text"], accent2=theme["accent2"], space_after=9)
+            if fact:
+                fy = ct + Inches(3.75)
+                _fact_card(slide, tx, fy, max(tw, Inches(3.0)), SLIDE_H - fy - Inches(0.55),
+                           fact, theme, size=12, rnd=rnd)
+        elif mode == "top_pair":
+            ph = content_h * rnd.uniform(0.4, 0.47)
+            half = (avail_w - Inches(0.2)) / 2
+            _img_framed(slide, imgs[0], cx, ct, half, ph, theme, rnd)
+            _img_framed(slide, imgs[1], cx + half + Inches(0.2), ct, half, ph, theme, rnd)
+            ty = ct + ph + Inches(0.25)
+            _add_bullets(slide, cx, ty, avail_w, SLIDE_H - ty - Inches(0.55), bullets,
+                         size=15, color=theme["text"], accent2=theme["accent2"], space_after=8)
+        else:  # diagonal — одно фото сверху-слева, второе снизу-справа, текст обтекает
+            ph = content_h * 0.46
+            pw = avail_w * 0.5
+            _img_framed(slide, imgs[0], cx, ct, pw, ph, theme, rnd)
+            _img_framed(slide, imgs[1], right_edge - pw, SLIDE_H - Inches(0.55) - ph, pw, ph, theme, rnd)
+            _add_bullets(slide, cx + pw + Inches(0.25), ct, right_edge - (cx + pw + Inches(0.25)),
+                         ph, bullets[:3], size=14, color=theme["text"],
+                         accent2=theme["accent2"], space_after=7)
+            _add_bullets(slide, cx, ct + ph + Inches(0.2), pw + Inches(0.5),
+                         SLIDE_H - (ct + ph + Inches(0.2)) - Inches(0.55), bullets[3:],
+                         size=14, color=theme["text"], accent2=theme["accent2"], space_after=7)
+        return
+
+    # n >= 3
+    modes = ["strip_bottom", "strip_top", "grid_right", "mosaic"]
+    mode = rnd.choice(modes)
+    three = imgs[:3]
+    if mode in ("strip_bottom", "strip_top"):
+        strip_h = content_h * rnd.uniform(0.4, 0.48)
+        pw = (avail_w - Inches(0.24)) / 3
+        if mode == "strip_bottom":
+            strip_y = SLIDE_H - Inches(0.55) - strip_h
+            _add_bullets(slide, cx, ct, avail_w, strip_y - ct - Inches(0.15), bullets,
+                         size=14, color=theme["text"], accent2=theme["accent2"], space_after=7)
+        else:
+            strip_y = ct
+            ty = ct + strip_h + Inches(0.2)
+            _add_bullets(slide, cx, ty, avail_w, SLIDE_H - ty - Inches(0.55), bullets,
+                         size=14, color=theme["text"], accent2=theme["accent2"], space_after=7)
+        for pi, img in enumerate(three):
+            _img_framed(slide, img, cx + pi * (pw + Inches(0.12)), strip_y, pw, strip_h, theme, rnd)
+    elif mode == "grid_right":
+        colw = Inches(rnd.uniform(3.8, 4.4))
+        colx = right_edge - colw
+        ph = (content_h - Inches(0.24)) / 3
+        for pi, img in enumerate(three):
+            _img_framed(slide, img, colx, ct + pi * (ph + Inches(0.12)), colw, ph, theme, rnd)
+        _add_bullets(slide, cx, ct, colx - cx - Inches(0.3), content_h, bullets,
+                     size=15, color=theme["text"], accent2=theme["accent2"], space_after=9)
+    else:  # mosaic — крупное фото + два мелких, текст в свободной зоне
+        big_w = avail_w * 0.5
+        big_h = content_h * 0.62
+        _img_framed(slide, three[0], cx, ct, big_w, big_h, theme, rnd)
+        sw = big_w
+        sh = (content_h - big_h - Inches(0.15))
+        _img_framed(slide, three[1], cx, ct + big_h + Inches(0.15), (sw - Inches(0.1)) / 2, sh, theme, rnd)
+        _img_framed(slide, three[2], cx + (sw - Inches(0.1)) / 2 + Inches(0.1),
+                    ct + big_h + Inches(0.15), (sw - Inches(0.1)) / 2, sh, theme, rnd)
+        tx = cx + big_w + Inches(0.3)
+        _add_bullets(slide, tx, ct, right_edge - tx, content_h, bullets,
+                     size=14, color=theme["text"], accent2=theme["accent2"], space_after=8)
+
+
 def build_pptx(topic: str, subtitle: str, contents: list, slides_data: list,
                conclusion: list, teacher_name: str, teacher_school: str,
                theme: dict, images: dict) -> bytes:
@@ -1143,121 +1374,10 @@ def build_pptx(topic: str, subtitle: str, contents: list, slides_data: list,
         cx = _content_area_x(theme)
         content_h = SLIDE_H - ct - Inches(0.6)
 
-        # ── Layout выбирается по количеству фото и чётности слайда ─────
-        n_imgs = len(slide_imgs)
-
-        if n_imgs == 0:
-            # Нет фото: текст + карточка факта справа
-            if fact:
-                fact_card_w = Inches(4.0)
-                fact_card_x = SLIDE_W - fact_card_w - Inches(0.25)
-                fact_card_y = ct + Inches(0.1)
-                fact_card_h = Inches(2.8)
-                _add_rect(slide, fact_card_x, fact_card_y, fact_card_w, fact_card_h, theme["accent"])
-                _add_rect(slide, fact_card_x, fact_card_y, fact_card_w, Emu(130000), theme["accent2"])
-                _add_text(slide, fact_card_x + Inches(0.15), fact_card_y + Emu(15000),
-                          fact_card_w - Inches(0.3), Emu(110000),
-                          "ИНТЕРЕСНЫЙ ФАКТ", size=9, bold=True, color=theme["accent2"])
-                _add_text(slide, fact_card_x + Inches(0.15), fact_card_y + Inches(0.28),
-                          fact_card_w - Inches(0.3), fact_card_h - Inches(0.35),
-                          fact, size=13, color=theme["white"], italic=True, anchor=MSO_ANCHOR.TOP)
-                text_w = fact_card_x - cx - Inches(0.3)
-            else:
-                text_w = SLIDE_W - cx - Inches(0.25)
-            _add_bullets(slide, cx, ct, text_w, content_h,
-                         bullets, size=16, color=theme["text"],
-                         accent2=theme["accent2"], space_after=10)
-
-        elif n_imgs == 1:
-            # 1 фото: крупное справа/слева, текст по другой стороне
-            photo_on_right = (idx % 2 != 0)
-            photo_w = Inches(5.2)
-            photo_h = min(content_h - Inches(0.1), Inches(5.0))
-            photo_y = ct + Emu(20000)
-
-            if photo_on_right:
-                photo_x = SLIDE_W - photo_w - Inches(0.2)
-                text_x = cx
-                text_w = photo_x - cx - Inches(0.2)
-            else:
-                photo_x = cx
-                text_x = cx + photo_w + Inches(0.25)
-                text_w = SLIDE_W - text_x - Inches(0.2)
-
-            # Рамка-акцент под фото
-            _add_rect(slide, photo_x - Emu(55000), photo_y - Emu(55000),
-                      photo_w + Emu(110000), photo_h + Emu(110000), theme["accent2"])
-            _add_image_to_slide(slide, slide_imgs[0], photo_x, photo_y, photo_w, photo_h)
-
-            # Текст-тезисы
-            bullets_h = Inches(3.8) if fact else content_h
-            _add_bullets(slide, text_x, ct, max(text_w, Inches(3.5)), bullets_h,
-                         bullets, size=15, color=theme["text"],
-                         accent2=theme["accent2"], space_after=9)
-            # Карточка факта под тезисами
-            if fact:
-                fact_y = ct + Inches(3.9)
-                fact_h = SLIDE_H - fact_y - Inches(0.55)
-                if fact_h > Inches(0.4):
-                    _add_rect(slide, text_x, fact_y, max(text_w, Inches(3.5)), fact_h, theme["accent"])
-                    _add_text(slide, text_x + Inches(0.12), fact_y + Emu(25000),
-                              Inches(1.1), fact_h, "★", size=18, bold=True,
-                              color=theme["accent2"], anchor=MSO_ANCHOR.MIDDLE)
-                    _add_text(slide, text_x + Inches(1.25), fact_y + Emu(30000),
-                              max(text_w, Inches(3.5)) - Inches(1.35), fact_h - Emu(60000),
-                              fact, size=12, color=theme["white"],
-                              italic=True, anchor=MSO_ANCHOR.MIDDLE)
-
-        elif n_imgs == 2:
-            # 2 фото: левая колонка текст, правая — два фото вертикально
-            text_w = Inches(6.8)
-            col2_x = cx + text_w + Inches(0.25)
-            col2_w = SLIDE_W - col2_x - Inches(0.2)
-            ph = (content_h - Inches(0.15)) / 2
-
-            _add_rect(slide, col2_x - Emu(50000), ct - Emu(30000),
-                      col2_w + Emu(100000), ph + Emu(60000), theme["accent2"])
-            _add_image_to_slide(slide, slide_imgs[0], col2_x, ct, col2_w, ph)
-
-            _add_rect(slide, col2_x - Emu(50000), ct + ph + Inches(0.15) - Emu(30000),
-                      col2_w + Emu(100000), ph + Emu(60000), theme["accent2"])
-            _add_image_to_slide(slide, slide_imgs[1], col2_x, ct + ph + Inches(0.15), col2_w, ph)
-
-            bullets_h = Inches(3.8) if fact else content_h
-            _add_bullets(slide, cx, ct, text_w, bullets_h,
-                         bullets, size=15, color=theme["text"],
-                         accent2=theme["accent2"], space_after=9)
-            if fact:
-                fact_y = ct + Inches(3.9)
-                fact_h = SLIDE_H - fact_y - Inches(0.55)
-                if fact_h > Inches(0.35):
-                    _add_rect(slide, cx, fact_y, text_w, fact_h, theme["accent"])
-                    _add_text(slide, cx + Inches(0.12), fact_y + Emu(25000),
-                              Inches(0.9), fact_h, "★", size=16, bold=True,
-                              color=theme["accent2"], anchor=MSO_ANCHOR.MIDDLE)
-                    _add_text(slide, cx + Inches(1.05), fact_y + Emu(30000),
-                              text_w - Inches(1.15), fact_h - Emu(60000),
-                              fact, size=12, color=theme["white"],
-                              italic=True, anchor=MSO_ANCHOR.MIDDLE)
-
-        else:
-            # 3 фото: верхняя половина — текст, нижняя — полоса из 3 фото
-            text_area_h = content_h * 0.52
-            photo_strip_y = ct + text_area_h + Inches(0.15)
-            photo_strip_h = SLIDE_H - photo_strip_y - Inches(0.55)
-            pw = (SLIDE_W - cx - Inches(0.5)) / 3
-            gap = Inches(0.12)
-
-            for pi, img in enumerate(slide_imgs[:3]):
-                px = cx + pi * (pw + gap)
-                _add_rect(slide, px - Emu(40000), photo_strip_y - Emu(40000),
-                          pw + Emu(80000), photo_strip_h + Emu(80000), theme["accent2"])
-                _add_image_to_slide(slide, img, px, photo_strip_y, pw, photo_strip_h)
-
-            # Тезисы над полосой фото
-            _add_bullets(slide, cx, ct, SLIDE_W - cx - Inches(0.25), text_area_h,
-                         bullets, size=14, color=theme["text"],
-                         accent2=theme["accent2"], space_after=7)
+        # ── Процедурный per-slide макет: расположение фото, текста и факта
+        #    выбирается СЛУЧАЙНО для каждого слайда — единого формата нет. ──
+        slide_rnd = random.Random(f"{theme.get('name','')}|{s['title']}|{idx}|{random.random()}")
+        place_slide_content(slide, theme, slide_rnd, ct, cx, content_h, bullets, fact, slide_imgs)
 
         _footer(slide, teacher_name, teacher_school, theme)
 
@@ -1438,6 +1558,11 @@ def handler(event: dict, context) -> dict:
             except Exception:
                 pass
 
+        # Предусматриваем расход: блокируем ИИ при отсутствии подписки/баланса.
+        allowed, pc_status, pc_err = precheck_ai(login, est_tokens=4000)
+        if not allowed:
+            return _resp(pc_status, {"error": pc_err})
+
         try:
             outline, tokens_used = generate_outline(topic, description, slides_count, audience)
         except Exception as e:
@@ -1569,6 +1694,11 @@ def handler(event: dict, context) -> dict:
             pass
 
     theme = make_custom_theme(topic, random.randint(1, 10_000))
+
+    # Предусматриваем расход: блокируем ИИ при отсутствии подписки/баланса.
+    allowed, pc_status, pc_err = precheck_ai(login, est_tokens=4000)
+    if not allowed:
+        return _resp(pc_status, {"error": pc_err})
 
     try:
         outline, tokens_used = generate_outline(topic, description, slides_count, audience)

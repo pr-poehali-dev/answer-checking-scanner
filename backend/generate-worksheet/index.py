@@ -81,6 +81,36 @@ def spend_ai_tokens(login: str, amount: int, action_label: str = "Рабочий
         return True, "", 0.0, 0.0
 
 
+def precheck_ai(login: str, est_tokens: int = 2000):
+    """Проверяет ДО обращения к ИИ: подписка и достаточный баланс.
+    Возвращает (allowed, http_status, error). Без login — разрешаем."""
+    if not login:
+        return True, 200, ""
+    try:
+        req = urllib.request.Request(
+            f"{AUTH_URL}?action=precheck-ai",
+            data=json.dumps({"login": login, "est_tokens": est_tokens}).encode("utf-8"),
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as r:
+            resp = json.loads(r.read().decode())
+        return bool(resp.get("allowed")), 200, ""
+    except urllib.error.HTTPError as e:
+        err_body = {}
+        try:
+            err_body = json.loads(e.read().decode())
+        except Exception:
+            pass
+        if e.code == 402:
+            return False, 402, err_body.get("error", "Недостаточно средств на балансе ИИ. Пополните баланс.")
+        if e.code == 403:
+            return False, 403, err_body.get("error", "Для использования ИИ необходима активная подписка.")
+        return True, 200, ""
+    except Exception:
+        return True, 200, ""
+
+
 # ─── YANDEXGPT ───────────────────────────────────────────────────────────────
 
 YANDEX_GPT_URL = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
@@ -734,6 +764,11 @@ def handler(event: dict, context) -> dict:
                 return _resp(429, {"error": err_body.get("error", "Достигнут лимит ИИ-запросов на сегодня")})
         except Exception:
             pass
+
+    # Предусматриваем расход: блокируем ИИ, если нет подписки/баланса — ДО генерации.
+    allowed, pc_status, pc_err = precheck_ai(login, est_tokens=3000)
+    if not allowed:
+        return _resp(pc_status, {"error": pc_err})
 
     try:
         content, tokens_used = generate_worksheet_content(

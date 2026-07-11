@@ -56,6 +56,36 @@ def spend_ai_tokens(login: str, amount: int, action_label: str = "Экзамен
         return True, "", 0.0, 0.0
 
 
+def precheck_ai(login: str, est_tokens: int = 2000):
+    """Проверяет ДО обращения к ИИ: подписка и достаточный баланс.
+    Возвращает (allowed, http_status, error). Без login — разрешаем."""
+    if not login:
+        return True, 200, ""
+    try:
+        req = urllib.request.Request(
+            f"{AUTH_URL}?action=precheck-ai",
+            data=json.dumps({"login": login, "est_tokens": est_tokens}).encode("utf-8"),
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as r:
+            resp = json.loads(r.read().decode())
+        return bool(resp.get("allowed")), 200, ""
+    except urllib.error.HTTPError as e:
+        err_body = {}
+        try:
+            err_body = json.loads(e.read().decode())
+        except Exception:
+            pass
+        if e.code == 402:
+            return False, 402, err_body.get("error", "Недостаточно средств на балансе ИИ. Пополните баланс.")
+        if e.code == 403:
+            return False, 403, err_body.get("error", "Для использования ИИ необходима активная подписка.")
+        return True, 200, ""
+    except Exception:
+        return True, 200, ""
+
+
 from docx import Document
 from docx.shared import Pt, Cm, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -1120,6 +1150,11 @@ def handler(event: dict, context) -> dict:
             err = _check_limit(login)
             if err:
                 return err
+
+        # Предусматриваем расход: блокируем ИИ при отсутствии подписки/баланса.
+        allowed, pc_status, pc_err = precheck_ai(login, est_tokens=3000)
+        if not allowed:
+            return _resp(pc_status, {"error": pc_err})
 
         parts = structure["parts"]
         if batch_indices is None:

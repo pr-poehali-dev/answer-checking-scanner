@@ -1051,6 +1051,54 @@ def handler(event: dict, context) -> dict:
         finally:
             conn.close()
 
+    # ── POST precheck-ai — проверка возможности использовать ИИ ДО генерации ──
+    # Не списывает баланс. Возвращает allowed:false с 402/403, если денег нет
+    # или нет подписки. Используется всеми ИИ-функциями (в т.ч. чатом), чтобы
+    # заранее предусмотреть расход и не тратить впустую вызов ИИ.
+    if method == "POST" and route in ("precheck-ai", "precheck_ai"):
+        login = (body.get("login") or "").strip()
+        # Ориентировочная стоимость запроса в токенах (для оценки достаточности).
+        try:
+            est_tokens = int(body.get("est_tokens") or 0)
+        except (TypeError, ValueError):
+            est_tokens = 0
+        if not login:
+            return _resp(400, {"error": "Укажите login"})
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"SELECT ai_balance_kopecks, role, subscription_until FROM {SCHEMA}.users WHERE login = %s",
+                (login,)
+            )
+            row = cur.fetchone()
+            if not row:
+                return _resp(404, {"allowed": False, "error": "Пользователь не найден"})
+            balance_kop, role, sub_until = row[0] or 0, row[1], row[2]
+            now = datetime.utcnow()
+            balance_rub = round(balance_kop / 100, 2)
+            # admin и tester — ИИ бесплатно
+            if role in ("tester", "admin"):
+                return _resp(200, {"allowed": True, "free": True, "balance_rub": balance_rub})
+            # Без активной подписки — ИИ заблокирован
+            has_sub = sub_until and isinstance(sub_until, datetime) and sub_until > now
+            if not has_sub:
+                return _resp(403, {"allowed": False, "balance_rub": balance_rub,
+                                   "error": "Для использования ИИ необходима активная подписка."})
+            # Предусматриваем расход: нужен хотя бы минимальный положительный баланс,
+            # а если ИИ оценил размер запроса — проверяем достаточность заранее.
+            AI_MARKUP = 1.40
+            est_kop = max(round(est_tokens * 0.2 * AI_MARKUP), 0) if est_tokens > 0 else 1
+            if balance_kop <= 0 or balance_kop < est_kop:
+                need_rub = round(max(est_kop, 1) / 100, 2)
+                return _resp(402, {"allowed": False, "balance_rub": balance_rub,
+                                   "error": f"Недостаточно средств для ИИ. Баланс: {balance_rub} ₽" +
+                                            (f", нужно ~{need_rub} ₽" if est_tokens > 0 else "") +
+                                            ". Пополните баланс в личном кабинете."})
+            return _resp(200, {"allowed": True, "balance_rub": balance_rub})
+        finally:
+            conn.close()
+
     # ── POST spend-tokens — списание баланса в копейках за ИИ-генерацию ───────
     # amount = количество токенов YandexGPT; базовая ставка 0.2 коп/токен (2 руб/1000),
     # к потреблению добавляется наценка +40%.

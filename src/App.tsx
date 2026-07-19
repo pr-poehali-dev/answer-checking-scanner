@@ -20,6 +20,7 @@ import KnowledgeBasePage from "./pages/KnowledgeBasePage";
 import MaterialsPage from "./pages/MaterialsPage";
 import PublicHomePage from "./pages/PublicHomePage";
 import SiteVersionBadge from "./components/SiteVersionBadge";
+import AccessibilityPanel from "./components/AccessibilityPanel";
 
 const queryClient = new QueryClient();
 
@@ -29,6 +30,9 @@ const App = () => (
       <Toaster />
       <Sonner />
       <BrowserRouter>
+        <a href="#main-content" className="skip-to-content">
+          Перейти к основному содержимому
+        </a>
         <Routes>
           <Route path="/" element={<Index />} />
           <Route path="/yadisk-callback" element={<YadiskCallback />} />
@@ -48,6 +52,7 @@ const App = () => (
           <Route path="*" element={<NotFound />} />
         </Routes>
         <SiteVersionBadge />
+        <AccessibilityPanel />
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>

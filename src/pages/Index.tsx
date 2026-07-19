@@ -366,7 +366,7 @@ export default function Index() {
         </header>
 
         {/* Контент */}
-        <main className="flex-1 overflow-y-auto pb-16 md:pb-0">
+        <main id="main-content" tabIndex={-1} className="flex-1 overflow-y-auto pb-16 md:pb-0">
           <div className="px-3 md:px-6 py-4 md:py-6">
             {isMaintenance ? (
               <div className="flex flex-col items-center justify-center py-20 text-center">

@@ -18,6 +18,7 @@ import SjouParentPage from "./pages/SjouParentPage";
 import UdsPage from "./pages/UdsPage";
 import KnowledgeBasePage from "./pages/KnowledgeBasePage";
 import MaterialsPage from "./pages/MaterialsPage";
+import DocsPage from "./pages/DocsPage";
 import PublicHomePage from "./pages/PublicHomePage";
 import SiteVersionBadge from "./components/SiteVersionBadge";
 import AccessibilityPanel from "./components/AccessibilityPanel";
@@ -40,6 +41,7 @@ const App = () => (
           <Route path="/privacy" element={<PrivacyPage />} />
           <Route path="/knowledge-base" element={<KnowledgeBasePage />} />
           <Route path="/materials" element={<MaterialsPage />} />
+          <Route path="/docs" element={<DocsPage />} />
           <Route path="/home" element={<PublicHomePage />} />
           <Route path="/sjou" element={<SjouPage />} />
           <Route path="/sjou-operator" element={<SjouOperatorPage />} />

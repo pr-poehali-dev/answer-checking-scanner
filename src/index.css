@@ -54,11 +54,16 @@
     @apply border-border;
   }
 
+  /* Корневой кегль масштабируется настройкой доступности (по умолчанию 1).
+     Через html влияет на ВСЕ rem-размеры Tailwind (text-xs/sm/base/...). */
+  html {
+    font-size: calc(16px * var(--a11y-font-scale, 1));
+  }
+
   body {
     @apply bg-background text-foreground;
     font-family: "IBM Plex Sans", sans-serif;
-    /* Базовый кегль масштабируется настройкой доступности (по умолчанию 1) */
-    font-size: calc(14px * var(--a11y-font-scale, 1));
+    font-size: 0.875rem; /* 14px в rem — масштабируется вместе с html */
     line-height: 1.6;
   }
 
@@ -199,11 +204,11 @@
       @apply p-3;
     }
 
-    /* Инпуты — нормальный размер шрифта чтобы не зумилось */
+    /* Инпуты — нормальный размер шрифта чтобы не зумилось (в rem — масштабируется) */
     input,
     select,
     textarea {
-      font-size: 16px !important;
+      font-size: 1rem !important;
     }
   }
 }

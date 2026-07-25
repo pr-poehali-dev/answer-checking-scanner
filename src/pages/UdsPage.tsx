@@ -31,7 +31,6 @@ export default function UdsPage() {
   const [certList, setCertList] = useState<CryptoProMedia[] | null>(null);
   const [certLoading, setCertLoading] = useState(false);
   const [tab, setTab] = useState<Tab>("employees");
-  const [logoClicks, setLogoClicks] = useState(0);
   const lastActivityRef = useRef<number>(Date.now());
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -147,12 +146,27 @@ export default function UdsPage() {
     }
   };
 
-  // 5 кликов по логотипу → вход по коду ИИС
-  const onLogoClick = () => {
-    const n = logoClicks + 1;
-    setLogoClicks(n);
-    if (n >= 5) { setStep("iis"); setLogoClicks(0); setError(""); }
-  };
+  // Tab + 2 → вход по коду ИИС
+  useEffect(() => {
+    if (session) return;
+    let tabDown = false;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Tab") tabDown = true;
+      if (tabDown && e.key === "2") {
+        e.preventDefault();
+        setStep("iis"); setError("");
+      }
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === "Tab") tabDown = false;
+    };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+    };
+  }, [session]);
 
   const verifyIis = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -230,7 +244,6 @@ export default function UdsPage() {
         smsHint={smsHint}
         busy={busy}
         error={error}
-        onLogoClick={onLogoClick}
         certLogin={certLogin}
         certList={certList}
         certLoading={certLoading}

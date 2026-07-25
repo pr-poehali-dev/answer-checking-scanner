@@ -15,7 +15,6 @@ interface UdsLoginFormProps {
   smsHint: string;
   busy: boolean;
   error: string;
-  onLogoClick: () => void;
   certLogin: (thumbprint?: string) => void;
   certList: CryptoProMedia[] | null;
   certLoading: boolean;
@@ -41,7 +40,6 @@ export default function UdsLoginForm({
   smsHint,
   busy,
   error,
-  onLogoClick,
   certLogin,
   certList,
   certLoading,
@@ -64,10 +62,9 @@ export default function UdsLoginForm({
     <div className="min-h-screen flex items-center justify-center bg-slate-900 px-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-6">
-          <button onClick={onLogoClick} title="УДС"
-            className="w-14 h-14 rounded-xl bg-blue-600 flex items-center justify-center mx-auto mb-3 active:scale-95 transition-transform">
+          <div className="w-14 h-14 rounded-xl bg-blue-600 flex items-center justify-center mx-auto mb-3">
             <Icon name="ShieldCheck" size={28} className="text-white" />
-          </button>
+          </div>
           <h1 className="text-xl font-bold text-white">УДС</h1>
           <p className="text-sm text-slate-400 mt-1">Управление Движения Системы</p>
         </div>

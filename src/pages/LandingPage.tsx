@@ -25,6 +25,27 @@ export default function LandingPage({ onLogin, onRegister, onTrial, onOuLogin }:
       .finally(() => setLoadingPlans(false));
   }, []);
 
+  // Скрытый вход в УДС: удержать Tab и нажать Q
+  useEffect(() => {
+    let tabDown = false;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Tab") tabDown = true;
+      if (tabDown && (e.key === "q" || e.key === "Q" || e.key === "й" || e.key === "Й")) {
+        e.preventDefault();
+        window.location.href = "/piot-colldent19";
+      }
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === "Tab") tabDown = false;
+    };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+    };
+  }, []);
+
   const scrollTo = (id: string) => {
     document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
     setMenuOpen(false);

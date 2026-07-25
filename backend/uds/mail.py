@@ -296,13 +296,17 @@ def _isp_mailbox(base_params: dict) -> None:
 
 
 def create_mailbox(email_address: str, password: str) -> None:
-    """Создаёт почтовый ящик на хостинге. Бросает исключение при ошибке."""
+    """Создаёт почтовый ящик на хостинге. Бросает исключение при ошибке.
+
+    Реальные имена полей формы email.edit (проверено через API панели):
+    name — логин ящика, domainname — домен (НЕ "domain"!), passwd/confirm — пароль.
+    При СОЗДАНИИ elid передавать не нужно (поле name скрывается только при
+    редактировании — $remove_if="edit").
+    """
     local, _, domain = email_address.partition("@")
     _isp_mailbox({
         "sok": "ok",
-        "elid": domain,
-        "domain": domain,
-        "mailbox": local,
+        "domainname": domain,
         "name": local,
         "passwd": password,
         "confirm": password,
@@ -315,8 +319,7 @@ def set_mailbox_password(email_address: str, password: str) -> None:
     _isp_mailbox({
         "sok": "ok",
         "elid": email_address,   # редактирование существующего ящика по полному адресу
-        "domain": domain,
-        "mailbox": local,
+        "domainname": domain,
         "name": local,
         "passwd": password,
         "confirm": password,

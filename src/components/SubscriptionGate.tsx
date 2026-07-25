@@ -254,7 +254,9 @@ export default function SubscriptionGate() {
           />
           <span className="text-xs text-muted-foreground leading-relaxed group-hover:text-foreground transition-colors">
             Нажимая «Оформить», я принимаю условия{" "}
-            <a href="/oferta" target="_blank" className="underline underline-offset-2 hover:text-primary">Договора-оферты</a>
+            <a href="/oferta" target="_blank" className="underline underline-offset-2 hover:text-primary">Договора-оферты</a>,
+            {" "}ознакомлен с{" "}
+            <a href="/docs" target="_blank" className="underline underline-offset-2 hover:text-primary">Документацией</a>
             {" "}и даю согласие на обработку персональных данных согласно{" "}
             <a href="/privacy" target="_blank" className="underline underline-offset-2 hover:text-primary">Политике конфиденциальности</a>
           </span>

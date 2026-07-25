@@ -37,7 +37,7 @@ export default function DocsPage() {
             </p>
             <p>
               Правообладатель — {COMPANY_INFO.fullName}. Программное обеспечение доступно по адресу{" "}
-              <a href="https://ooo29.ru" target="_blank" rel="noreferrer" className="underline hover:text-foreground">ooo29.ru</a>.
+              <a href="https://saou.ru" target="_blank" rel="noreferrer" className="underline hover:text-foreground">saou.ru</a>.
             </p>
           </Section>
 
@@ -94,7 +94,7 @@ export default function DocsPage() {
             </p>
             <p>
               5.2. Начало работы: открыть адрес{" "}
-              <a href="https://ooo29.ru" target="_blank" rel="noreferrer" className="underline hover:text-foreground">ooo29.ru</a>,
+              <a href="https://saou.ru" target="_blank" rel="noreferrer" className="underline hover:text-foreground">saou.ru</a>,
               зарегистрировать учётную запись или войти под существующей, выбрать тариф и приступить
               к работе с разделами системы.
             </p>
@@ -127,7 +127,7 @@ export default function DocsPage() {
             <p>
               7.3. Размещение и хостинг программного обеспечения осуществляются на территории
               Российской Федерации у хостинг-провайдера REG.RU (тарифный план хостинга «Host-0»,
-              учётная запись u3545136, с использованием SSL-сертификата). Доменное имя ooo29.ru.
+              учётная запись u3545136, с использованием SSL-сертификата). Доменное имя saou.ru.
             </p>
           </Section>
 
@@ -142,7 +142,7 @@ export default function DocsPage() {
 
           <Section title="9. Правоустанавливающие документы">
             <p>
-              Создание интернет-платформы (веб-сайта) на домене ooo29.ru и права на программное
+              Создание интернет-платформы (веб-сайта) и права на программное
               обеспечение подтверждаются решением учредителя {COMPANY_INFO.fullName}:
             </p>
             <p>

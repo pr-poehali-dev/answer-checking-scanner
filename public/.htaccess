@@ -1,13 +1,21 @@
+Options -MultiViews
+
 <IfModule mod_rewrite.c>
   RewriteEngine On
   RewriteBase /
 
-  # Не трогаем реально существующие файлы и папки (css, js, картинки и т.д.)
+  # Не трогаем реально существующие файлы и папки (css, js, картинки, PDF и т.д.)
   RewriteCond %{REQUEST_FILENAME} -f [OR]
   RewriteCond %{REQUEST_FILENAME} -d
   RewriteRule ^ - [L]
 
-  # Все остальные маршруты (включая /yadisk-callback) отдаём на index.html —
-  # роутингом дальше занимается React (SPA fallback).
+  # Все остальные маршруты (/docs, /oferta, /yadisk-callback и т.д.) отдаём на
+  # index.html — роутингом дальше занимается React (SPA fallback).
   RewriteRule ^ index.html [L]
+</IfModule>
+
+# Запасной вариант, если mod_rewrite недоступен: любую «ненайденную»
+# страницу отдаём как index.html, чтобы работал клиентский роутинг SPA.
+<IfModule !mod_rewrite.c>
+  ErrorDocument 404 /index.html
 </IfModule>

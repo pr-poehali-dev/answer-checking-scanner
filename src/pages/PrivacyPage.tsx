@@ -29,7 +29,7 @@ export default function PrivacyPage() {
             порядок обработки и защиты персональных данных пользователей образовательной платформы САОУ
             (Система автоматизации образовательных учреждений) и связанных сервисов (СЖОУ — система школьного
             журнала образовательного учреждения, УДС), размещённых в сети Интернет на домене{" "}
-            <a href="https://ooo29.ru" target="_blank" rel="noreferrer" className="underline hover:text-foreground">ooo29.ru</a>{" "}
+            <a href="https://saou.ru" target="_blank" rel="noreferrer" className="underline hover:text-foreground">saou.ru</a>{" "}
             (далее — «Сайт»).
           </p>
 

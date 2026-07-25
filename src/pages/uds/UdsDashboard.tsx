@@ -92,7 +92,7 @@ export default function UdsDashboard({ session, tab, setTab, logout, onProfileUp
 
       <main className="max-w-5xl mx-auto px-4 md:px-6 py-6">
         {tab === "employees" && (
-          <UdsEmployees login={session.login} token={session.token} perms={perms} myRole={session.panel_role} />
+          <UdsEmployees login={session.login} token={session.token} perms={perms} myRole={session.panel_role} isAdmin={!!session.is_admin} />
         )}
         {tab === "wards" && (
           <MyWards login={session.login} token={session.token} perms={perms} myRole={session.panel_role} />

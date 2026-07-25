@@ -21,6 +21,7 @@ export interface Session {
   panel_role_label: string;
   operator_number: number;
   perms: UdsPerms;
+  is_admin?: boolean;
   subrole_label?: string | null;
   curator_name?: string | null;
   pending_transfers?: number;

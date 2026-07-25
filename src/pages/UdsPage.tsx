@@ -73,6 +73,7 @@ export default function UdsPage() {
           ...prev,
           panel_role: me.panel_role || prev.panel_role,
           perms: me.perms!,
+          is_admin: me.is_admin,
           subrole_label: me.subrole_label,
           curator_name: me.my_curator?.full_name ?? null,
           pending_transfers: me.pending_transfers ?? 0,

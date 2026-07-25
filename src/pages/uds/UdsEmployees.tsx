@@ -19,9 +19,10 @@ interface Props {
   token: string;
   perms: UdsPerms;
   myRole: string;
+  isAdmin: boolean;
 }
 
-export default function UdsEmployees({ login, token, perms, myRole }: Props) {
+export default function UdsEmployees({ login, token, perms, myRole, isAdmin }: Props) {
   const [employees, setEmployees] = useState<UdsEmployee[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -49,8 +50,10 @@ export default function UdsEmployees({ login, token, perms, myRole }: Props) {
   };
 
   const changeRole = async (targetLogin: string, role: string) => {
+    if (!role) return; // плейсхолдер «— роль —» — ничего не делает
+    if (role === "__remove__" && !isAdmin) return;
     setError("");
-    try { await udsApi.setRole(login, token, targetLogin, role); await load(); }
+    try { await udsApi.setRole(login, token, targetLogin, role === "__remove__" ? "" : role); await load(); }
     catch (e) { setError((e as Error).message); }
   };
 
@@ -138,7 +141,7 @@ export default function UdsEmployees({ login, token, perms, myRole }: Props) {
                 {ROLE_OPTIONS.filter(r => assignable.includes(r.value)).map(r => (
                   <option key={r.value} value={r.value}>{r.label}</option>
                 ))}
-                <option value="">Снять роль</option>
+                {isAdmin && <option value="__remove__">Снять роль (удалить)</option>}
               </select>
             )}
             {perms.can_block && emp.can_manage !== false && emp.login !== login && emp.login !== "admin" && (

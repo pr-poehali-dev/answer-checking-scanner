@@ -839,6 +839,7 @@ def handler(event: dict, context) -> dict:
                 "panel_role_label": PANEL_ROLE_LABELS.get(role, role) if role else None,
                 "operator_number": caller.get("operator_number"),
                 "is_panel": caller.get("is_panel", False),
+                "is_admin": bool(caller.get("is_admin")),
                 "uds_registered": caller.get("uds_registered", False),
                 "uds_access": access,
                 "perms": perms_for(role, sub) if (access and role) else None,
@@ -1126,6 +1127,9 @@ def handler(event: dict, context) -> dict:
                     return _resp(403, {"error": "Нельзя изменить роль равного или вышестоящего"})
 
             if new_role == "":
+                # Удаление (снятие роли) сотрудника — только для администратора
+                if not caller.get("is_admin"):
+                    return _resp(403, {"error": "Удалять сотрудников может только администратор"})
                 cur.execute(
                     f"UPDATE {SCHEMA}.panel_operators SET panel_role = 'removed', assigned_by = %s WHERE login = %s",
                     (caller["login"], tl)

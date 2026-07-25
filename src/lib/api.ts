@@ -504,7 +504,7 @@ export const udsApi = {
     ),
 
   me: (login: string, token: string) =>
-    udsRequest<{ login: string; panel_role: string | null; panel_role_label: string | null; operator_number: number | null; is_panel: boolean; uds_registered: boolean; uds_access: boolean; perms: UdsPerms | null; my_cert: UdsCert | null; my_mail: { email_address: string; status: string; password_set: boolean } | null; subrole: string | null; subrole_label: string | null; my_curator: { login: string; full_name: string } | null; pending_transfers: number }>("me", "GET", login, token),
+    udsRequest<{ login: string; panel_role: string | null; panel_role_label: string | null; operator_number: number | null; is_panel: boolean; is_admin: boolean; uds_registered: boolean; uds_access: boolean; perms: UdsPerms | null; my_cert: UdsCert | null; my_mail: { email_address: string; status: string; password_set: boolean } | null; subrole: string | null; subrole_label: string | null; my_curator: { login: string; full_name: string } | null; pending_transfers: number }>("me", "GET", login, token),
 
   employees: (login: string, token: string) =>
     udsRequest<{ employees: UdsEmployee[] }>("employees", "GET", login, token),

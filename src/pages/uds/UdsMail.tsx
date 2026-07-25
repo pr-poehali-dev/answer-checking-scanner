@@ -41,6 +41,14 @@ export default function UdsMail({ login, token, myAddress }: Props) {
   const [ispBusy, setIspBusy] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
+  // Модалка «Написать» — новое письмо на произвольный адрес
+  const [composeOpen, setComposeOpen] = useState(false);
+  const [composeTo, setComposeTo] = useState("");
+  const [composeSubject, setComposeSubject] = useState("");
+  const [composeBody, setComposeBody] = useState("");
+  const [composeError, setComposeError] = useState("");
+  const [composeSending, setComposeSending] = useState(false);
+
   const testIsp = async () => {
     setIspBusy(true); setIspCheck(null);
     try {
@@ -108,6 +116,38 @@ export default function UdsMail({ login, token, myAddress }: Props) {
 
   const isExternal = peer && !peer.address.toLowerCase().endsWith("@ooo29.ru");
 
+  const openCompose = () => {
+    setComposeTo(""); setComposeSubject(""); setComposeBody(""); setComposeError("");
+    setComposeOpen(true);
+  };
+
+  const sendCompose = async () => {
+    const to = composeTo.trim().toLowerCase();
+    const text = composeBody.trim();
+    if (!to || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
+      setComposeError("Укажите корректный email-адрес"); return;
+    }
+    if (!text) {
+      setComposeError("Введите текст сообщения"); return;
+    }
+    setComposeSending(true); setComposeError("");
+    try {
+      const res = await udsApi.mailSend(login, token, to, composeSubject.trim(), text);
+      setComposeOpen(false);
+      // Переходим в диалог с этим адресом
+      const d = await udsApi.mailThread(login, token, to);
+      setPeer({ address: to, name: to });
+      setMessages(d.messages);
+      setDraft(""); setSubject("");
+      loadThreads();
+      if (res.warning) setError(res.warning);
+    } catch (e) {
+      setComposeError((e as Error).message);
+    } finally {
+      setComposeSending(false);
+    }
+  };
+
   return (
     <div className="border border-border rounded-sm bg-white overflow-hidden flex h-[calc(100vh-220px)] min-h-[420px]">
       {/* Левая колонка: чаты / контакты */}
@@ -120,6 +160,13 @@ export default function UdsMail({ login, token, myAddress }: Props) {
           <button onClick={() => setTab("contacts")}
             className={`flex-1 py-2.5 text-xs font-semibold ${tab === "contacts" ? "text-primary border-b-2 border-primary" : "text-muted-foreground"}`}>
             <Icon name="Users" size={13} className="inline mr-1" /> Контакты
+          </button>
+        </div>
+
+        <div className="p-2 border-b border-border">
+          <button onClick={openCompose}
+            className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-primary text-primary-foreground text-xs font-semibold rounded-sm hover:opacity-90">
+            <Icon name="PenSquare" size={13} fallback="Plus" /> Написать
           </button>
         </div>
 
@@ -269,6 +316,59 @@ export default function UdsMail({ login, token, myAddress }: Props) {
           </>
         )}
       </div>
+
+      {/* Модалка «Написать» — новое письмо на произвольный адрес */}
+      {composeOpen && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+          onClick={() => !composeSending && setComposeOpen(false)}>
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-md p-5 space-y-3" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold flex items-center gap-2">
+                <Icon name="PenSquare" size={15} fallback="Plus" /> Новое письмо
+              </h3>
+              <button onClick={() => setComposeOpen(false)} disabled={composeSending}
+                className="text-muted-foreground hover:text-foreground disabled:opacity-50">
+                <Icon name="X" size={16} />
+              </button>
+            </div>
+
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Адрес получателя</label>
+              <input value={composeTo} onChange={e => setComposeTo(e.target.value)}
+                placeholder="example@mail.ru" type="email"
+                className="w-full px-3 py-2 text-xs border border-border rounded-sm focus:outline-none focus:ring-1 focus:ring-primary" />
+            </div>
+
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Тема</label>
+              <input value={composeSubject} onChange={e => setComposeSubject(e.target.value)}
+                placeholder="Тема письма"
+                className="w-full px-3 py-2 text-xs border border-border rounded-sm focus:outline-none focus:ring-1 focus:ring-primary" />
+            </div>
+
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Сообщение</label>
+              <textarea value={composeBody} onChange={e => setComposeBody(e.target.value)} rows={5}
+                placeholder="Текст сообщения…"
+                className="w-full px-3 py-2 text-xs border border-border rounded-sm resize-none focus:outline-none focus:ring-1 focus:ring-primary" />
+            </div>
+
+            {composeError && <p className="text-xs text-destructive">{composeError}</p>}
+
+            <div className="flex justify-end gap-2 pt-1">
+              <button onClick={() => setComposeOpen(false)} disabled={composeSending}
+                className="px-3 py-2 text-xs border border-border rounded-sm hover:bg-muted disabled:opacity-50">
+                Отмена
+              </button>
+              <button onClick={sendCompose} disabled={composeSending}
+                className="inline-flex items-center gap-1.5 px-3 py-2 bg-primary text-primary-foreground text-xs font-semibold rounded-sm hover:opacity-90 disabled:opacity-50">
+                {composeSending ? <Icon name="Loader2" size={13} className="animate-spin" /> : <Icon name="Send" size={13} />}
+                Отправить
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

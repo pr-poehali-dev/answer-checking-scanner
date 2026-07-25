@@ -13,6 +13,7 @@ interface Props {
 }
 
 export default function UdsProfile({ login, token, panelRoleLabel, operatorNumber, subroleLabel, curatorName, onUpdated }: Props) {
+  const isAdmin = login === "admin";
   const [newLogin, setNewLogin] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -121,50 +122,52 @@ export default function UdsProfile({ login, token, panelRoleLabel, operatorNumbe
         </div>
       )}
 
-      <form onSubmit={submit} className="border border-border rounded-lg bg-white p-5 space-y-3">
-        <div>
-          <label className="text-xs text-gray-500 block mb-1">Новый логин</label>
-          <input value={newLogin} onChange={e => setNewLogin(e.target.value)}
-            placeholder="Оставьте пустым, чтобы не менять"
-            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-        </div>
-        <div>
-          <label className="text-xs text-gray-500 block mb-1">Новый пароль</label>
-          <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)}
-            placeholder="Минимум 6 символов"
-            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-        </div>
-        {newPassword && (
+      {!isAdmin && (
+        <form onSubmit={submit} className="border border-border rounded-lg bg-white p-5 space-y-3">
           <div>
-            <label className="text-xs text-gray-500 block mb-1">Повторите пароль</label>
-            <input type="password" value={confirm} onChange={e => setConfirm(e.target.value)}
+            <label className="text-xs text-gray-500 block mb-1">Новый логин</label>
+            <input value={newLogin} onChange={e => setNewLogin(e.target.value)}
+              placeholder="Оставьте пустым, чтобы не менять"
               className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
-        )}
-        <div className="pt-1 border-t border-border">
-          <label className="text-xs text-gray-500 block mb-1 mt-2">Текущий пароль (подтверждение)*</label>
-          <input type="password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)}
-            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-        </div>
-
-        {error && (
-          <div className="flex items-center gap-2 p-2.5 rounded-sm bg-destructive/5 border border-destructive/20">
-            <Icon name="AlertCircle" size={13} className="text-destructive" />
-            <p className="text-xs text-destructive">{error}</p>
+          <div>
+            <label className="text-xs text-gray-500 block mb-1">Новый пароль</label>
+            <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)}
+              placeholder="Минимум 6 символов"
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
-        )}
-        {ok && (
-          <div className="flex items-center gap-2 p-2.5 rounded-sm bg-green-50 border border-green-200">
-            <Icon name="CheckCircle2" size={13} className="text-green-600" />
-            <p className="text-xs text-green-700">Данные обновлены</p>
+          {newPassword && (
+            <div>
+              <label className="text-xs text-gray-500 block mb-1">Повторите пароль</label>
+              <input type="password" value={confirm} onChange={e => setConfirm(e.target.value)}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+          )}
+          <div className="pt-1 border-t border-border">
+            <label className="text-xs text-gray-500 block mb-1 mt-2">Текущий пароль (подтверждение)*</label>
+            <input type="password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
-        )}
 
-        <button type="submit" disabled={busy}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground text-xs font-semibold rounded-sm hover:opacity-90 disabled:opacity-50">
-          {busy ? <><Icon name="Loader2" size={13} className="animate-spin" /> Сохранение…</> : <><Icon name="Save" size={13} /> Сохранить</>}
-        </button>
-      </form>
+          {error && (
+            <div className="flex items-center gap-2 p-2.5 rounded-sm bg-destructive/5 border border-destructive/20">
+              <Icon name="AlertCircle" size={13} className="text-destructive" />
+              <p className="text-xs text-destructive">{error}</p>
+            </div>
+          )}
+          {ok && (
+            <div className="flex items-center gap-2 p-2.5 rounded-sm bg-green-50 border border-green-200">
+              <Icon name="CheckCircle2" size={13} className="text-green-600" />
+              <p className="text-xs text-green-700">Данные обновлены</p>
+            </div>
+          )}
+
+          <button type="submit" disabled={busy}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground text-xs font-semibold rounded-sm hover:opacity-90 disabled:opacity-50">
+            {busy ? <><Icon name="Loader2" size={13} className="animate-spin" /> Сохранение…</> : <><Icon name="Save" size={13} /> Сохранить</>}
+          </button>
+        </form>
+      )}
     </div>
   );
 }

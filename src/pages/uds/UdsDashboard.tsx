@@ -36,7 +36,7 @@ export default function UdsDashboard({ session, tab, setTab, logout, onProfileUp
     { id: "maintenance", label: "Тех. работы", icon: "Construction", show: perms.can_maintenance },
     { id: "audit", label: "Логи действий", icon: "ScrollText", show: true },
     { id: "consents", label: "Согласия", icon: "ShieldCheck", show: canConsents },
-    { id: "profile", label: "Мой профиль", icon: "UserCog", show: session.login !== "admin" },
+    { id: "profile", label: "Мой профиль", icon: "UserCog", show: true },
   ].filter(t => t.show);
 
   return (

@@ -292,7 +292,7 @@ REGISTER_SENDER = os.environ.get("UDS_REGISTER_SENDER", "bint.kod@saou.ru")
 # чтобы усложнить фильтрацию писем как спама и скрыть системный источник
 LOGIN_SENDER_POOL = [
     s.strip() for s in os.environ.get(
-        "UDS_LOGIN_SENDER_POOL", "t7@saou.ru,kj@ooo29.ru,hard_d@ooo29.ru"
+        "UDS_LOGIN_SENDER_POOL", "t7@saou.ru,4rr@saou.ru"
     ).split(",") if s.strip()
 ]
 

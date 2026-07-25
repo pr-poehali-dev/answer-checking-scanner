@@ -285,20 +285,46 @@ def otp_verify(cur, login: str, purpose: str, code: str) -> str:
     return "ok"
 
 
-def send_email_otp(to_email: str, code: str, purpose: str) -> None:
-    """Отправляет OTP-код на email через SMTP УДС."""
-    # Сначала пробуем отдельные UDS-секреты, иначе общие SMTP
-    smtp_host = os.environ.get("UDS_SMTP_HOST") or os.environ.get("SMTP_HOST", "")
-    smtp_port = int(os.environ.get("UDS_SMTP_PORT") or os.environ.get("SMTP_PORT", "465"))
-    smtp_user = os.environ.get("UDS_SMTP_USER") or os.environ.get("SMTP_USER", "")
-    smtp_pass = os.environ.get("UDS_SMTP_PASSWORD") or os.environ.get("SMTP_PASSWORD", "")
+# Отправитель кода регистрации (подтверждение email) — всегда один и тот же адрес
+REGISTER_SENDER = os.environ.get("UDS_REGISTER_SENDER", "bint.kod@saou.ru")
 
-    print(f"[UDS SMTP] host={smtp_host} port={smtp_port} user={smtp_user} to={to_email} purpose={purpose}")
+# Пул отправителей кода входа — каждый раз выбирается случайный адрес,
+# чтобы усложнить фильтрацию писем как спама и скрыть системный источник
+LOGIN_SENDER_POOL = [
+    s.strip() for s in os.environ.get(
+        "UDS_LOGIN_SENDER_POOL", "t7@saou.ru,kj@ooo29.ru,hard_d@ooo29.ru"
+    ).split(",") if s.strip()
+]
 
-    if not smtp_host or not smtp_user:
-        raise RuntimeError("SMTP не настроен: заполните UDS_SMTP_HOST и UDS_SMTP_USER")
-    if not smtp_pass:
-        raise RuntimeError("SMTP пароль не задан: заполните UDS_SMTP_PASSWORD")
+
+def send_email_otp(cur, to_email: str, code: str, purpose: str) -> None:
+    """Отправляет OTP-код на email через SMTP от имени системного ящика.
+
+    purpose == 'email_verify' (регистрация сотрудника) — всегда с REGISTER_SENDER.
+    purpose == 'sms_login' (вход в УДС)                — со случайного адреса из LOGIN_SENDER_POOL.
+    Ящик-отправитель создаётся на хостинге автоматически через ISPmanager,
+    если он ещё не существует (см. mail.ensure_system_mailbox).
+    """
+    if purpose == "email_verify":
+        sender = REGISTER_SENDER
+    else:
+        pool = LOGIN_SENDER_POOL or [REGISTER_SENDER]
+        sender = random.choice(pool)
+
+    smtp_user = sender
+    try:
+        smtp_pass = mail.ensure_system_mailbox(cur, SCHEMA, sender)
+    except Exception as e:
+        # Резервный вариант: если авто-создание ящика недоступно —
+        # используем старый фиксированный ящик УДС (если он настроен).
+        fallback_user = os.environ.get("UDS_SMTP_USER", "")
+        fallback_pass = os.environ.get("UDS_SMTP_PASSWORD", "")
+        if not fallback_user or not fallback_pass:
+            raise RuntimeError(f"Не удалось подготовить ящик-отправитель {sender}: {e}")
+        smtp_user = fallback_user
+        smtp_pass = fallback_pass
+
+    print(f"[UDS SMTP] user={smtp_user} to={to_email} purpose={purpose}")
 
     if purpose == "email_verify":
         subject = "УДС САОУ — подтверждение email"
@@ -316,30 +342,8 @@ def send_email_otp(to_email: str, code: str, purpose: str) -> None:
             f"Если вы не входили в систему — немедленно сообщите Главе Правления."
         )
 
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"] = smtp_user
-    msg["To"] = to_email
-    msg.attach(MIMEText(text_body, "plain", "utf-8"))
-
-    import ssl
-    try:
-        if smtp_port == 465:
-            ctx = ssl.create_default_context()
-            with smtplib.SMTP_SSL(smtp_host, smtp_port, context=ctx, timeout=15) as s:
-                s.login(smtp_user, smtp_pass)
-                s.sendmail(smtp_user, [to_email], msg.as_string())
-        else:
-            with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as s:
-                s.ehlo()
-                s.starttls(context=ssl.create_default_context())
-                s.ehlo()
-                s.login(smtp_user, smtp_pass)
-                s.sendmail(smtp_user, [to_email], msg.as_string())
-        print(f"[UDS SMTP] OK: письмо отправлено на {to_email}")
-    except Exception as e:
-        print(f"[UDS SMTP] ОШИБКА: {e}")
-        raise
+    # Переиспользуем перебор SMTP-хостов из mail.py (работает и для saou.ru, и для ooo29.ru)
+    mail.send_external_email(smtp_user, smtp_pass, "УДС САОУ", to_email, subject, text_body)
 
 
 # ── Мини-УЦ "Управление УДС САОУ" ──────────────────────────────────────────────
@@ -480,7 +484,8 @@ def handler(event: dict, context) -> dict:
             code = otp_issue(cur, reg_login or target_email, "email_verify", 6, ttl_min=10)
             conn.commit()
             try:
-                send_email_otp(to_email, code, "email_verify")
+                send_email_otp(cur, to_email, code, "email_verify")
+                conn.commit()
             except Exception as e:
                 return _resp(500, {"error": f"Не удалось отправить email: {e}"})
             return _resp(200, {"ok": True, "hint": f"Код отправлен на {to_email[:4]}***"})
@@ -544,7 +549,8 @@ def handler(event: dict, context) -> dict:
             conn.commit()
             email_ok = False
             try:
-                send_email_otp(to_email, code, "sms_login")
+                send_email_otp(cur, to_email, code, "sms_login")
+                conn.commit()
                 email_ok = True
             except Exception:
                 pass

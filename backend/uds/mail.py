@@ -115,6 +115,66 @@ def decrypt_password(enc: str) -> str:
     return _fernet().decrypt(enc.encode()).decode()
 
 
+# ── Системные ящики-отправители (коды подтверждения/входа) ───────────────────
+
+def ensure_system_mailbox(cur, schema: str, email_address: str) -> str:
+    """Гарантирует, что системный ящик-отправитель существует на хостинге и в БД,
+    возвращает расшифрованный пароль для SMTP-авторизации.
+
+    Если записи нет — создаёт ящик через ISPmanager с новым паролем.
+    Если ящик уже числится активным — просто расшифровывает сохранённый пароль.
+    """
+    cur.execute(
+        f"SELECT password_enc, status FROM {schema}.system_mailboxes WHERE LOWER(email_address) = %s",
+        (email_address.lower(),)
+    )
+    row = cur.fetchone()
+    if row and row[1] == "active" and row[0]:
+        return decrypt_password(row[0])
+
+    if not isp_available():
+        raise RuntimeError(f"ISPmanager не настроен — не удаётся подготовить ящик {email_address}")
+
+    password = _gen_system_password(16)
+    try:
+        create_mailbox(email_address, password)
+    except Exception as e:
+        err = str(e)
+        # Ящик уже существует на хостинге — считаем, что пароль нам неизвестен,
+        # переустанавливаем его, чтобы гарантированно получить рабочий доступ.
+        if "already exist" in err.lower() or "уже сущест" in err.lower() or "exist" in err.lower():
+            set_mailbox_password(email_address, password)
+        else:
+            raise
+
+    enc = encrypt_password(password)
+    if row:
+        cur.execute(
+            f"""UPDATE {schema}.system_mailboxes
+                SET password_enc=%s, status='active', provider_status='created', updated_at=now()
+                WHERE LOWER(email_address)=%s""",
+            (enc, email_address.lower())
+        )
+    else:
+        cur.execute(
+            f"""INSERT INTO {schema}.system_mailboxes (email_address, password_enc, purpose, status, provider_status)
+                VALUES (%s, %s, %s, 'active', 'created')""",
+            (email_address, enc, _purpose_guess(email_address))
+        )
+    return password
+
+
+def _purpose_guess(email_address: str) -> str:
+    local = email_address.split("@")[0].lower()
+    return "email_verify" if "bint" in local or "kod" in local else "sms_login"
+
+
+def _gen_system_password(n: int = 16) -> str:
+    import string
+    chars = string.ascii_letters + string.digits
+    return "".join(random.choice(chars) for _ in range(n))
+
+
 # ── ISPmanager API (создание/смена пароля почтового ящика) ────────────────────
 
 def _isp_config():

@@ -155,8 +155,9 @@ export default function UdsEmployees({ login, token, perms, myRole, isAdmin }: P
       </div>
 
       {detail && (
-        <EmployeeDetail data={detail} login={login} token={token} perms={perms} myRole={myRole}
+        <EmployeeDetail data={detail} login={login} token={token} perms={perms} myRole={myRole} isAdmin={isAdmin}
           onChanged={() => { openDetail(detail.emp.login); load(); }}
+          onDeleted={() => { setDetail(null); load(); }}
           onClose={() => setDetail(null)} />
       )}
     </div>

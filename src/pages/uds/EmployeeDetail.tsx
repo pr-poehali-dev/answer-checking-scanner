@@ -38,15 +38,19 @@ interface Props {
   token: string;
   perms: UdsPerms;
   myRole: string;
+  isAdmin: boolean;
   onChanged?: () => void;
+  onDeleted?: () => void;
   onClose: () => void;
 }
 
-export default function EmployeeDetail({ data, login, token, perms, myRole, onChanged, onClose }: Props) {
+export default function EmployeeDetail({ data, login, token, perms, myRole, isAdmin, onChanged, onDeleted, onClose }: Props) {
   const { emp, logs } = data;
   const isHeadOrDeputy = myRole === "head" || myRole === "deputy";
   const [curators, setCurators] = useState<UdsCurator[]>([]);
   const [busy, setBusy] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
   // Смена пароля
@@ -77,6 +81,18 @@ export default function EmployeeDetail({ data, login, token, perms, myRole, onCh
       setMsg("Куратор назначен"); onChanged?.();
     } catch (e) { setErr((e as Error).message); }
     finally { setBusy(false); }
+  };
+
+  const doDeletePermanently = async () => {
+    setDeleting(true); setErr(""); setMsg("");
+    try {
+      await udsApi.deleteEmployee(login, token, emp.login);
+      onDeleted ? onDeleted() : onChanged?.();
+      onClose();
+    } catch (e) {
+      setErr((e as Error).message);
+      setDeleting(false);
+    }
   };
 
   const doResetPassword = async () => {
@@ -195,6 +211,36 @@ export default function EmployeeDetail({ data, login, token, perms, myRole, onCh
 
           {perms.can_cert && emp.login !== "admin" && (
             <EmployeeCertSection login={login} token={token} targetLogin={emp.login} />
+          )}
+
+          {/* Полное безвозвратное удаление — только Глава Правления (admin) */}
+          {isAdmin && emp.login !== "admin" && emp.login !== login && (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 space-y-2">
+              <p className="text-xs font-semibold flex items-center gap-1.5 text-destructive">
+                <Icon name="Trash2" size={13} /> Удалить сотрудника навсегда
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                Полностью удаляет учётную запись, почту и доступ. Действие необратимо.
+              </p>
+              {!deleteConfirm ? (
+                <button onClick={() => setDeleteConfirm(true)}
+                  className="text-xs px-3 py-1.5 border border-destructive/40 text-destructive rounded hover:bg-destructive/10">
+                  Удалить навсегда
+                </button>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <button onClick={doDeletePermanently} disabled={deleting}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-destructive text-white text-xs font-semibold rounded hover:opacity-90 disabled:opacity-50">
+                    {deleting ? <Icon name="Loader2" size={13} className="animate-spin" /> : <Icon name="Trash2" size={13} />}
+                    Точно удалить
+                  </button>
+                  <button onClick={() => setDeleteConfirm(false)} disabled={deleting}
+                    className="px-3 py-1.5 border border-border text-xs rounded hover:bg-muted disabled:opacity-50">
+                    Отмена
+                  </button>
+                </div>
+              )}
+            </div>
           )}
 
           <div>

@@ -542,6 +542,9 @@ export const udsApi = {
   block: (login: string, token: string, targetLogin: string, blocked: boolean) =>
     udsRequest<{ ok: boolean }>("block", "POST", login, token, { target_login: targetLogin, blocked }),
 
+  deleteEmployee: (login: string, token: string, targetLogin: string) =>
+    udsRequest<{ ok: boolean }>("delete-employee", "POST", login, token, { target_login: targetLogin }),
+
   auditLog: (login: string, token: string, targetLogin?: string) =>
     udsRequest<{ logs: UdsAuditEntry[] }>("audit-log", "GET", login, token, undefined, targetLogin ? { target_login: targetLogin } : {}),
 

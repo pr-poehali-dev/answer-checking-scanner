@@ -1178,6 +1178,41 @@ def handler(event: dict, context) -> dict:
             conn.commit()
             return _resp(200, {"ok": True})
 
+        # ── delete-employee — ПОЛНОЕ безвозвратное удаление сотрудника (только Глава) ──
+        if action == "delete-employee" and method == "POST":
+            if not caller.get("is_admin"):
+                return _resp(403, {"error": "Полное удаление сотрудника доступно только Главе Правления"})
+            tl = (body.get("target_login") or "").strip()
+            if not tl or tl == "admin":
+                return _resp(400, {"error": "Недопустимый сотрудник"})
+            cur = conn.cursor()
+            cur.execute(f"SELECT 1 FROM {SCHEMA}.panel_operators WHERE login = %s", (tl,))
+            if not cur.fetchone():
+                return _resp(404, {"error": "Сотрудник не найден"})
+
+            # Освобождаем подопечных этого куратора и снимаем ссылки в передачах
+            cur.execute(f"UPDATE {SCHEMA}.panel_operators SET curator_login = NULL WHERE curator_login = %s", (tl,))
+            cur.execute(
+                f"UPDATE {SCHEMA}.curator_transfers SET status = 'canceled' WHERE (employee_login = %s OR from_curator = %s OR to_curator = %s) AND status = 'pending'",
+                (tl, tl, tl)
+            )
+            # Отзываем активные сертификаты
+            cur.execute(
+                f"""UPDATE {SCHEMA}.uds_certificates SET status = 'revoked', revoked_by = %s, revoked_at = NOW()
+                    WHERE login = %s AND status IN ('assigned', 'issuing', 'active')""",
+                (caller["login"], tl)
+            )
+            # Удаляем почтовый ящик и одноразовые коды
+            cur.execute(f"DELETE FROM {SCHEMA}.mailboxes WHERE login = %s", (tl,))
+            cur.execute(f"DELETE FROM {SCHEMA}.uds_otp_codes WHERE login = %s", (tl,))
+            # Фиксируем в аудите ДО удаления записи о сотруднике (актор/цель — просто строки, без FK)
+            log_action(cur, caller["login"], my_role, "delete_employee_permanent", tl, None)
+            # Физическое удаление из УДС и системы пользователей
+            cur.execute(f"DELETE FROM {SCHEMA}.panel_operators WHERE login = %s", (tl,))
+            cur.execute(f"DELETE FROM {SCHEMA}.users WHERE login = %s", (tl,))
+            conn.commit()
+            return _resp(200, {"ok": True})
+
         # ── set-subrole — назначить/снять подроль (Глава/Зам) ────────────────
         if action == "set-subrole" and method == "POST":
             if not perms["can_assign_subrole"]:

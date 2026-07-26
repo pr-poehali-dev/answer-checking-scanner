@@ -9,7 +9,8 @@ POST /register — добавление пользователя админом
 POST /me — получить актуальный статус подписки (по токену)
 POST /activate-trial — активация пробного периода 5 дней (не более раза на IP и на устройство)
 POST /check-ai-limit — проверить/увеличить счётчик AI-запросов (trial: макс 5 в день)
-GET /users — список пользователей (admin)
+GET /users — список пользователей (admin), включая IP регистрации
+GET /ip-stats — IP-адреса с несколькими аккаунтами и история попыток пробного периода (admin)
 POST /toggle, /reset-password, /set-role — admin
 DELETE /delete — admin
 POST /grant-subscription — admin (выдать/продлить/отозвать подписку)
@@ -869,7 +870,8 @@ def handler(event: dict, context) -> dict:
             cur.execute(
                 f"""SELECT id, login, full_name, first_name, last_name, email, school, role, is_active, created_at,
                            subscription_status, subscription_plan, subscription_until,
-                           trial_until, trial_ai_calls_today, trial_ai_date, last_seen_at
+                           trial_until, trial_ai_calls_today, trial_ai_date, last_seen_at,
+                           registration_ip, email_confirmed
                     FROM {SCHEMA}.users ORDER BY created_at DESC"""
             )
             rows = cur.fetchall()
@@ -883,9 +885,63 @@ def handler(event: dict, context) -> dict:
                     "created_at": str(r[9]),
                     "subscription_plan": r[11],
                     "last_seen_at": r[16].isoformat() if r[16] else None,
+                    "registration_ip": r[17],
+                    "email_confirmed": r[18],
                     **sub,
                 })
             return _resp(200, {"users": users})
+        finally:
+            conn.close()
+
+    # ── GET ip-stats (admin) — регистрации, сгруппированные по IP-адресу ────
+    if method == "GET" and route == "ip-stats":
+        if not check_admin_token(headers):
+            return _resp(403, {"error": "Нет доступа"})
+
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            # IP-адреса, с которых зарегистрировано больше одного аккаунта
+            cur.execute(
+                f"""SELECT registration_ip, COUNT(*) AS cnt,
+                           ARRAY_AGG(login ORDER BY created_at) AS logins,
+                           MIN(created_at) AS first_seen, MAX(created_at) AS last_seen
+                    FROM {SCHEMA}.users
+                    WHERE registration_ip IS NOT NULL AND registration_ip != ''
+                    GROUP BY registration_ip
+                    HAVING COUNT(*) > 1
+                    ORDER BY cnt DESC, last_seen DESC
+                    LIMIT 200"""
+            )
+            rows = cur.fetchall()
+            suspicious_ips = [{
+                "ip_address": r[0], "accounts_count": r[1], "logins": r[2],
+                "first_seen": r[3].isoformat() if r[3] else None,
+                "last_seen": r[4].isoformat() if r[4] else None,
+            } for r in rows]
+
+            # Использования пробного периода — сколько раз данный IP/устройство пытались
+            cur.execute(
+                f"""SELECT ip_address, device_fingerprint, login, created_at
+                    FROM {SCHEMA}.trial_usage ORDER BY created_at DESC LIMIT 500"""
+            )
+            trial_rows = cur.fetchall()
+            trial_usage = [{
+                "ip_address": r[0], "device_fingerprint": r[1], "login": r[2],
+                "created_at": r[3].isoformat() if r[3] else None,
+            } for r in trial_rows]
+
+            cur.execute(f"SELECT COUNT(DISTINCT registration_ip) FROM {SCHEMA}.users WHERE registration_ip IS NOT NULL AND registration_ip != ''")
+            unique_ips = cur.fetchone()[0] or 0
+            cur.execute(f"SELECT COUNT(*) FROM {SCHEMA}.users")
+            total_users = cur.fetchone()[0] or 0
+
+            return _resp(200, {
+                "suspicious_ips": suspicious_ips,
+                "trial_usage": trial_usage,
+                "unique_ips": unique_ips,
+                "total_users": total_users,
+            })
         finally:
             conn.close()
 

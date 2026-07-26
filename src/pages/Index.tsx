@@ -17,6 +17,7 @@ import CollectiveSection from "@/components/scanner/CollectiveSection";
 import { SupportSection } from "@/components/scanner/SupportSection";
 import { MyMaterialsSection } from "@/components/scanner/MyMaterialsSection";
 import { ProjectSection } from "@/components/scanner/ProjectSection";
+import { AdminUsersSection } from "@/components/scanner/AdminUsersSection";
 import TokensModal from "@/components/TokensModal";
 import { authApi } from "@/lib/api";
 import LoginPage from "@/pages/LoginPage";
@@ -81,6 +82,7 @@ const SECTION_COMPONENTS: Record<Section, React.FC> = {
   myResults: ResultsSection,
   materials: MyMaterialsSection,
   project: ProjectSection,
+  adminUsers: AdminUsersSection,
 };
 
 // Разделы для нижней мобильной панели (самые частые)
@@ -273,6 +275,15 @@ export default function Index() {
             >
               <Icon name="Building2" size={16} fallback="Circle" />
               <span className="flex-1">Коллектив</span>
+            </div>
+          )}
+          {isAdminInLK && (
+            <div
+              className={`nav-item ${active === "adminUsers" ? "active" : ""}`}
+              onClick={() => navigate("adminUsers")}
+            >
+              <Icon name="ShieldAlert" size={16} fallback="Circle" />
+              <span className="flex-1">Пользователи и IP</span>
             </div>
           )}
         </nav>

@@ -76,6 +76,18 @@
       "expectedStatus": 403
     },
     {
+      "name": "GET users without admin token returns 403",
+      "method": "GET",
+      "path": "/?action=users",
+      "expectedStatus": 403
+    },
+    {
+      "name": "GET ip-stats without admin token returns 403",
+      "method": "GET",
+      "path": "/?action=ip-stats",
+      "expectedStatus": 403
+    },
+    {
       "name": "collective-by-token without params returns 400",
       "method": "GET",
       "path": "/?action=collective-by-token",

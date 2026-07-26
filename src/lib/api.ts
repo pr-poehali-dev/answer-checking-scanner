@@ -50,6 +50,30 @@ export interface UserRow extends SubscriptionInfo {
   subscription_plan?: string | null;
   last_seen_at?: string | null;
   ai_balance_kopecks?: number;
+  registration_ip?: string | null;
+  email_confirmed?: boolean;
+}
+
+export interface SuspiciousIp {
+  ip_address: string;
+  accounts_count: number;
+  logins: string[];
+  first_seen: string | null;
+  last_seen: string | null;
+}
+
+export interface TrialUsageRow {
+  ip_address: string | null;
+  device_fingerprint: string | null;
+  login: string;
+  created_at: string | null;
+}
+
+export interface IpStats {
+  suspicious_ips: SuspiciousIp[];
+  trial_usage: TrialUsageRow[];
+  unique_ips: number;
+  total_users: number;
 }
 
 async function request<T>(action: string, options: RequestInit & { token?: string } = {}): Promise<T> {
@@ -115,6 +139,9 @@ export const authApi = {
 
   listUsers: (token: string) =>
     request<{ users: UserRow[] }>("users", { method: "GET", token }),
+
+  ipStats: (token: string) =>
+    request<IpStats>("ip-stats", { method: "GET", token }),
 
   toggleUser: (token: string, login: string) =>
     request<{ login: string; is_active: boolean }>("toggle", {

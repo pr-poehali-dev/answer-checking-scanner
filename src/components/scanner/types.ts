@@ -15,7 +15,8 @@ export type Section =
   | "support"
   | "myResults"
   | "materials"
-  | "project";
+  | "project"
+  | "adminUsers";
 
 export const NAV_ITEMS: { id: Section; label: string; icon: string }[] = [
   { id: "works", label: "Работы", icon: "ClipboardList" },
@@ -78,6 +79,7 @@ export const SECTION_TITLES: Record<Section, string> = {
   myResults: "Мои результаты",
   materials: "Мои материалы",
   project: "Проект / Курсовая",
+  adminUsers: "Пользователи и IP-статистика",
 };
 
 export const WORK_TYPES = ["Проверочная работа", "Контрольная работа"] as const;

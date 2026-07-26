@@ -89,7 +89,9 @@ async function request<T>(action: string, options: RequestInit & { token?: strin
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(data.error || `Ошибка ${res.status}`);
+    const err = new Error(data.error || `Ошибка ${res.status}`) as Error & { data?: unknown };
+    err.data = data;
+    throw err;
   }
   return data as T;
 }
@@ -102,9 +104,21 @@ export const authApi = {
     }),
 
   signup: (payload: { first_name: string; last_name: string; email: string; password: string; school?: string; role?: "teacher" | "student"; study_group?: string; consent?: Record<string, string> }) =>
-    request<AuthUser & { id: number; success: boolean }>("signup", {
+    request<{ success: boolean; need_confirmation: boolean; login: string; email: string; role: UserRole }>("signup", {
       method: "POST",
       body: JSON.stringify(payload),
+    }),
+
+  confirmEmail: (login: string, code: string) =>
+    request<AuthUser & { success: boolean }>("confirm-email", {
+      method: "POST",
+      body: JSON.stringify({ login, code }),
+    }),
+
+  resendEmailCode: (login: string) =>
+    request<{ ok: boolean; hint: string }>("resend-email-code", {
+      method: "POST",
+      body: JSON.stringify({ login }),
     }),
 
   getLkVisibility: () =>
@@ -181,10 +195,10 @@ export const authApi = {
       { method: "POST", token, body: JSON.stringify(payload) }
     ),
 
-  activateTrial: (login: string) =>
+  activateTrial: (login: string, deviceFingerprint?: string) =>
     request<{ success: boolean; trial_active: boolean; trial_until: string; trial_ai_calls_today: number; trial_ai_limit: number }>(
       "activate-trial",
-      { method: "POST", body: JSON.stringify({ login }) }
+      { method: "POST", body: JSON.stringify({ login, device_fingerprint: deviceFingerprint }) }
     ),
 
   checkAiLimit: (login: string) =>

@@ -1,6 +1,7 @@
 // Глобальное хранилище приложения САОУ
 import { authApi } from "@/lib/api";
 import { yadisk, yadiskOAuth, yadiskStorage, ROOT_FOLDER, STUDENTS_FILE, WORKS_FILE, type YadiskUser } from "@/lib/yadisk";
+import { getDeviceFingerprint } from "@/lib/deviceFingerprint";
 
 // ── Персистентность сессии ─────────────────────────────────────────────────
 const SESSION_KEY = "aousp_session_v1";
@@ -311,7 +312,9 @@ export const appStore = {
     };
   },
 
-  login: async (login: string, password: string): Promise<{ ok: true; role: UserRole } | { ok: false; error: string }> => {
+  login: async (login: string, password: string): Promise<
+    { ok: true; role: UserRole } | { ok: false; error: string; needConfirmation?: boolean; login?: string }
+  > => {
     try {
       const user = await authApi.login(login.trim(), password);
       const newTeacher: Teacher = {
@@ -355,15 +358,32 @@ export const appStore = {
       }
       return { ok: true, role: user.role };
     } catch (e) {
-      return { ok: false, error: (e as Error).message || "Ошибка входа" };
+      const err = e as Error & { data?: { need_confirmation?: boolean; login?: string } };
+      return {
+        ok: false,
+        error: err.message || "Ошибка входа",
+        needConfirmation: err.data?.need_confirmation,
+        login: err.data?.login,
+      };
     }
   },
 
   signup: async (payload: { first_name: string; last_name: string; email: string; password: string; role?: "teacher" | "student"; study_group?: string; consent?: Record<string, string> }): Promise<
-    { ok: true; role: UserRole; login: string } | { ok: false; error: string }
+    { ok: true; login: string; email: string } | { ok: false; error: string }
   > => {
     try {
-      const user = await authApi.signup(payload);
+      const res = await authApi.signup(payload);
+      return { ok: true, login: res.login, email: res.email };
+    } catch (e) {
+      return { ok: false, error: (e as Error).message || "Ошибка регистрации" };
+    }
+  },
+
+  confirmEmail: async (login: string, code: string): Promise<
+    { ok: true; role: UserRole } | { ok: false; error: string }
+  > => {
+    try {
+      const user = await authApi.confirmEmail(login, code);
       const signupTeacher: Teacher = {
         login: user.login,
         name: user.full_name,
@@ -387,9 +407,18 @@ export const appStore = {
       saveSession(signupTeacher);
       state = { ...state, teacher: signupTeacher, storageMode: loadStorageMode(signupTeacher.login) };
       notify();
-      return { ok: true, role: user.role, login: user.login };
+      return { ok: true, role: user.role };
     } catch (e) {
-      return { ok: false, error: (e as Error).message || "Ошибка регистрации" };
+      return { ok: false, error: (e as Error).message || "Не удалось подтвердить email" };
+    }
+  },
+
+  resendEmailCode: async (login: string): Promise<{ ok: true; hint: string } | { ok: false; error: string }> => {
+    try {
+      const res = await authApi.resendEmailCode(login);
+      return { ok: true, hint: res.hint };
+    } catch (e) {
+      return { ok: false, error: (e as Error).message || "Не удалось отправить код" };
     }
   },
 
@@ -428,7 +457,7 @@ export const appStore = {
   activateTrial: async (): Promise<{ ok: true } | { ok: false; error: string }> => {
     if (!state.teacher) return { ok: false, error: "Не авторизован" };
     try {
-      const data = await authApi.activateTrial(state.teacher.login);
+      const data = await authApi.activateTrial(state.teacher.login, getDeviceFingerprint());
       state = {
         ...state,
         teacher: {

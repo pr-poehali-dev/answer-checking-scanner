@@ -33,7 +33,7 @@ function previewLogin(firstName: string, lastName: string): string {
   return base || "—";
 }
 
-type Mode = "login" | "signup";
+type Mode = "login" | "signup" | "confirm";
 
 export default function LoginPage({ onLogin, initialMode = "login", onBack }: LoginPageProps) {
   const [mode, setMode] = useState<Mode>(initialMode);
@@ -56,6 +56,12 @@ export default function LoginPage({ onLogin, initialMode = "login", onBack }: Lo
   const [loading, setLoading] = useState(false);
   const [agreedReg, setAgreedReg] = useState(false);
 
+  // confirm-email
+  const [confirmLogin, setConfirmLogin] = useState("");
+  const [confirmCode, setConfirmCode] = useState("");
+  const [confirmHint, setConfirmHint] = useState("");
+  const [resending, setResending] = useState(false);
+
   const generatedLogin = useMemo(
     () => previewLogin(firstName, lastName),
     [firstName, lastName],
@@ -67,8 +73,14 @@ export default function LoginPage({ onLogin, initialMode = "login", onBack }: Lo
     setLoading(true);
     const res = await appStore.login(login.trim(), password);
     setLoading(false);
-    if (res.ok) onLogin(res.role);
-    else setError(res.error || "Неверный логин или пароль");
+    if (res.ok) { onLogin(res.role); return; }
+    if (res.needConfirmation && res.login) {
+      setConfirmLogin(res.login);
+      setConfirmHint("Введите код, отправленный вам на почту при регистрации.");
+      setMode("confirm");
+      return;
+    }
+    setError(res.error || "Неверный логин или пароль");
   };
 
   const handleSignupSubmit = async (e: React.FormEvent) => {
@@ -89,8 +101,36 @@ export default function LoginPage({ onLogin, initialMode = "login", onBack }: Lo
       consent: buildConsent("registration"),
     });
     setLoading(false);
+    if (res.ok) {
+      setConfirmLogin(res.login);
+      setConfirmHint(`Мы отправили код подтверждения на ${res.email}`);
+      setMode("confirm");
+    } else {
+      setError(res.error || "Ошибка регистрации");
+    }
+  };
+
+  const handleConfirmSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    if (confirmCode.trim().length < 6) {
+      setError("Введите 6-значный код из письма");
+      return;
+    }
+    setLoading(true);
+    const res = await appStore.confirmEmail(confirmLogin, confirmCode.trim());
+    setLoading(false);
     if (res.ok) onLogin(res.role);
-    else setError(res.error || "Ошибка регистрации");
+    else setError(res.error || "Неверный код");
+  };
+
+  const handleResendCode = async () => {
+    setResending(true);
+    setError("");
+    const res = await appStore.resendEmailCode(confirmLogin);
+    setResending(false);
+    if (res.ok) setConfirmHint(res.hint);
+    else setError(res.error);
   };
 
   const switchMode = (m: Mode) => {
@@ -121,36 +161,86 @@ export default function LoginPage({ onLogin, initialMode = "login", onBack }: Lo
         </div>
 
         {/* Tabs */}
-        <div className="grid grid-cols-2 gap-1 p-1 bg-muted rounded-sm mb-3">
-          <button
-            type="button"
-            onClick={() => switchMode("login")}
-            className={`py-2 text-xs font-semibold rounded-sm transition-colors ${
-              mode === "login" ? "bg-white text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            Вход
-          </button>
-          <button
-            type="button"
-            onClick={() => switchMode("signup")}
-            className={`py-2 text-xs font-semibold rounded-sm transition-colors ${
-              mode === "signup" ? "bg-white text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            Регистрация
-          </button>
-        </div>
+        {mode !== "confirm" && (
+          <div className="grid grid-cols-2 gap-1 p-1 bg-muted rounded-sm mb-3">
+            <button
+              type="button"
+              onClick={() => switchMode("login")}
+              className={`py-2 text-xs font-semibold rounded-sm transition-colors ${
+                mode === "login" ? "bg-white text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Вход
+            </button>
+            <button
+              type="button"
+              onClick={() => switchMode("signup")}
+              className={`py-2 text-xs font-semibold rounded-sm transition-colors ${
+                mode === "signup" ? "bg-white text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Регистрация
+            </button>
+          </div>
+        )}
 
         {/* Form */}
         <div className="border border-border rounded-sm bg-white shadow-sm">
           <div className="px-6 py-4 border-b border-border bg-muted">
             <p className="text-sm font-semibold text-center">
-              {mode === "login" ? "Вход в систему САОУ" : "Регистрация в системе САОУ"}
+              {mode === "login" ? "Вход в систему САОУ" : mode === "signup" ? "Регистрация в системе САОУ" : "Подтверждение email"}
             </p>
           </div>
 
-          {mode === "login" ? (
+          {mode === "confirm" ? (
+            <form onSubmit={handleConfirmSubmit} className="p-6 space-y-4">
+              <div className="flex items-start gap-2.5 p-3 rounded-sm bg-primary/5 border border-primary/20">
+                <Icon name="MailCheck" size={16} className="text-primary flex-shrink-0 mt-0.5" fallback="Mail" />
+                <p className="text-xs text-muted-foreground leading-relaxed">{confirmHint}</p>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1.5">Код из письма</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={confirmCode}
+                  onChange={e => setConfirmCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  placeholder="000000"
+                  autoFocus
+                  className="w-full px-3 py-2.5 border border-border rounded-sm text-center text-lg tracking-[0.4em] font-semibold focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+
+              {error && (
+                <div className="flex items-center gap-2 p-3 rounded-sm bg-destructive/5 border border-destructive/20">
+                  <Icon name="AlertCircle" size={14} className="text-destructive flex-shrink-0" />
+                  <p className="text-xs text-destructive">{error}</p>
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={loading || confirmCode.length < 6}
+                className="w-full flex items-center justify-center gap-2 py-2.5 bg-primary text-primary-foreground text-sm font-semibold rounded-sm hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loading ? (
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : (
+                  <Icon name="CheckCircle2" size={15} />
+                )}
+                {loading ? "Проверяем..." : "Подтвердить"}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleResendCode}
+                disabled={resending}
+                className="w-full text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+              >
+                {resending ? "Отправляем..." : "Отправить код ещё раз"}
+              </button>
+            </form>
+          ) : mode === "login" ? (
             <form onSubmit={handleLoginSubmit} className="p-6 space-y-4">
               <div>
                 <label className="text-xs text-muted-foreground block mb-1.5">Логин или email</label>

@@ -112,6 +112,26 @@ def _find_anchors(gray, debug=None):
                 continue
             if mean_b > 150:
                 continue
+            # Реперы (квадраты) и закрашенные кружки ответов ОДИНАКОВОГО
+            # размера (см. template.py: anc == sq), поэтому size+fill их не
+            # различают — на полностью заполненном бланке десятки закрашенных
+            # кружков ложно проходят как "реперы". Надёжный признак: у
+            # СПЛОШНОГО КВАДРАТА тёмные пиксели доходят до самых углов bbox,
+            # а у ЗАКРАШЕННОГО КРУГА (вписан в квадрат) углы bbox светлые —
+            # там фон бумаги. Проверяем яркость всех 4 углов.
+            csz = max(2, int(min(cw, ch) * 0.18))
+            corner_pts = [(x, y), (x + cw - csz, y),
+                          (x, y + ch - csz), (x + cw - csz, y + ch - csz)]
+            corner_vals = []
+            for (px_, py_) in corner_pts:
+                px_ = min(max(px_, 0), gray.shape[1] - csz)
+                py_ = min(max(py_, 0), gray.shape[0] - csz)
+                patch = gray[py_:py_+csz, px_:px_+csz]
+                if patch.size:
+                    corner_vals.append(float(np.mean(patch)))
+            corner_mean = float(np.mean(corner_vals)) if corner_vals else 255.0
+            if corner_mean > 130:  # светлые углы = закрашенный кружок, не репер
+                continue
             cx, cy_ = x + cw // 2, y + ch // 2
             key = (cx // 8, cy_ // 8)
             if key in seen:
@@ -569,17 +589,21 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
     dbg_rows_dist = []
 
     if not anchors:
+        # Сетку ответов не удалось привязать к реперам, но QR-код ученика —
+        # независимая зона: пробуем прочитать его в любом случае, чтобы хотя бы
+        # код был определён (не блокируем результат целиком одной неудачей).
+        code_fallback, dbg_code_fallback = _read_qr_code(img, gray)
         return {
             "answers": [""] * questions_count,
             "confidences": [0.0] * questions_count,
-            "code": "?????",
+            "code": code_fallback or "?????",
             "code_confs": [0.0] * 5,
             "squares_found": dbg_anchors,
             "answer_rows": 0,
-            "code_rows": 0,
+            "code_rows": len(code_fallback),
             "dbg_fills": [],
             "dbg_rows_dist": ["no_anchors", f"cands={dbg_anchors}", dbg_find],
-            "dbg_code": {},
+            "dbg_code": dbg_code_fallback,
         }
 
     # tl,tr,bl,br = ЦЕНТРЫ якорей ответов

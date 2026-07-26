@@ -95,7 +95,7 @@ export default function UdsDashboard({ session, tab, setTab, logout, onProfileUp
           <UdsEmployees login={session.login} token={session.token} perms={perms} myRole={session.panel_role} isAdmin={!!session.is_admin} />
         )}
         {tab === "wards" && (
-          <MyWards login={session.login} token={session.token} perms={perms} myRole={session.panel_role} />
+          <MyWards login={session.login} token={session.token} perms={perms} myRole={session.panel_role} isAdmin={!!session.is_admin} />
         )}
         {tab === "users" && (
           <UdsUsers login={session.login} token={session.token} perms={perms} />

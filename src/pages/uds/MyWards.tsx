@@ -9,10 +9,11 @@ interface Props {
   token: string;
   perms: UdsPerms;
   myRole: string;
+  isAdmin: boolean;
 }
 
 /** Вкладка «Мои подопечные» — сотрудники, куратором которых является текущий пользователь. */
-export default function MyWards({ login, token, perms, myRole }: Props) {
+export default function MyWards({ login, token, perms, myRole, isAdmin }: Props) {
   const [wards, setWards] = useState<UdsEmployee[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -109,8 +110,9 @@ export default function MyWards({ login, token, perms, myRole }: Props) {
       </div>
 
       {detail && (
-        <EmployeeDetail data={detail} login={login} token={token} perms={perms} myRole={myRole}
+        <EmployeeDetail data={detail} login={login} token={token} perms={perms} myRole={myRole} isAdmin={isAdmin}
           onChanged={() => { openDetail(detail.emp.login); load(); }}
+          onDeleted={() => { setDetail(null); load(); }}
           onClose={() => setDetail(null)} />
       )}
     </div>

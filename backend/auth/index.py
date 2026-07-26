@@ -1,10 +1,13 @@
 """
 API авторизации и управления пользователями АОУСПТ.
 POST /login — вход (учитель/админ/tester)
-POST /signup — самостоятельная регистрация (имя, фамилия, email, пароль) — логин генерируется автоматически
+POST /signup — самостоятельная регистрация (имя, фамилия, email, пароль) — логин генерируется автоматически,
+              требуется подтверждение email кодом (см. /confirm-email)
+POST /confirm-email — подтвердить 6-значный код с почты, выдать рабочий токен
+POST /resend-email-code — повторно отправить код подтверждения email
 POST /register — добавление пользователя админом
 POST /me — получить актуальный статус подписки (по токену)
-POST /activate-trial — активация пробного периода 5 дней
+POST /activate-trial — активация пробного периода 5 дней (не более раза на IP и на устройство)
 POST /check-ai-limit — проверить/увеличить счётчик AI-запросов (trial: макс 5 в день)
 GET /users — список пользователей (admin)
 POST /toggle, /reset-password, /set-role — admin
@@ -16,10 +19,14 @@ POST /maintenance — обновить список разделов на ТО (
 import json
 import os
 import re
+import ssl
+import random
+import smtplib
 import hashlib
 import hmac
 import secrets
 import psycopg2
+from email.mime.text import MIMEText
 from datetime import datetime, timedelta
 
 CORS = {
@@ -267,6 +274,82 @@ def is_valid_email(email: str) -> bool:
     return bool(email and EMAIL_RE.match(email))
 
 
+# ── Подтверждение email при регистрации ──────────────────────────────────────
+EMAIL_CONFIRM_TTL_MIN = 15
+SMTP_HOST = os.environ.get("UDS_SMTP_HOST", "").strip()
+SMTP_PORT = int(os.environ.get("UDS_SMTP_PORT") or "465")
+SMTP_USER = os.environ.get("UDS_SMTP_USER", "").strip()
+SMTP_PASSWORD = os.environ.get("UDS_SMTP_PASSWORD", "").strip()
+
+
+def gen_email_code() -> str:
+    return "".join(str(random.randint(0, 9)) for _ in range(6))
+
+
+def issue_email_code(cur, login: str) -> str:
+    """Инвалидирует старые коды и создаёт новый 6-значный код подтверждения email."""
+    cur.execute(
+        f"UPDATE {SCHEMA}.email_verify_codes SET used = TRUE WHERE login = %s AND used = FALSE",
+        (login,)
+    )
+    code = gen_email_code()
+    expires = datetime.utcnow() + timedelta(minutes=EMAIL_CONFIRM_TTL_MIN)
+    cur.execute(
+        f"""INSERT INTO {SCHEMA}.email_verify_codes (login, code, expires_at)
+            VALUES (%s, %s, %s)""",
+        (login, code, expires)
+    )
+    return code
+
+
+def verify_email_code(cur, login: str, code: str) -> str:
+    """Возвращает 'ok', 'wrong', 'expired' или 'limit'."""
+    cur.execute(
+        f"""SELECT id, code, expires_at, attempts FROM {SCHEMA}.email_verify_codes
+            WHERE login = %s AND used = FALSE ORDER BY created_at DESC LIMIT 1""",
+        (login,)
+    )
+    row = cur.fetchone()
+    if not row:
+        return "expired"
+    code_id, stored_code, expires_at, attempts = row
+    if datetime.utcnow() > expires_at:
+        cur.execute(f"UPDATE {SCHEMA}.email_verify_codes SET used = TRUE WHERE id = %s", (code_id,))
+        return "expired"
+    if attempts >= 5:
+        return "limit"
+    if (code or "").strip() != stored_code:
+        cur.execute(f"UPDATE {SCHEMA}.email_verify_codes SET attempts = attempts + 1 WHERE id = %s", (code_id,))
+        return "wrong"
+    cur.execute(f"UPDATE {SCHEMA}.email_verify_codes SET used = TRUE WHERE id = %s", (code_id,))
+    return "ok"
+
+
+def send_confirmation_email(to_email: str, code: str) -> None:
+    if not (SMTP_HOST and SMTP_USER and SMTP_PASSWORD):
+        raise RuntimeError("Отправка email не настроена")
+    subject = "САОУ — подтверждение регистрации"
+    text_body = (
+        f"Ваш код подтверждения регистрации в системе САОУ:\n\n"
+        f"  {code}\n\n"
+        f"Код действует {EMAIL_CONFIRM_TTL_MIN} минут. Если вы не регистрировались — просто проигнорируйте это письмо."
+    )
+    msg = MIMEText(text_body, "plain", "utf-8")
+    msg["Subject"] = subject
+    msg["From"] = f"САОУ <{SMTP_USER}>"
+    msg["To"] = to_email
+    ctx = ssl.create_default_context()
+    if SMTP_PORT == 465:
+        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, context=ctx, timeout=15) as s:
+            s.login(SMTP_USER, SMTP_PASSWORD)
+            s.sendmail(SMTP_USER, [to_email], msg.as_string())
+    else:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as s:
+            s.ehlo(); s.starttls(context=ctx); s.ehlo()
+            s.login(SMTP_USER, SMTP_PASSWORD)
+            s.sendmail(SMTP_USER, [to_email], msg.as_string())
+
+
 # ── Журнал согласий (доказательная база) ────────────────────────────────────
 
 def get_client_ip(event: dict, headers: dict) -> str:
@@ -360,15 +443,14 @@ def handler(event: dict, context) -> dict:
 
             login = generate_login(first_name, last_name, cur)
             pw_hash = hash_password(password)          # pbkdf2 + соль
-            token = _make_token(role, login, pw_hash)
-            token_hash = hashlib.sha256(token.encode()).hexdigest()
+            reg_ip = get_client_ip(event, headers)
             cur.execute(
                 f"""INSERT INTO {SCHEMA}.users
                     (login, password_hash, full_name, first_name, last_name, email, school, role,
-                     created_by, subscription_status, auth_token_hash, study_group)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'self', 'none', %s, %s) RETURNING id""",
+                     created_by, subscription_status, study_group, email_confirmed, registration_ip)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'self', 'none', %s, FALSE, %s) RETURNING id""",
                 (login, pw_hash, full_name, first_name, last_name, email, school, role,
-                 token_hash, study_group or None)
+                 study_group or None, reg_ip or None)
             )
             user_id = cur.fetchone()[0]
             # Фиксируем согласие с офертой и политикой (доказательная база)
@@ -377,20 +459,97 @@ def handler(event: dict, context) -> dict:
                 email=email, phone=None,
                 context=(body.get("consent") or {}).get("context") or "registration",
                 consent=body.get("consent") or {},
-                ip=get_client_ip(event, headers),
+                ip=reg_ip,
                 user_agent=headers.get("user-agent", ""),
             )
+            code = issue_email_code(cur, login)
+            try:
+                send_confirmation_email(email, code)
+            except Exception as e:
+                conn.rollback()
+                return _resp(500, {"error": f"Не удалось отправить код на email: {e}"})
             conn.commit()
             return _resp(200, {
-                "success": True, "id": user_id, "login": login, "role": role,
-                "full_name": full_name, "first_name": first_name, "last_name": last_name,
-                "email": email, "school": school, "study_group": study_group,
-                "token": token, "subscription_status": "none",
-                "subscription_active": False, "subscription_until": None,
+                "success": True, "need_confirmation": True, "login": login,
+                "email": email, "role": role,
             })
         except psycopg2.errors.UniqueViolation:
             conn.rollback()
             return _resp(409, {"error": "Логин или email уже заняты"})
+        finally:
+            conn.close()
+
+    # ── POST confirm-email — подтвердить код и получить рабочий токен ───────
+    if method == "POST" and route == "confirm-email":
+        login = (body.get("login") or "").strip()
+        code = (body.get("code") or "").strip()
+        if not login or not code:
+            return _resp(400, {"error": "Укажите login и код"})
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            result = verify_email_code(cur, login, code)
+            if result == "expired":
+                conn.commit()
+                return _resp(400, {"error": "Код истёк. Запросите новый."})
+            if result == "limit":
+                conn.commit()
+                return _resp(429, {"error": "Превышено число попыток. Запросите новый код."})
+            if result == "wrong":
+                conn.commit()
+                return _resp(400, {"error": "Неверный код. Попробуйте ещё раз."})
+
+            cur.execute(
+                f"""SELECT password_hash, full_name, first_name, last_name, email, school, role, is_active
+                    FROM {SCHEMA}.users WHERE login = %s""",
+                (login,)
+            )
+            row = cur.fetchone()
+            if not row:
+                return _resp(404, {"error": "Пользователь не найден"})
+            pw_hash, full_name, first_name, last_name, email, school, role, is_active = row
+            if not is_active:
+                return _resp(403, {"error": "Аккаунт заблокирован. Обратитесь к администратору."})
+
+            token = _make_token(role, login, pw_hash)
+            token_hash = hashlib.sha256(token.encode()).hexdigest()
+            cur.execute(
+                f"UPDATE {SCHEMA}.users SET email_confirmed = TRUE, auth_token_hash = %s WHERE login = %s",
+                (token_hash, login)
+            )
+            conn.commit()
+            return _resp(200, {
+                "success": True, "login": login, "role": role,
+                "full_name": full_name, "first_name": first_name, "last_name": last_name,
+                "email": email, "school": school, "token": token,
+                "subscription_status": "none", "subscription_active": False, "subscription_until": None,
+            })
+        finally:
+            conn.close()
+
+    # ── POST resend-email-code — повторно отправить код подтверждения ───────
+    if method == "POST" and route == "resend-email-code":
+        login = (body.get("login") or "").strip()
+        if not login:
+            return _resp(400, {"error": "Укажите login"})
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(f"SELECT email, email_confirmed FROM {SCHEMA}.users WHERE login = %s", (login,))
+            row = cur.fetchone()
+            if not row:
+                return _resp(404, {"error": "Пользователь не найден"})
+            email, confirmed = row
+            if confirmed:
+                return _resp(400, {"error": "Email уже подтверждён"})
+            code = issue_email_code(cur, login)
+            try:
+                send_confirmation_email(email, code)
+            except Exception as e:
+                conn.rollback()
+                return _resp(500, {"error": f"Не удалось отправить email: {e}"})
+            conn.commit()
+            return _resp(200, {"ok": True, "hint": f"Код отправлен на {email[:3]}***"})
         finally:
             conn.close()
 
@@ -431,7 +590,7 @@ def handler(event: dict, context) -> dict:
             cur.execute(
                 f"""SELECT login, password_hash, full_name, first_name, last_name, email, school, role, is_active,
                           subscription_status, subscription_until,
-                          trial_until, trial_ai_calls_today, trial_ai_date, ai_balance_kopecks
+                          trial_until, trial_ai_calls_today, trial_ai_date, ai_balance_kopecks, email_confirmed
                     FROM {SCHEMA}.users
                     WHERE login = %s OR LOWER(email) = LOWER(%s)
                     LIMIT 1""",
@@ -446,10 +605,15 @@ def handler(event: dict, context) -> dict:
                 return _resp(401, {"error": "Неверный логин или пароль"})
 
             (login, stored_ph, full_name, first_name, last_name, email, school, role, is_active,
-             sub_status, sub_until, trial_until, trial_ai_calls_today, trial_ai_date, ai_balance_kopecks) = row
+             sub_status, sub_until, trial_until, trial_ai_calls_today, trial_ai_date, ai_balance_kopecks,
+             email_confirmed) = row
 
             if not is_active:
                 return _resp(403, {"error": "Аккаунт заблокирован. Обратитесь к администратору."})
+
+            if not email_confirmed:
+                return _resp(403, {"error": "Email не подтверждён. Проверьте почту и введите код из письма.",
+                                    "need_confirmation": True, "login": login})
 
             # Если пароль хранился в старом sha256 — обновляем на pbkdf2 налету
             new_ph = stored_ph
@@ -531,8 +695,10 @@ def handler(event: dict, context) -> dict:
     # ── POST activate-trial ──────────────────────────────────────────────────
     if method == "POST" and route in ("activate-trial", "activate_trial"):
         login = (body.get("login") or "").strip()
+        device_fp = (body.get("device_fingerprint") or "").strip()[:128]
         if not login:
             return _resp(400, {"error": "Укажите login"})
+        client_ip = get_client_ip(event, headers)
         conn = get_conn()
         try:
             cur = conn.cursor()
@@ -551,9 +717,26 @@ def handler(event: dict, context) -> dict:
             if sub_until and isinstance(sub_until, datetime) and sub_until > now:
                 return _resp(400, {"error": "У вас уже есть активная подписка"})
 
-            # Trial уже был активирован
+            # Trial уже был активирован этим аккаунтом
             if trial_until is not None:
                 return _resp(400, {"error": "Пробный период уже был использован"})
+
+            # Пробный период — не более одного раза на IP-адрес и на устройство,
+            # даже если создать новый аккаунт с другим email.
+            if client_ip:
+                cur.execute(
+                    f"SELECT login FROM {SCHEMA}.trial_usage WHERE ip_address = %s",
+                    (client_ip,)
+                )
+                if cur.fetchone():
+                    return _resp(403, {"error": "С этого IP-адреса пробный период уже активировался ранее"})
+            if device_fp:
+                cur.execute(
+                    f"SELECT login FROM {SCHEMA}.trial_usage WHERE device_fingerprint = %s",
+                    (device_fp,)
+                )
+                if cur.fetchone():
+                    return _resp(403, {"error": "На этом устройстве пробный период уже активировался ранее"})
 
             new_trial_until = now + timedelta(days=TRIAL_DAYS)
             cur.execute(
@@ -562,6 +745,15 @@ def handler(event: dict, context) -> dict:
                     WHERE login = %s""",
                 (new_trial_until, login)
             )
+            try:
+                cur.execute(
+                    f"""INSERT INTO {SCHEMA}.trial_usage (ip_address, device_fingerprint, login)
+                        VALUES (%s, %s, %s)""",
+                    (client_ip or None, device_fp or None, login)
+                )
+            except psycopg2.errors.UniqueViolation:
+                conn.rollback()
+                return _resp(403, {"error": "Пробный период с этого IP-адреса или устройства уже был использован"})
             conn.commit()
             return _resp(200, {
                 "success": True,

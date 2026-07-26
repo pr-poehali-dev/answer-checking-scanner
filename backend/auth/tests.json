@@ -28,6 +28,27 @@
       "expectedStatus": 400
     },
     {
+      "name": "Confirm-email without login/code returns 400",
+      "method": "POST",
+      "path": "/?action=confirm-email",
+      "body": {},
+      "expectedStatus": 400
+    },
+    {
+      "name": "Resend-email-code without login returns 400",
+      "method": "POST",
+      "path": "/?action=resend-email-code",
+      "body": {},
+      "expectedStatus": 400
+    },
+    {
+      "name": "Confirm-email unknown login returns 400 (no active code)",
+      "method": "POST",
+      "path": "/?action=confirm-email",
+      "body": { "login": "unknown_login_xyz", "code": "000000" },
+      "expectedStatus": 400
+    },
+    {
       "name": "Check AI limit without login returns 400",
       "method": "POST",
       "path": "/?action=check-ai-limit",

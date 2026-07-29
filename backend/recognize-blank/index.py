@@ -223,11 +223,58 @@ def _select_corner_anchors(cands, img_w, img_h, x_off=0, y_off=0,
     # Санити-проверки геометрии прямоугольника реперов.
     if tl is tr or bl is br or tl is bl or tr is br:
         return None
+
+    tl = (float(tl[0]), float(tl[1])); tr = (float(tr[0]), float(tr[1]))
+    bl = (float(bl[0]), float(bl[1])); br = (float(br[0]), float(br[1]))
+
+    # ── Коррекция потерянного угла при наклоне фото / тени ────────────────────
+    # Реперы образуют (почти) параллелограмм: левая и правая стороны равной
+    # высоты, верх и низ равной ширины. Если один угол не задетектился и вместо
+    # него выбран посторонний кандидат, одна из сторон резко «короче». Находим
+    # такую аномалию и достраиваем дефектный угол по трём остальным
+    # (P = соседний1 + соседний2 − противоположный).
+    h_left = bl[1] - tl[1]      # высота левой стороны
+    h_right = br[1] - tr[1]     # высота правой стороны
+    w_top = tr[0] - tl[0]       # ширина верхней стороны
+    w_bot = br[0] - bl[0]       # ширина нижней стороны
+    ref_h = max(h_left, h_right, 1.0)
+    ref_w = max(w_top, w_bot, 1.0)
+    bad = None
+    # Правая сторона заметно короче левой → нижний-правый (или верхний-правый) угол ложный
+    if abs(h_left - h_right) > ref_h * 0.20:
+        # Тот из правых углов, что ломает высоту: сравниваем с «идеальной» высотой
+        if h_right < h_left:
+            # правая сторона коротка: br слишком высоко ИЛИ tr слишком низко.
+            # Обычно теряется НИЖНИЙ угол (тень внизу) → чиним br.
+            bad = "br"
+        else:
+            bad = "tr"
+    elif abs(w_top - w_bot) > ref_w * 0.20:
+        if w_bot < w_top:
+            bad = "br" if br[0] < tr[0] + w_top * 0.5 else "bl"
+        else:
+            bad = "tr" if tr[0] < br[0] + w_bot * 0.5 else "tl"
+
+    if bad == "br":
+        br = (tr[0] + bl[0] - tl[0], tr[1] + bl[1] - tl[1])
+    elif bad == "bl":
+        bl = (tl[0] + br[0] - tr[0], tl[1] + br[1] - tr[1])
+    elif bad == "tr":
+        tr = (tl[0] + br[0] - bl[0], tl[1] + br[1] - bl[1])
+    elif bad == "tl":
+        tl = (tr[0] + bl[0] - br[0], tr[1] + bl[1] - br[1])
+
     if not (tl[0] < tr[0] - 5 and bl[0] < br[0] - 5):
         return None  # левые должны быть левее правых
     if not (tl[1] < bl[1] - 5 and tr[1] < br[1] - 5):
         return None  # верхние выше нижних
-    return tl, tr, bl, br
+    # Координаты используются как индексы срезов — возвращаем целыми.
+    return (
+        (int(round(tl[0])), int(round(tl[1]))),
+        (int(round(tr[0])), int(round(tr[1]))),
+        (int(round(bl[0])), int(round(bl[1]))),
+        (int(round(br[0])), int(round(br[1]))),
+    )
 
 
 # ── Детектирование квадратов ответов прямо с изображения ─────────────────────
@@ -304,6 +351,51 @@ def _darkness(gray, cx, cy, cw, ch, thr_value: int = 100) -> float:
         return 0.0
     bw = (roi < thr_value).astype(np.uint8)
     return float(np.mean(bw))
+
+
+def _local_darkness(gray, cx, cy, cw, ch) -> float:
+    """Заливка кружка через ЛОКАЛЬНЫЙ порог (Оцу по окрестности). Устойчиво к
+    теням и неравномерному освещению: сравнивает пиксели кружка с фоном ВОКРУГ
+    него, а не с глобальным порогом. Возвращает долю тёмных пикселей центра."""
+    cx = int(round(cx)); cy = int(round(cy))
+    cw = int(round(cw)); ch = int(round(ch))
+    sz = max(10, int(min(cw, ch) * 0.72))
+    # Окно локального фона — чуть шире кружка
+    bg = max(sz + 6, int(sz * 1.8))
+    bx1 = max(0, cx - bg // 2); by1 = max(0, cy - bg // 2)
+    bx2 = min(gray.shape[1], cx + bg // 2); by2 = min(gray.shape[0], cy + bg // 2)
+    patch = gray[by1:by2, bx1:bx2]
+    if patch.size == 0:
+        return 0.0
+    # Локальный порог = среднее между медианой фона и минимумом (чернила)
+    bg_med = float(np.median(patch))
+    dark_min = float(np.min(patch))
+    local_thr = dark_min + (bg_med - dark_min) * 0.5
+    local_thr = max(40.0, min(local_thr, bg_med - 15))
+    x1 = max(0, cx - sz // 2); y1 = max(0, cy - sz // 2)
+    x2 = min(gray.shape[1], cx + sz // 2); y2 = min(gray.shape[0], cy + sz // 2)
+    roi = gray[y1:y2, x1:x2]
+    if roi.size == 0:
+        return 0.0
+    return float(np.mean(roi < local_thr))
+
+
+def _best_darkness(gray, cx, cy, cw, ch, thr_value: int = 100, search: int = 0) -> float:
+    """Максимальная заливка кружка с небольшим поиском преимущественно по X
+    (горизонтальное смещение сетки типичнее). Использует локальный порог —
+    устойчиво к теням. Вертикальный поиск ограничен, чтобы не захватить
+    соседнюю строку."""
+    if search <= 0:
+        return _local_darkness(gray, cx, cy, cw, ch)
+    best = 0.0
+    sx = search
+    sy = max(2, search // 3)   # по Y ищем скромно, чтобы не задеть соседнюю строку
+    for dy in range(-sy, sy + 1, max(2, sy)):
+        for dx in range(-sx, sx + 1, max(2, sx // 2)):
+            f = _local_darkness(gray, cx + dx, cy + dy, cw, ch)
+            if f > best:
+                best = f
+    return best
 
 
 # ── Распознавание кружков кода ────────────────────────────────────────────────
@@ -609,45 +701,75 @@ def _split_blocks(values, n_blocks, min_gap):
     return blocks
 
 
+def _column_step(cx_list, est_step):
+    """Определяет ИСТИННЫЙ межколоночный шаг как медиану кластеризованных
+    X-позиций кружков. Устойчив к выбросам (одиночный кружок сбоку не искажает
+    шаг, в отличие от span/(n-1))."""
+    centers = _cluster_1d(cx_list, 0, tol=est_step * 0.5)
+    if len(centers) < 2:
+        return None
+    diffs = [centers[i + 1] - centers[i] for i in range(len(centers) - 1)]
+    # Межколоночный шаг — самые МАЛЫЕ разности (между блоками разрыв большой).
+    small = sorted(d for d in diffs if d < est_step * 2.0)
+    if not small:
+        return None
+    return float(np.median(small))
+
+
 def _build_columns(cx_list, n_cols, n_opts, est_step):
-    """Строит центры всех колонок кружков: делит на n_cols блоков, в каждом —
-    n_opts колонок, РАВНОМЕРНО между крайними кружками блока."""
+    """Строит центры всех колонок кружков: делит на n_cols блоков, и в каждом
+    от ЛЕВОГО края откладывает n_opts колонок с общим межколоночным шагом.
+    Общий шаг устойчивее, чем span/(n-1) для отдельного блока (не ломается от
+    одиночного кружка-выброса сбоку)."""
     if not cx_list:
         return []
-    # Разрыв между блоками (левый/правый) заметно больше межколоночного шага.
     blocks = _split_blocks(cx_list, n_cols, min_gap=est_step * 2.5)
     if len(blocks) != n_cols:
+        return []
+    step = _column_step(cx_list, est_step)
+    if step is None or step < est_step * 0.4:
         return []
     centers = []
     for blk in blocks:
         if len(blk) < 2:
             return []
-        lo, hi = min(blk), max(blk)
-        span = hi - lo
         if n_opts == 1:
-            centers.append((lo + hi) / 2)
+            centers.append((min(blk) + max(blk)) / 2)
             continue
-        step = span / (n_opts - 1)
-        # Проверка адекватности шага (защита от вырожденных случаев)
-        if step < est_step * 0.4:
-            return []
+        # Левый край блока = медиана самых левых кружков (устойчиво к шуму).
+        blk_sorted = sorted(blk)
+        left_edge = float(np.median(blk_sorted[:max(1, len(blk_sorted) // (n_opts * 2))]))
+        # Проверяем что ширина блока согласуется с шагом (иначе блок «шире» нормы)
+        span = max(blk) - min(blk)
+        if span > step * (n_opts - 1) * 1.4:
+            # В блоке есть выброс — берём левый край как min, шаг фиксированный
+            left_edge = min(blk)
         for oi in range(n_opts):
-            centers.append(lo + oi * step)
+            centers.append(left_edge + oi * step)
     return centers
 
 
 def _build_rows(cy_list, n_rows, est_step):
-    """Строит центры строк: РАВНОМЕРНО между верхним и нижним рядом кружков."""
+    """Строит центры строк от ВЕРХНЕЙ строки с медианным межстрочным шагом.
+    Устойчиво к выбросам (кружок кода/шум снизу не растягивает сетку, в отличие
+    от span/(n-1))."""
     if not cy_list or n_rows < 1:
         return []
-    lo, hi = min(cy_list), max(cy_list)
+    centers = _cluster_1d(cy_list, 0, tol=est_step * 0.6)
     if n_rows == 1:
-        return [(lo + hi) / 2]
-    span = hi - lo
-    step = span / (n_rows - 1)
+        return [float(np.median(cy_list))]
+    if len(centers) < 2:
+        return []
+    diffs = [centers[i + 1] - centers[i] for i in range(len(centers) - 1)]
+    # Межстрочный шаг — типичная (медианная) малая разность между рядами.
+    small = sorted(d for d in diffs if d < est_step * 3.0)
+    if not small:
+        return []
+    step = float(np.median(small))
     if step < est_step * 0.3:
         return []
-    return [lo + ri * step for ri in range(n_rows)]
+    top = min(centers)   # верхний ряд
+    return [top + ri * step for ri in range(n_rows)]
 
 
 # ── Главная функция ───────────────────────────────────────────────────────────
@@ -697,6 +819,36 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
 
     # tl,tr,bl,br = ЦЕНТРЫ якорей ответов
     a_tl, a_tr, a_bl, a_br = anchors
+
+    # ── 1b. DESKEW: выпрямляем перспективу по 4 реперам — ТОЛЬКО при наклоне ──
+    # При съёмке под наклоном рамка реперов — трапеция, строки «уезжают».
+    # Для РОВНЫХ фото (рамка уже прямоугольник) deskew не нужен и может навредить,
+    # поэтому применяем его лишь когда стороны заметно расходятся, а результат
+    # остаётся в границах изображения.
+    dbg_find["deskewed"] = False
+    h_left = a_bl[1] - a_tl[1]; h_right = a_br[1] - a_tr[1]
+    w_top = a_tr[0] - a_tl[0]; w_bot = a_br[0] - a_bl[0]
+    skew_h = abs(h_left - h_right) / max(h_left, h_right, 1)
+    skew_w = abs(w_top - w_bot) / max(w_top, w_bot, 1)
+    # Целевой прямоугольник: берём МЕНЬШИЕ (надёжные) стороны, чтобы не растягивать
+    rect_w = max(min(w_top, w_bot), 1)
+    rect_h = max(min(h_left, h_right), 1)
+    ox = min(a_tl[0], a_bl[0]); oy = min(a_tl[1], a_tr[1])
+    fits = (ox + rect_w <= w) and (oy + rect_h <= h) and rect_w > w * 0.3 and rect_h > h * 0.15
+    if (skew_h > 0.08 or skew_w > 0.08) and fits:
+        src = np.float32([a_tl, a_tr, a_bl, a_br])
+        dst = np.float32([[ox, oy], [ox + rect_w, oy],
+                          [ox, oy + rect_h], [ox + rect_w, oy + rect_h]])
+        try:
+            M = cv2.getPerspectiveTransform(src, dst)
+            gray = cv2.warpPerspective(gray, M, (w, h), flags=cv2.INTER_LINEAR,
+                                       borderMode=cv2.BORDER_REPLICATE)
+            a_tl = (int(ox), int(oy)); a_tr = (int(ox + rect_w), int(oy))
+            a_bl = (int(ox), int(oy + rect_h)); a_br = (int(ox + rect_w), int(oy + rect_h))
+            dbg_find["deskewed"] = True
+        except Exception:
+            pass
+
     P_tl = (a_tl[0], a_tl[1]); P_tr = (a_tr[0], a_tr[1])
     P_bl = (a_bl[0], a_bl[1]); P_br = (a_br[0], a_br[1])
 
@@ -738,11 +890,20 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
             read_px = max(sq_px, int(np.median(steps) * 0.66))
     dbg_snap["read_px"] = read_px
 
+    # Радиус поиска кружка вокруг расчётного центра: компенсирует остаточное
+    # смещение сетки (наклон фото, неидеальная калибровка). ~35% шага колонок.
+    col_step = 0
+    if len(cc) >= 2:
+        _steps = [cc[i+1] - cc[i] for i in range(len(cc)-1) if cc[i+1] - cc[i] > 0]
+        col_step = int(np.median(_steps)) if _steps else 0
+    search_r = int(max(read_px, col_step) * 0.35) if col_step else int(read_px * 0.35)
+    dbg_snap["search_r"] = search_r
+
     # ── 3. ЧИТАЕМ ОТВЕТЫ по шаблону ──────────────────────────────────────────
     answers, confidences, dbg_fills = [], [], []
     for qi in range(questions_count):
         row = sorted(cells_by_q.get(qi, []), key=lambda c: c[0])
-        fills = [_darkness(gray, px, py, read_px, read_px, thr_value)
+        fills = [_best_darkness(gray, px, py, read_px, read_px, thr_value, search_r)
                  for (_, px, py) in row]
         if not fills:
             answers.append(""); confidences.append(0.0); continue
@@ -761,11 +922,12 @@ def _recognize(image_b64: str, questions_count: int, options_count: int) -> dict
                               "xy": [(px, py) for (_, px, py) in row],
                               "thr": thr_value, "chosen": chosen})
         # Закрашенный кружок тёмный почти целиком (≈0.8-1.0), тогда как фоновый
-        # шум/тень/печатная буква дают лишь ≈0.15-0.25. Поэтому требуем:
-        #  • высокую абсолютную закраску (max_f ≥ 0.45), ИЛИ
-        #  • умеренную закраску при ОЧЕНЬ явном отрыве от остальных.
+        # шум/тень/печатная буква дают лишь ≈0.15-0.25 с малым отрывом. Требуем
+        # ЛИБО высокую закраску, ЛИБО умеренную, но с явным отрывом от остальных
+        # (чтобы поймать бледную, но честную пометку и не поймать фоновый шум).
         is_marked = (max_f >= 0.45 and gap >= 0.20) or \
-                    (max_f >= 0.30 and gap >= 0.25 and norm_gap >= 0.55)
+                    (max_f >= 0.30 and gap >= 0.22 and norm_gap >= 0.45) or \
+                    (max_f >= 0.33 and gap >= 0.15 and norm_gap >= 0.40)
         if is_marked:
             answers.append(chosen)
             confidences.append(round(min(0.99, norm_gap * 0.5 + max_f * 0.5), 2))

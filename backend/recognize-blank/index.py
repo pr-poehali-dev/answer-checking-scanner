@@ -151,58 +151,83 @@ def _find_anchors(gray, debug=None):
     return candidates
 
 
+def _dedup_cands(cands, tol):
+    """Схлопывает кандидаты, стоящие ближе tol друг к другу (дубликаты одного
+    репера из разных порогов бинаризации), оставляя самый КРУПНЫЙ из группы."""
+    out = []
+    for c in sorted(cands, key=lambda c: -c[4]):  # от крупных к мелким
+        dup = False
+        for o in out:
+            if abs(c[0] - o[0]) <= tol and abs(c[1] - o[1]) <= tol:
+                dup = True
+                break
+        if not dup:
+            out.append(c)
+    return out
+
+
 def _select_corner_anchors(cands, img_w, img_h, x_off=0, y_off=0,
                             min_w_frac=0.45, min_h_frac=0.10):
     """
-    Выбираем 4 угловых репера у краёв листа. Реперы стоят в ЛЕВОМ и ПРАВОМ полях
-    (≈2 мм от края), тогда как все клетки ответов — внутри сетки. Поэтому реперы
-    отличаются крайним по X положением. Берём кандидатов с минимальным и
-    максимальным X (левая/правая колонки полей), затем в каждой колонке —
-    верхний и нижний. Возвращает (tl, tr, bl, br) по их ЦЕНТРАМ.
+    Выбираем 4 угловых репера зоны ответов. Реперы стоят прямоугольником по краям
+    сетки (левое/правое поле, выше первой и ниже последней строки). Берём bbox
+    всех кандидатов и к каждому из 4 его углов подбираем ближайший кандидат —
+    это устойчиво к бледным/мелким/сдвоенным реперам и к наклону фото.
+    Возвращает (tl, tr, bl, br) по их ЦЕНТРАМ.
     """
     if len(cands) < 4:
         return None
 
-    # Отбраковываем мелкие кандидаты (модули QR, шум): настоящие реперы — крупные.
-    # Берём только те, чья сторона ≥ 60% от максимальной среди кандидатов.
-    if len(cands) > 4:
-        max_side = max(c[4] for c in cands)
-        big = [c for c in cands if c[4] >= max_side * 0.6]
-        if len(big) >= 4:
-            cands = big
+    # Дедупликация: один репер часто детектится несколькими порогами → дубли
+    # с почти совпадающими координатами. Схлопываем их, оставляя крупнейший.
+    tol = max(int(min(img_w, img_h) * 0.02), 10)
+    cands = _dedup_cands(cands, tol)
+    if len(cands) < 4:
+        return None
 
-    xs = sorted(c[0] for c in cands)
-    x_lo, x_hi = xs[0], xs[-1]
+    # Приоритет крупным реперам, но НЕ отбрасываем мелкие полностью: бледный на
+    # фото угловой репер может выйти мелким — он нужен, чтобы не потерять угол.
+    # Разбиваем на «крупные» (надёжные) и «все» (запасные для недостающих углов).
+    max_side = max(c[4] for c in cands)
+    big = [c for c in cands if c[4] >= max_side * 0.55]
+
+    xs = [c[0] for c in cands]
+    ys = [c[1] for c in cands]
+    x_lo, x_hi = min(xs), max(xs)
+    y_lo, y_hi = min(ys), max(ys)
     x_span = max(x_hi - x_lo, 1)
+    y_span = max(y_hi - y_lo, 1)
     if x_span < img_w * min_w_frac:
-        return None  # все кандидаты в одной зоне — реперов по краям нет
-
-    # Левая/правая «колонки полей»: кандидаты в пределах 22% размаха от краёв.
-    xtol = max(x_span * 0.22, img_w * 0.06)
-    left = sorted((c for c in cands if c[0] <= x_lo + xtol), key=lambda c: c[1])
-    right = sorted((c for c in cands if c[0] >= x_hi - xtol), key=lambda c: c[1])
-    if len(left) < 2 or len(right) < 2:
+        return None  # реперов по краям нет — всё в одной зоне
+    if y_span < img_h * min_h_frac:
         return None
 
-    # Левая колонка задаёт верх/низ рамки: самый верхний и самый нижний слева.
-    lt, lb = left[0], left[-1]
-    gh_left = lb[1] - lt[1]
-    if gh_left < img_h * min_h_frac:
-        return None
+    # Для каждого из 4 углов bbox — ближайший кандидат. Сначала ищем среди
+    # крупных; если для угла крупного нет рядом — берём из всех кандидатов.
+    corners_target = {
+        "tl": (x_lo, y_lo), "tr": (x_hi, y_lo),
+        "bl": (x_lo, y_hi), "br": (x_hi, y_hi),
+    }
+    diag = math.hypot(x_span, y_span)
+    picked = {}
+    for name, (tx, ty) in corners_target.items():
+        pool = big if len(big) >= 4 else cands
+        best = min(pool, key=lambda c: math.hypot(c[0] - tx, c[1] - ty))
+        # Если ближайший крупный слишком далёк от угла — пробуем среди всех.
+        if math.hypot(best[0] - tx, best[1] - ty) > diag * 0.35:
+            best = min(cands, key=lambda c: math.hypot(c[0] - tx, c[1] - ty))
+        picked[name] = best
 
-    # В ПРАВОЙ колонке берём реперы, ПАРНЫЕ по Y к левым (а не самые крайние) —
-    # иначе захватываются реперы соседней зоны (кода), стоящие в том же поле.
-    ytol = max(gh_left * 0.14, 12)
-    rt = min(right, key=lambda c: abs(c[1] - lt[1]))
-    rb = min(right, key=lambda c: abs(c[1] - lb[1]))
-    if abs(rt[1] - lt[1]) > ytol or abs(rb[1] - lb[1]) > ytol:
+    tl, tr, bl, br = picked["tl"], picked["tr"], picked["bl"], picked["br"]
+
+    # Санити-проверки геометрии прямоугольника реперов.
+    if tl is tr or bl is br or tl is bl or tr is br:
         return None
-    if rt is rb:
-        return None
-    # Верх должен быть заметно выше низа.
-    if (lt[1] >= lb[1] - 5) or (rt[1] >= rb[1] - 5):
-        return None
-    return lt, rt, lb, rb
+    if not (tl[0] < tr[0] - 5 and bl[0] < br[0] - 5):
+        return None  # левые должны быть левее правых
+    if not (tl[1] < bl[1] - 5 and tr[1] < br[1] - 5):
+        return None  # верхние выше нижних
+    return tl, tr, bl, br
 
 
 # ── Детектирование квадратов ответов прямо с изображения ─────────────────────

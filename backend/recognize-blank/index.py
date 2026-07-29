@@ -548,15 +548,17 @@ def _calibrate_cells_to_circles(gray, cells_by_q, n_q, n_opts,
     cy_list = [float(y) + zy0 for x, y, r in circles[0]]
     dbg["detected"] = len(cx_list)
 
-    # Калибровка X-колонок: кластеризуем X всех кружков
-    col_centers = _cluster_1d(cx_list, total_cols, tol=est_step * 0.5)
-    # Калибровка Y-строк
-    row_centers = _cluster_1d(cy_list, n_rows, tol=est_step * 0.6)
+    # ── Надёжное построение X-колонок ────────────────────────────────────────
+    # Кластеризация всех X ненадёжна (закрашенные ответы дают ложные центры и
+    # «лишние» кластеры). Вместо этого: делим кружки на n_cols БЛОКОВ (левый/
+    # правый) по крупному разрыву в X, и в каждом блоке РАВНОМЕРНО распределяем
+    # n_opts колонок между крайними кружками блока. Это использует только
+    # надёжные границы, а не подверженную шуму кластеризацию всех точек.
+    col_centers = _build_columns(cx_list, n_cols, n_opts, est_step)
+    row_centers = _build_rows(cy_list, n_rows, est_step)
     dbg["col_centers"] = [int(c) for c in col_centers]
     dbg["row_centers"] = [int(c) for c in row_centers][:6]
 
-    # Если число найденных колонок/строк не совпало с ожидаемым — частичная
-    # калибровка: используем найденные оси, остальное оставляем по шаблону.
     use_cols = len(col_centers) == total_cols
     use_rows = len(row_centers) == n_rows
     dbg["use_cols"] = use_cols
@@ -584,6 +586,68 @@ def _calibrate_cells_to_circles(gray, cells_by_q, n_q, n_opts,
             new_row.append((opt_idx, nx, ny))
         calibrated[qi] = new_row
     return calibrated, dbg
+
+
+def _split_blocks(values, n_blocks, min_gap):
+    """Делит отсортированные значения на n_blocks групп по САМЫМ КРУПНЫМ
+    разрывам между соседними значениями. Устойчиво к шуму внутри блока."""
+    if n_blocks <= 1 or len(values) < 2:
+        return [values]
+    vs = sorted(values)
+    gaps = [(vs[i + 1] - vs[i], i) for i in range(len(vs) - 1)]
+    gaps.sort(reverse=True)
+    # Берём n_blocks-1 наибольших разрывов как границы блоков
+    cut_idxs = sorted(i for _, i in gaps[:n_blocks - 1] if gaps and gaps[0][0] >= min_gap)
+    if len(cut_idxs) < n_blocks - 1:
+        return [vs]  # разрывов мало — не делится на блоки чётко
+    blocks = []
+    start = 0
+    for ci in cut_idxs:
+        blocks.append(vs[start:ci + 1])
+        start = ci + 1
+    blocks.append(vs[start:])
+    return blocks
+
+
+def _build_columns(cx_list, n_cols, n_opts, est_step):
+    """Строит центры всех колонок кружков: делит на n_cols блоков, в каждом —
+    n_opts колонок, РАВНОМЕРНО между крайними кружками блока."""
+    if not cx_list:
+        return []
+    # Разрыв между блоками (левый/правый) заметно больше межколоночного шага.
+    blocks = _split_blocks(cx_list, n_cols, min_gap=est_step * 2.5)
+    if len(blocks) != n_cols:
+        return []
+    centers = []
+    for blk in blocks:
+        if len(blk) < 2:
+            return []
+        lo, hi = min(blk), max(blk)
+        span = hi - lo
+        if n_opts == 1:
+            centers.append((lo + hi) / 2)
+            continue
+        step = span / (n_opts - 1)
+        # Проверка адекватности шага (защита от вырожденных случаев)
+        if step < est_step * 0.4:
+            return []
+        for oi in range(n_opts):
+            centers.append(lo + oi * step)
+    return centers
+
+
+def _build_rows(cy_list, n_rows, est_step):
+    """Строит центры строк: РАВНОМЕРНО между верхним и нижним рядом кружков."""
+    if not cy_list or n_rows < 1:
+        return []
+    lo, hi = min(cy_list), max(cy_list)
+    if n_rows == 1:
+        return [(lo + hi) / 2]
+    span = hi - lo
+    step = span / (n_rows - 1)
+    if step < est_step * 0.3:
+        return []
+    return [lo + ri * step for ri in range(n_rows)]
 
 
 # ── Главная функция ───────────────────────────────────────────────────────────

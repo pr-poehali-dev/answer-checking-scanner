@@ -1,0 +1,64 @@
+{
+  "tests": [
+    {
+      "name": "OPTIONS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    },
+    {
+      "name": "GET not allowed",
+      "method": "GET",
+      "path": "/?action=sync-works",
+      "expectedStatus": 405
+    },
+    {
+      "name": "sync-works without login returns 400",
+      "method": "POST",
+      "path": "/?action=sync-works",
+      "body": { "works": [] },
+      "expectedStatus": 400
+    },
+    {
+      "name": "log-activity without action returns 400",
+      "method": "POST",
+      "path": "/?action=log-activity",
+      "body": { "login": "test_teacher" },
+      "expectedStatus": 400
+    },
+    {
+      "name": "sync-works empty list ok",
+      "method": "POST",
+      "path": "/?action=sync-works",
+      "body": { "login": "test_teacher_autotest", "works": [] },
+      "expectedStatus": 200,
+      "expectedBody": { "ok": true },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "sync-materials empty list ok",
+      "method": "POST",
+      "path": "/?action=sync-materials",
+      "body": { "login": "test_teacher_autotest", "materials": [] },
+      "expectedStatus": 200,
+      "expectedBody": { "ok": true },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "log-activity ok",
+      "method": "POST",
+      "path": "/?action=log-activity",
+      "body": { "login": "test_teacher_autotest", "action": "yadisk_connect", "entityType": "yadisk", "details": { "test": true } },
+      "expectedStatus": 200,
+      "expectedBody": { "ok": true },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "unknown action returns 404",
+      "method": "POST",
+      "path": "/?action=nonexistent",
+      "body": { "login": "test_teacher_autotest" },
+      "expectedStatus": 404
+    }
+  ]
+}

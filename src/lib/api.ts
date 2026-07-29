@@ -8,6 +8,7 @@ const TEST_URL = "https://functions.poehali.dev/80f9c6ec-e492-47b6-881a-633a41d7
 const WORKSHEET_URL = "https://functions.poehali.dev/34530eb2-3d3c-485e-b7f8-63df6db74f49";
 const SUBSCRIPTION_URL = "https://functions.poehali.dev/0dc83bdb-3da2-4cb9-b9d9-f0b48cfb25da";
 const STUDENT_LINK_URL = "https://functions.poehali.dev/23f6c20d-f0bd-4bfb-84fe-75c97564d076";
+const TEACHER_DATA_URL = "https://functions.poehali.dev/4fb82b33-77af-4fce-933b-fe06a3bdb427";
 const UDS_URL = "https://functions.poehali.dev/3f54b399-3af0-45fa-a2b6-0736484f6059";
 const MATERIALS_URL = "https://functions.poehali.dev/b8c11774-1a89-4bd2-a962-df36ddc786d7";
 
@@ -295,6 +296,62 @@ export const studentLinkApi = {
   // Ученик: свои результаты
   myResults: (studentLogin: string) =>
     slRequest<{ bound: boolean; results: StudentResultRow[] }>("my-results", "GET", studentLogin),
+};
+
+// ── Teacher Data API — дублирование данных учителя в БД на нашем хостинге ────
+
+async function tdRequest<T>(action: string, login: string, body: object): Promise<T> {
+  const res = await fetch(`${TEACHER_DATA_URL}?action=${action}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-User-Login": login },
+    body: JSON.stringify({ login, ...body }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Ошибка ${res.status}`);
+  return data as T;
+}
+
+export interface TeacherWorkDto {
+  id: string;
+  type: string;
+  subject: string;
+  classLabel: string;
+  date: string;
+  totalQuestions: number;
+  part1Count: number;
+  part2Count: number;
+  answerKey: string;
+  maxScore: number;
+  topic?: string;
+  generatedByAi?: boolean;
+}
+
+export interface TeacherMaterialDto {
+  id: string;
+  type: "presentation" | "synopsis" | "test" | "worksheet";
+  title: string;
+  subject?: string;
+  classLabel?: string;
+  topic?: string;
+  filename?: string;
+  size?: number;
+  uploadedToYadisk?: boolean;
+}
+
+export const teacherDataApi = {
+  syncWorks: (teacherLogin: string, works: TeacherWorkDto[]) =>
+    tdRequest<{ ok: boolean; saved: number }>("sync-works", teacherLogin, { works }),
+
+  syncMaterials: (teacherLogin: string, materials: TeacherMaterialDto[]) =>
+    tdRequest<{ ok: boolean; saved: number }>("sync-materials", teacherLogin, { materials }),
+
+  logActivity: (teacherLogin: string, action: string, opts?: { entityType?: string; entityId?: string; details?: unknown }) =>
+    tdRequest<{ ok: boolean }>("log-activity", teacherLogin, {
+      action,
+      entityType: opts?.entityType,
+      entityId: opts?.entityId,
+      details: opts?.details,
+    }),
 };
 
 // ── УДС API (Управление Движения Системы) ──────────────────────────────────────

@@ -585,6 +585,7 @@ export const appStore = {
     state = { ...state, works: [...state.works, work] };
     notify();
     _scheduleAutoSave();
+    appStore.syncWorksToDb();
   },
 
   generateWorkId: (): string => {
@@ -610,6 +611,7 @@ export const appStore = {
   addPresentation: (item: PresentationItem) => {
     state = { ...state, presentations: [item, ...state.presentations] };
     notify();
+    appStore.syncMaterialsToDb();
   },
 
   removePresentation: (id: string) => {
@@ -620,6 +622,7 @@ export const appStore = {
   addGeneratedTest: (item: GeneratedTestItem) => {
     state = { ...state, generatedTests: [item, ...state.generatedTests] };
     notify();
+    appStore.syncMaterialsToDb();
   },
 
   removeGeneratedTest: (id: string) => {
@@ -630,6 +633,7 @@ export const appStore = {
   addWorksheet: (item: WorksheetItem) => {
     state = { ...state, worksheets: [item, ...state.worksheets] };
     notify();
+    appStore.syncMaterialsToDb();
   },
 
   removeWorksheet: (id: string) => {
@@ -640,6 +644,7 @@ export const appStore = {
   addSynopsis: (item: SynopsisItem) => {
     state = { ...state, synopses: [item, ...state.synopses] };
     notify();
+    appStore.syncMaterialsToDb();
   },
 
   removeSynopsis: (id: string) => {
@@ -655,6 +660,10 @@ export const appStore = {
       teacher: state.teacher ? { ...state.teacher, yadiskToken: token } : null,
     };
     notify();
+    appStore.logActivityToDb("yadisk_connect", {
+      entityType: "yadisk",
+      details: { user: user?.login || user?.display_name || null },
+    });
     // После подключения — загружаем данные (автосохранение включится там)
     appStore.loadFromYadisk();
   },
@@ -668,6 +677,7 @@ export const appStore = {
       teacher: state.teacher ? { ...state.teacher, yadiskToken: null } : null,
     };
     notify();
+    appStore.logActivityToDb("yadisk_disconnect", { entityType: "yadisk" });
   },
 
   /** Восстанавливает подключение Я.Диска — сначала из localStorage, потом из БД (любое устройство). */
@@ -753,6 +763,14 @@ export const appStore = {
 
       state = { ...state, yadiskSyncing: false, yadiskLastSync: now };
       notify();
+      appStore.logActivityToDb("yadisk_sync", {
+        entityType: "yadisk",
+        details: {
+          students: state.students.length,
+          works: state.works.length,
+          results: state.results.length,
+        },
+      });
       return { ok: true };
     } catch (e) {
       state = { ...state, yadiskSyncing: false };
@@ -821,6 +839,9 @@ export const appStore = {
       // Синхронизируем коды и результаты в общую БД (для доступа учеников)
       appStore.syncStudentCodesToDb();
       appStore.syncResultsToDb();
+      // Дублируем каталог работ и материалов в БД на нашем хостинге
+      appStore.syncWorksToDb();
+      appStore.syncMaterialsToDb();
       return { ok: true, studentsCount: students.length, worksCount: works.length };
     } catch (e) {
       state = { ...state, yadiskSyncing: false };
@@ -926,6 +947,75 @@ export const appStore = {
     try {
       const { studentLinkApi } = await import("@/lib/api");
       await studentLinkApi.syncResults(t.login, payload);
+    } catch { /* ignore */ }
+  },
+
+  /** Учитель: дублирует каталог работ в БД на нашем хостинге (без файлов). */
+  syncWorksToDb: async (): Promise<void> => {
+    const t = state.teacher;
+    if (!t || (t.role !== "teacher" && t.role !== "tester")) return;
+    if (!state.works.length) return;
+    const payload = state.works.map(w => ({
+      id: w.id,
+      type: w.type,
+      subject: w.subject,
+      classLabel: `${w.classNum}${w.classLetter}`,
+      date: w.date,
+      totalQuestions: w.totalQuestions,
+      part1Count: w.part1Count,
+      part2Count: w.part2Count,
+      answerKey: w.answerKey,
+      maxScore: w.maxScore,
+      topic: w.topic,
+      generatedByAi: w.generatedByAi,
+    }));
+    try {
+      const { teacherDataApi } = await import("@/lib/api");
+      await teacherDataApi.syncWorks(t.login, payload);
+    } catch { /* ignore */ }
+  },
+
+  /** Учитель: дублирует каталог материалов (презентации/конспекты/тесты/листы) в БД. */
+  syncMaterialsToDb: async (): Promise<void> => {
+    const t = state.teacher;
+    if (!t || (t.role !== "teacher" && t.role !== "tester")) return;
+    const items: {
+      id: string; type: "presentation" | "synopsis" | "test" | "worksheet";
+      title: string; subject?: string; classLabel?: string; topic?: string;
+      filename?: string; size?: number; uploadedToYadisk?: boolean;
+    }[] = [];
+    state.presentations.forEach(p => items.push({
+      id: p.id, type: "presentation", title: p.topic, topic: p.topic,
+      filename: p.filename, size: p.size, uploadedToYadisk: p.uploadedToYadisk,
+    }));
+    state.synopses.forEach(s => items.push({
+      id: s.id, type: "synopsis", title: s.topic, subject: s.subject,
+      classLabel: String(s.classNum), topic: s.topic, filename: s.filename,
+    }));
+    state.generatedTests.forEach(g => items.push({
+      id: g.id, type: "test", title: g.topic || `${g.workType}: ${g.subject}`,
+      subject: g.subject, classLabel: String(g.classNum), topic: g.topic,
+      filename: g.filename, size: g.size, uploadedToYadisk: g.uploadedToYadisk,
+    }));
+    state.worksheets.forEach(w => items.push({
+      id: w.id, type: "worksheet", title: w.title, subject: w.subject,
+      classLabel: String(w.classNum), topic: w.topic, filename: w.filename,
+      size: w.size, uploadedToYadisk: w.uploadedToYadisk,
+    }));
+    if (!items.length) return;
+    try {
+      const { teacherDataApi } = await import("@/lib/api");
+      await teacherDataApi.syncMaterials(t.login, items);
+    } catch { /* ignore */ }
+  },
+
+  /** Учитель: пишет событие в журнал действий на нашем хостинге. */
+  logActivityToDb: async (action: string, opts?: { entityType?: string; entityId?: string; details?: unknown }): Promise<void> => {
+    const t = state.teacher;
+    if (!t || (t.role !== "teacher" && t.role !== "tester")) return;
+    try {
+      const { teacherDataApi } = await import("@/lib/api");
+      await teacherDataApi.logActivity(t.login, action, opts);
     } catch { /* ignore */ }
   },
 

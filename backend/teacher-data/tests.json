@@ -7,10 +7,24 @@
       "expectedStatus": 200
     },
     {
-      "name": "GET not allowed",
+      "name": "GET without login returns 400",
       "method": "GET",
-      "path": "/?action=sync-works",
-      "expectedStatus": 405
+      "path": "/?action=load-all",
+      "expectedStatus": 400
+    },
+    {
+      "name": "GET unknown action returns 404",
+      "method": "GET",
+      "path": "/?action=whatever&login=x",
+      "expectedStatus": 404
+    },
+    {
+      "name": "GET load-all returns data structure",
+      "method": "GET",
+      "path": "/?action=load-all&login=zzz_never_used_login_999",
+      "expectedStatus": 200,
+      "expectedBody": { "works": [], "materials": [], "students": [], "results": [] },
+      "bodyMatcher": "partial"
     },
     {
       "name": "sync-works without login returns 400",

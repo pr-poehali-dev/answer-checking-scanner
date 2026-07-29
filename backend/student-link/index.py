@@ -103,11 +103,13 @@ def handler(event: dict, context) -> dict:
                 work_id = str(r.get("workId") or "").strip()[:32]
                 if not student_code or not work_id:
                     continue
+                answers = r.get("answers")
+                answers_json = json.dumps(answers, ensure_ascii=False) if isinstance(answers, list) else None
                 cur.execute(
                     f"""INSERT INTO {SCHEMA}.student_results
                         (teacher_login, student_code, work_id, work_title, subject, work_date,
-                         correct_count, total_count, score, grade, scanned_at, updated_at)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, NOW()), NOW())
+                         correct_count, total_count, score, grade, answers, scanned_at, updated_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, NOW()), NOW())
                         ON CONFLICT (teacher_login, student_code, work_id) DO UPDATE
                         SET work_title = EXCLUDED.work_title,
                             subject = EXCLUDED.subject,
@@ -116,6 +118,7 @@ def handler(event: dict, context) -> dict:
                             total_count = EXCLUDED.total_count,
                             score = EXCLUDED.score,
                             grade = EXCLUDED.grade,
+                            answers = COALESCE(EXCLUDED.answers, {SCHEMA}.student_results.answers),
                             scanned_at = EXCLUDED.scanned_at,
                             updated_at = NOW()""",
                     (
@@ -127,6 +130,7 @@ def handler(event: dict, context) -> dict:
                         int(r.get("totalCount") or 0),
                         int(r.get("score") or 0),
                         str(r.get("grade") or "")[:8] or None,
+                        answers_json,
                         r.get("scannedAt") or None,
                     )
                 )

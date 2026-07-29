@@ -350,6 +350,8 @@ export const appStore = {
           yadiskLastSync: null,
         };
         notify();
+        // Восстанавливаем данные из нашей БД (независимо от Я.Диска)
+        appStore.loadFromDb();
         appStore.restoreYadisk().then((restored) => {
           if (restored) {
             appStore.loadFromYadisk();
@@ -941,12 +943,128 @@ export const appStore = {
         totalCount: r.totalCount,
         score: r.score,
         grade: r.grade,
+        answers: r.answers,
         scannedAt: r.scannedAt,
       };
     });
     try {
       const { studentLinkApi } = await import("@/lib/api");
       await studentLinkApi.syncResults(t.login, payload);
+    } catch { /* ignore */ }
+  },
+
+  /**
+   * Учитель: загружает свои данные (ученики, работы, результаты, материалы) из
+   * нашей БД и мержит их в ЛК. Делает данные независимыми от Я.Диска и браузера —
+   * при входе с любого устройства данные восстанавливаются.
+   */
+  loadFromDb: async (): Promise<void> => {
+    const t = state.teacher;
+    if (!t || (t.role !== "teacher" && t.role !== "tester")) return;
+    try {
+      const { teacherDataApi } = await import("@/lib/api");
+      const data = await teacherDataApi.loadAll(t.login);
+
+      // classLabel "11А" → { classNum: 11, classLetter: "А" }
+      const parseClass = (label: string | null): { classNum: number; classLetter: string } => {
+        const m = (label || "").match(/^(\d+)\s*([А-Яа-яA-Za-z]*)$/);
+        return { classNum: m ? parseInt(m[1], 10) || 0 : 0, classLetter: m ? (m[2] || "") : "" };
+      };
+
+      // Ученики — мержим по коду (локальные приоритетны, из БД добавляем недостающих)
+      const localStudentCodes = new Set(state.students.map(s => s.code));
+      const dbStudents: Student[] = data.students
+        .filter(s => s.code && !localStudentCodes.has(s.code))
+        .map(s => ({ code: s.code, bindCode: s.bindCode || undefined, name: s.name, ...parseClass(s.classLabel) }));
+
+      // Работы — мержим по id
+      const localWorkIds = new Set(state.works.map(w => w.id));
+      const dbWorks: Work[] = data.works
+        .filter(w => w.id && !localWorkIds.has(w.id))
+        .map(w => {
+          const cls = parseClass(w.classLabel);
+          return {
+            id: w.id, type: (w.type as WorkType) || "Проверочная работа",
+            subject: w.subject || "", classNum: cls.classNum, classLetter: cls.classLetter,
+            date: w.date || "", totalQuestions: w.totalQuestions || 0,
+            part1Count: w.part1Count || 0, part2Count: w.part2Count || 0,
+            answerKey: w.answerKey || "", maxScore: w.maxScore || 0,
+            gradeScale: { grade1: 0, grade2: 0, grade3: 0, grade4: 0, grade5: 0 },
+            topic: w.topic || undefined, generatedByAi: !!w.generatedByAi,
+          };
+        });
+
+      // Результаты — мержим по (workId, studentCode)
+      const localResultKeys = new Set(state.results.map(r => `${r.workId}|${r.studentCode}`));
+      const dbResults: StudentResult[] = data.results
+        .filter(r => r.workId && r.studentCode && !localResultKeys.has(`${r.workId}|${r.studentCode}`))
+        .map(r => ({
+          workId: r.workId, studentCode: r.studentCode,
+          answers: Array.isArray(r.answers) ? r.answers : [],
+          correctCount: r.correctCount || 0, totalCount: r.totalCount || 0,
+          score: r.score || 0, grade: r.grade || "",
+          scannedAt: r.scannedAt || new Date().toISOString(),
+        }));
+
+      // Материалы — восстанавливаем как элементы каталога (без файлов) по id
+      const localPresIds = new Set(state.presentations.map(p => p.id));
+      const localSynIds = new Set(state.synopses.map(s => s.id));
+      const localTestIds = new Set(state.generatedTests.map(g => g.id));
+      const localWsIds = new Set(state.worksheets.map(w => w.id));
+      const dbPres: PresentationItem[] = [];
+      const dbSyn: SynopsisItem[] = [];
+      const dbTests: GeneratedTestItem[] = [];
+      const dbWs: WorksheetItem[] = [];
+      for (const m of data.materials) {
+        const cls = parseClass(m.classLabel);
+        if (m.type === "presentation" && !localPresIds.has(m.id)) {
+          dbPres.push({
+            id: m.id, topic: m.title || m.topic || "", description: "", audience: "",
+            slidesCount: 0, filename: m.filename || "", size: m.size || 0,
+            yadiskPath: null, uploadedToYadisk: !!m.uploadedToYadisk,
+            createdAt: m.createdAt || new Date().toISOString(),
+            outline: { subtitle: "", slides: [], conclusion: [] },
+          });
+        } else if (m.type === "synopsis" && !localSynIds.has(m.id)) {
+          dbSyn.push({
+            id: m.id, subject: m.subject || "", classNum: cls.classNum,
+            topic: m.title || m.topic || "", description: "", text: "", wordCount: 0,
+            createdAt: m.createdAt || new Date().toISOString(), filename: m.filename || undefined,
+          });
+        } else if (m.type === "test" && !localTestIds.has(m.id)) {
+          dbTests.push({
+            id: m.id, workId: "", workType: "Тест", subject: m.subject || "",
+            classNum: cls.classNum, topic: m.title || m.topic || "", description: "",
+            part1Count: 0, part2Count: 0, filename: m.filename || "", size: m.size || 0,
+            yadiskPath: null, uploadedToYadisk: !!m.uploadedToYadisk,
+            createdAt: m.createdAt || new Date().toISOString(),
+            questions: { part1: [], part2: [] },
+          });
+        } else if (m.type === "worksheet" && !localWsIds.has(m.id)) {
+          dbWs.push({
+            id: m.id, title: m.title || "", subject: m.subject || "", classNum: cls.classNum,
+            topic: m.topic || "", description: "", tasksCount: 0, imagesAdded: 0,
+            filename: m.filename || "", size: m.size || 0, yadiskPath: null,
+            uploadedToYadisk: !!m.uploadedToYadisk, createdAt: m.createdAt || new Date().toISOString(),
+            intro: "", tasks: [],
+          });
+        }
+      }
+
+      if (dbStudents.length || dbWorks.length || dbResults.length ||
+          dbPres.length || dbSyn.length || dbTests.length || dbWs.length) {
+        state = {
+          ...state,
+          students: [...state.students, ...dbStudents],
+          works: [...state.works, ...dbWorks],
+          results: [...state.results, ...dbResults],
+          presentations: [...state.presentations, ...dbPres],
+          synopses: [...state.synopses, ...dbSyn],
+          generatedTests: [...state.generatedTests, ...dbTests],
+          worksheets: [...state.worksheets, ...dbWs],
+        };
+        notify();
+      }
     } catch { /* ignore */ }
   },
 
@@ -1056,9 +1174,12 @@ export function useAppStore(): AppState {
   const initialized = useRef(false);
 
   useEffect(() => {
-    // Восстанавливаем Я.Диск после перезагрузки страницы (один раз)
-    if (!initialized.current && _restoredTeacher?.role === "teacher") {
+    // Восстанавливаем данные после перезагрузки страницы (один раз)
+    if (!initialized.current &&
+        (_restoredTeacher?.role === "teacher" || _restoredTeacher?.role === "tester")) {
       initialized.current = true;
+      // Данные из нашей БД — независимо от Я.Диска
+      appStore.loadFromDb();
       appStore.restoreYadisk().then((restored) => {
         if (restored) appStore.loadFromYadisk();
       });

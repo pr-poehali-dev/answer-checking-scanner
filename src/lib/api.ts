@@ -338,7 +338,35 @@ export interface TeacherMaterialDto {
   uploadedToYadisk?: boolean;
 }
 
+export interface TeacherDataLoadResult {
+  works: {
+    id: string; type: string; subject: string; classLabel: string; date: string;
+    totalQuestions: number; part1Count: number; part2Count: number;
+    answerKey: string; maxScore: number; topic: string | null; generatedByAi: boolean;
+  }[];
+  materials: {
+    id: string; type: string; title: string; subject: string | null;
+    classLabel: string | null; topic: string | null; filename: string | null;
+    size: number; uploadedToYadisk: boolean; createdAt: string | null;
+  }[];
+  students: { code: string; bindCode: string | null; name: string; classLabel: string | null }[];
+  results: {
+    workId: string; studentCode: string; correctCount: number; totalCount: number;
+    score: number; grade: string | null; answers: string[]; scannedAt: string | null;
+  }[];
+}
+
 export const teacherDataApi = {
+  loadAll: (teacherLogin: string) =>
+    fetch(`${TEACHER_DATA_URL}?action=load-all&login=${encodeURIComponent(teacherLogin)}`, {
+      method: "GET",
+      headers: { "X-User-Login": teacherLogin },
+    }).then(async r => {
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || `Ошибка ${r.status}`);
+      return data as TeacherDataLoadResult;
+    }),
+
   syncWorks: (teacherLogin: string, works: TeacherWorkDto[]) =>
     tdRequest<{ ok: boolean; saved: number }>("sync-works", teacherLogin, { works }),
 

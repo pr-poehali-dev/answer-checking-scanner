@@ -44,7 +44,7 @@ def handler(event: dict, context) -> dict:
     method = event.get("httpMethod", "GET")
     if method == "OPTIONS":
         return {"statusCode": 200, "headers": CORS, "body": ""}
-    if method != "POST":
+    if method not in ("POST", "GET"):
         return _resp(405, {"error": "Метод не поддерживается"})
 
     params = event.get("queryStringParameters") or {}
@@ -56,9 +56,90 @@ def handler(event: dict, context) -> dict:
         return _resp(400, {"error": "Некорректный JSON"})
 
     headers = {k.lower(): v for k, v in (event.get("headers") or {}).items()}
-    teacher_login = (headers.get("x-user-login") or body.get("login") or "").strip()
+    teacher_login = (headers.get("x-user-login") or params.get("login") or body.get("login") or "").strip()
     if not teacher_login:
         return _resp(400, {"error": "Не указан login учителя"})
+
+    # ── GET load-all: возвращает учителю все его данные из БД ──────────────────
+    # (ученики, работы, результаты, материалы) — для восстановления ЛК на любом
+    # устройстве, независимо от Я.Диска и localStorage.
+    if method == "GET" and action == "load-all":
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+
+            # Работы
+            cur.execute(
+                f"""SELECT work_id, work_type, subject, class_label, work_date,
+                           total_questions, part1_count, part2_count, answer_key,
+                           max_score, topic, generated_by_ai
+                    FROM {SCHEMA}.teacher_works WHERE teacher_login = %s
+                    ORDER BY created_at""",
+                (teacher_login,)
+            )
+            works = [{
+                "id": r[0], "type": r[1], "subject": r[2], "classLabel": r[3],
+                "date": r[4], "totalQuestions": r[5], "part1Count": r[6],
+                "part2Count": r[7], "answerKey": r[8], "maxScore": r[9],
+                "topic": r[10], "generatedByAi": r[11],
+            } for r in cur.fetchall()]
+
+            # Материалы
+            cur.execute(
+                f"""SELECT material_id, material_type, title, subject, class_label,
+                           topic, filename, size_bytes, uploaded_to_yadisk, created_at
+                    FROM {SCHEMA}.teacher_materials WHERE teacher_login = %s
+                    ORDER BY created_at DESC""",
+                (teacher_login,)
+            )
+            materials = [{
+                "id": r[0], "type": r[1], "title": r[2], "subject": r[3],
+                "classLabel": r[4], "topic": r[5], "filename": r[6],
+                "size": r[7], "uploadedToYadisk": r[8],
+                "createdAt": r[9].isoformat() if r[9] else None,
+            } for r in cur.fetchall()]
+
+            # Ученики
+            cur.execute(
+                f"""SELECT student_code, bind_code, full_name, class_label
+                    FROM {SCHEMA}.student_codes WHERE teacher_login = %s
+                    ORDER BY full_name""",
+                (teacher_login,)
+            )
+            students = [{
+                "code": r[0], "bindCode": r[1], "name": r[2], "classLabel": r[3],
+            } for r in cur.fetchall()]
+
+            # Результаты
+            cur.execute(
+                f"""SELECT work_id, student_code, correct_count, total_count,
+                           score, grade, answers, scanned_at
+                    FROM {SCHEMA}.student_results WHERE teacher_login = %s
+                    ORDER BY scanned_at DESC""",
+                (teacher_login,)
+            )
+            results = []
+            for r in cur.fetchall():
+                try:
+                    ans = json.loads(r[6]) if r[6] else []
+                except Exception:
+                    ans = []
+                results.append({
+                    "workId": r[0], "studentCode": r[1], "correctCount": r[2],
+                    "totalCount": r[3], "score": r[4], "grade": r[5],
+                    "answers": ans,
+                    "scannedAt": r[7].isoformat() if r[7] else None,
+                })
+
+            return _resp(200, {
+                "works": works, "materials": materials,
+                "students": students, "results": results,
+            })
+        finally:
+            conn.close()
+
+    if method == "GET":
+        return _resp(404, {"error": "Неизвестное действие"})
 
     # ── POST sync-works: каталог работ ────────────────────────────────────────
     if action == "sync-works":

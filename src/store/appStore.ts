@@ -2,6 +2,7 @@
 import { authApi } from "@/lib/api";
 import { yadisk, yadiskOAuth, yadiskStorage, ROOT_FOLDER, STUDENTS_FILE, WORKS_FILE, type YadiskUser } from "@/lib/yadisk";
 import { getDeviceFingerprint } from "@/lib/deviceFingerprint";
+import { saveLocalData, loadLocalData, clearLocalData } from "@/lib/localData";
 
 // ── Персистентность сессии ─────────────────────────────────────────────────
 const SESSION_KEY = "aousp_session_v1";
@@ -86,6 +87,8 @@ let _autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
 let _autoSaveEnabled = false; // включается только после первой загрузки данных
 
 function _scheduleAutoSave() {
+  // Данные на устройство пишем сразу — чтобы ничего не терялось даже без сети
+  _persistLocal();
   if (!_autoSaveEnabled) return;
   if (_autoSaveTimer) clearTimeout(_autoSaveTimer);
   _autoSaveTimer = setTimeout(() => {
@@ -94,6 +97,41 @@ function _scheduleAutoSave() {
       appStore.syncToYadisk();
     }
   }, 2500);
+}
+
+/** Сохраняет текущие данные на устройство пользователя (мгновенно, локально). */
+function _persistLocal() {
+  const login = state.teacher?.login;
+  if (!login) return;
+  saveLocalData(login, {
+    students: state.students as unknown as Record<string, unknown>[],
+    works: state.works as unknown as Record<string, unknown>[],
+    results: state.results as unknown as Record<string, unknown>[],
+    presentations: state.presentations as unknown as Record<string, unknown>[],
+    generatedTests: state.generatedTests as unknown as Record<string, unknown>[],
+    worksheets: state.worksheets as unknown as Record<string, unknown>[],
+    synopses: state.synopses as unknown as Record<string, unknown>[],
+  });
+}
+
+/**
+ * Подставляет в приложение данные ИМЕННО ЭТОГО пользователя с устройства.
+ * Если у него данных нет — состояние очищается, чтобы чужие данные
+ * (от предыдущего пользователя этого устройства) никогда не показывались.
+ */
+function _restoreLocalInto(login: string) {
+  const local = loadLocalData(login);
+  state = {
+    ...state,
+    students: (local?.students || []) as unknown as Student[],
+    works: (local?.works || []) as unknown as Work[],
+    results: (local?.results || []) as unknown as StudentResult[],
+    presentations: (local?.presentations || []) as unknown as PresentationItem[],
+    generatedTests: (local?.generatedTests || []) as unknown as GeneratedTestItem[],
+    worksheets: (local?.worksheets || []) as unknown as WorksheetItem[],
+    synopses: (local?.synopses || []) as unknown as SynopsisItem[],
+  };
+  return !!local;
 }
 
 export type UserRole = "admin" | "teacher" | "tester" | "student";
@@ -275,16 +313,18 @@ export type AppState = {
 
 // Начальное состояние — восстанавливаем сессию из localStorage
 const _restoredTeacher = loadSession();
+// И сразу поднимаем данные с устройства пользователя (мгновенно, без сети)
+const _localData = _restoredTeacher ? loadLocalData(_restoredTeacher.login) : null;
 
 let state: AppState = {
   teacher: _restoredTeacher,
-  students: [],
-  works: [],
-  results: [],
-  presentations: [],
-  generatedTests: [],
-  worksheets: [],
-  synopses: [],
+  students: (_localData?.students || []) as unknown as Student[],
+  works: (_localData?.works || []) as unknown as Work[],
+  results: (_localData?.results || []) as unknown as StudentResult[],
+  presentations: (_localData?.presentations || []) as unknown as PresentationItem[],
+  generatedTests: (_localData?.generatedTests || []) as unknown as GeneratedTestItem[],
+  worksheets: (_localData?.worksheets || []) as unknown as WorksheetItem[],
+  synopses: (_localData?.synopses || []) as unknown as SynopsisItem[],
   yadiskConnected: false,
   yadiskUser: null,
   yadiskSyncing: false,
@@ -339,6 +379,8 @@ export const appStore = {
       };
       saveSession(newTeacher);
       state = { ...state, teacher: newTeacher, storageMode: loadStorageMode(newTeacher.login) };
+      // Поднимаем данные с устройства этого пользователя — сразу, без ожидания сети
+      _restoreLocalInto(newTeacher.login);
       notify();
       if (user.role === "teacher" || user.role === "student") {
         // Сбрасываем Я.Диск-состояние от предыдущего пользователя (защита от смешения аккаунтов)
@@ -482,6 +524,9 @@ export const appStore = {
 
   logout: () => {
     const login = state.teacher?.login || "";
+    // Перед выходом закрепляем данные на устройстве — они остаются у пользователя
+    // и подхватятся при следующем входе, даже без интернета.
+    _persistLocal();
     if (login) yadiskStorage.clear(login);
     clearSession();
     state = {
@@ -501,6 +546,29 @@ export const appStore = {
       synopses: [],
     };
     notify();
+  },
+
+  /**
+   * Убирает данные пользователя с ЭТОГО устройства (на сервере они остаются).
+   * Полезно на чужом/общем компьютере.
+   */
+  clearDeviceData: () => {
+    const login = state.teacher?.login || "";
+    if (!login) return;
+    clearLocalData(login);
+    state = {
+      ...state,
+      students: [], works: [], results: [],
+      presentations: [], generatedTests: [], worksheets: [], synopses: [],
+    };
+    notify();
+  },
+
+  /** Когда данные последний раз сохранялись на этом устройстве. */
+  getLocalSavedAt: (): string | null => {
+    const login = state.teacher?.login || "";
+    if (!login) return null;
+    return loadLocalData(login)?.savedAt || null;
   },
 
   /** Устанавливает способ хранения документов и запоминает выбор для пользователя. */
@@ -613,45 +681,53 @@ export const appStore = {
   addPresentation: (item: PresentationItem) => {
     state = { ...state, presentations: [item, ...state.presentations] };
     notify();
+    _persistLocal();
     appStore.syncMaterialsToDb();
   },
 
   removePresentation: (id: string) => {
     state = { ...state, presentations: state.presentations.filter(p => p.id !== id) };
     notify();
+    _persistLocal();
   },
 
   addGeneratedTest: (item: GeneratedTestItem) => {
     state = { ...state, generatedTests: [item, ...state.generatedTests] };
     notify();
+    _persistLocal();
     appStore.syncMaterialsToDb();
   },
 
   removeGeneratedTest: (id: string) => {
     state = { ...state, generatedTests: state.generatedTests.filter(t => t.id !== id) };
     notify();
+    _persistLocal();
   },
 
   addWorksheet: (item: WorksheetItem) => {
     state = { ...state, worksheets: [item, ...state.worksheets] };
     notify();
+    _persistLocal();
     appStore.syncMaterialsToDb();
   },
 
   removeWorksheet: (id: string) => {
     state = { ...state, worksheets: state.worksheets.filter(w => w.id !== id) };
     notify();
+    _persistLocal();
   },
 
   addSynopsis: (item: SynopsisItem) => {
     state = { ...state, synopses: [item, ...state.synopses] };
     notify();
+    _persistLocal();
     appStore.syncMaterialsToDb();
   },
 
   removeSynopsis: (id: string) => {
     state = { ...state, synopses: state.synopses.filter(s => s.id !== id) };
     notify();
+    _persistLocal();
   },
 
   connectYadisk: (token: string, user: YadiskUser | null = null) => {
@@ -836,6 +912,8 @@ export const appStore = {
         yadiskLastSync: new Date().toISOString(),
       };
       notify();
+      // Закрепляем на устройстве пользователя
+      _persistLocal();
       // Включаем автосохранение только после первой загрузки
       _autoSaveEnabled = true;
       // Синхронизируем коды и результаты в общую БД (для доступа учеников)
@@ -1083,7 +1161,27 @@ export const appStore = {
         };
         notify();
       }
+      // Объединённые данные закрепляем на устройстве пользователя
+      _persistLocal();
+      // И отправляем на сервер то, чего там ещё нет (данные, созданные офлайн)
+      appStore.pushLocalToDb();
     } catch { /* ignore */ }
+  },
+
+  /**
+   * Отправляет на наш сервер всё, что есть у пользователя на устройстве.
+   * Нужно, если данные создавались без сети или до появления серверного
+   * хранения — тогда они «догоняются» при первом же выходе в сеть.
+   */
+  pushLocalToDb: async (): Promise<void> => {
+    const t = state.teacher;
+    if (!t || (t.role !== "teacher" && t.role !== "tester")) return;
+    await Promise.all([
+      appStore.syncWorksToDb(),
+      appStore.syncMaterialsToDb(),
+      appStore.syncStudentCodesToDb(),
+      appStore.syncResultsToDb(),
+    ]);
   },
 
   /** Учитель: дублирует каталог работ в БД на нашем хостинге (без файлов). */

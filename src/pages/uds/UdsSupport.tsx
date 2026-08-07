@@ -5,7 +5,7 @@ import { supportApi, type SupportTicket, type SupportMessage } from "@/lib/api";
 const SECTION_LABEL: Record<string, string> = {
   upload: "Загрузка бланков", works: "Работы", results: "Результаты",
   students: "Ученики", tests: "Тесты", synopsis: "Конспекты",
-  presentations: "Презентации", exams: "ОГЭ / ЕГЭ", chat: "Чат с ИИ",
+  presentations: "Презентации", exams: "Итоговая аттестация", chat: "Чат с ИИ",
   subscription: "Подписка", other: "Другое",
 };
 

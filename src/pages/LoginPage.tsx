@@ -421,7 +421,7 @@ export default function LoginPage({ onLogin, initialMode = "login", onBack }: Lo
               )}
 
               <p className="text-[11px] text-muted-foreground leading-relaxed">
-                После регистрации потребуется оформить подписку <span className="font-semibold">АОУСПТ</span> для доступа к разделам системы.
+                После регистрации потребуется оформить подписку <span className="font-semibold">САОУ</span> для доступа к разделам системы.
               </p>
 
               <label className="flex items-start gap-2.5 cursor-pointer group">

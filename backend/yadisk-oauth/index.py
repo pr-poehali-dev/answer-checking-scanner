@@ -1,5 +1,5 @@
 """
-OAuth-интеграция с Яндекс.Диском для учителей АОУСПТ.
+OAuth-интеграция с Яндекс.Диском для учителей САОУ.
 GET  /?action=auth_url&redirect_uri=...&state=... — получить URL для авторизации
 POST /?action=exchange  body: {code, redirect_uri, auth_token, user_login} — обменять код на токены и привязать к ЛК
 POST /?action=refresh   body: {refresh_token}     — обновить access-токен
@@ -47,7 +47,7 @@ def _get_yandex_user_info(access_token: str) -> dict:
 
 
 def handler(event: dict, context) -> dict:
-    """OAuth-привязка Яндекс.Диска к учётной записи учителя АОУСПТ с проверкой уникальности."""
+    """OAuth-привязка Яндекс.Диска к учётной записи учителя САОУ с проверкой уникальности."""
     if event.get("httpMethod") == "OPTIONS":
         return {"statusCode": 200, "headers": CORS, "body": ""}
 

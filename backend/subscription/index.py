@@ -1,5 +1,5 @@
 """
-API подписки АОУСПТ.
+API подписки САОУ.
 GET  /plans — список тарифов
 POST /create — создать платёж в ЮKassa, вернуть confirmation_url
 POST /check — проверить статус платежа (вызывается фронтом после возврата с оплаты)
@@ -23,11 +23,11 @@ CORS = {
 
 SCHEMA = os.environ.get("MAIN_DB_SCHEMA", "t_p31556921_answer_checking_scan")
 
-# ── Тарифы АОУСПТ ──────────────────────────────────────────────────────────
+# ── Тарифы САОУ ──────────────────────────────────────────────────────────
 PLANS = [
     {
         "code": "monthly",
-        "name": "АОУСПТ — Месяц",
+        "name": "САОУ — Месяц",
         "amount": 199,
         "months": 1,
         "description": "Подписка на 1 месяц. Все разделы доступны.",
@@ -35,7 +35,7 @@ PLANS = [
     },
     {
         "code": "halfyear",
-        "name": "АОУСПТ — Полгода",
+        "name": "САОУ — Полгода",
         "amount": 1099,
         "months": 6,
         "description": "Подписка на 6 месяцев. Экономия 8%.",
@@ -43,7 +43,7 @@ PLANS = [
     },
     {
         "code": "year",
-        "name": "АОУСПТ — Год",
+        "name": "САОУ — Год",
         "amount": 2299,
         "months": 12,
         "description": "Подписка на 12 месяцев. Экономия 4%.",
@@ -174,7 +174,7 @@ def grant_subscription(login: str, plan_code: str, months: int, payment_id: str 
 
 
 def handler(event: dict, context) -> dict:
-    """Платежи и подписки АОУСПТ через ЮKassa."""
+    """Платежи и подписки САОУ через ЮKassa."""
     if event.get("httpMethod") == "OPTIONS":
         return {"statusCode": 200, "headers": CORS, "body": ""}
 
@@ -235,7 +235,7 @@ def handler(event: dict, context) -> dict:
                 "amount": {"value": f"{plan['amount']:.2f}", "currency": "RUB"},
                 "capture": True,
                 "confirmation": {"type": "redirect", "return_url": return_url},
-                "description": f"АОУСПТ · {plan['name']} · {full_name}",
+                "description": f"САОУ · {plan['name']} · {full_name}",
                 "metadata": {
                     "login": user_login, "plan": plan_code, "months": str(plan["months"]),
                     "autorenew": "1" if autorenew else "0",
@@ -407,7 +407,7 @@ def handler(event: dict, context) -> dict:
                 "amount": {"value": f"{amount_rub:.2f}", "currency": "RUB"},
                 "capture": True,
                 "confirmation": {"type": "redirect", "return_url": return_url},
-                "description": f"АОУСПТ · Пополнение баланса ИИ · {full_name}",
+                "description": f"САОУ · Пополнение баланса ИИ · {full_name}",
                 "metadata": {"login": user_login, "plan": "balance", "amount_rub": str(amount_rub)},
             }
             if email:
@@ -604,7 +604,7 @@ def handler(event: dict, context) -> dict:
                     "amount": {"value": f"{plan['amount']:.2f}", "currency": "RUB"},
                     "capture": True,
                     "payment_method_id": pm_id,
-                    "description": f"АОУСПТ · Автопродление · {plan['name']} · {full_name}",
+                    "description": f"САОУ · Автопродление · {plan['name']} · {full_name}",
                     "metadata": {
                         "login": login, "plan": plan_code, "months": str(plan["months"]),
                         "autorenew": "0", "recurrent": "1",

@@ -33,9 +33,9 @@ const FEATURES = [
     color: "hsl(270 50% 35%)",
   },
   {
-    icon: "Cloud",
-    title: "Синхронизация с Я.Диском",
-    desc: "Все данные — ученики, работы, результаты, презентации — автоматически сохраняются на ваш личный Яндекс.Диск. Данные только у вас.",
+    icon: "ShieldCheck",
+    title: "Данные хранятся на серверах в России",
+    desc: "Ученики, работы, результаты, презентации и конспекты сохраняются на наших собственных серверах на территории РФ — и остаются доступны на любом устройстве. По желанию можно дополнительно подключить личный Яндекс.Диск.",
     color: "hsl(197 71% 35%)",
   },
 ];
@@ -77,7 +77,7 @@ export default function LandingContent({
             <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: "hsl(215 60% 22%)" }}>Возможности системы</p>
             <h2 className="text-2xl sm:text-3xl font-bold text-foreground mb-3">Всё что нужно учителю — в одном месте</h2>
             <p className="text-muted-foreground max-w-xl mx-auto text-sm">
-              От проверки бланков до генерации контента — АОУСПТ автоматизирует рутину, оставляя время на живое общение с учениками.
+              От проверки бланков до генерации контента — САОУ автоматизирует рутину, оставляя время на живое общение с учениками.
             </p>
           </div>
 
@@ -213,7 +213,7 @@ export default function LandingContent({
                     <span className="text-xs text-muted-foreground ml-1">/ {plan.months === 1 ? "месяц" : `${plan.months} мес.`}</span>
                   </div>
                   <ul className="space-y-2 mb-6 flex-1">
-                    {["Сканер бланков ответов", "ИИ-генератор тестов", "ИИ-презентации и конспекты", "Синхронизация с Я.Диском", "Журнал учеников и результатов"].map(f => (
+                    {["Сканер бланков ответов", "ИИ-генератор тестов", "ИИ-презентации и конспекты", "Хранение данных на серверах в РФ", "Журнал учеников и результатов"].map(f => (
                       <li key={f} className="flex items-center gap-2 text-xs text-foreground/80">
                         <Icon name="Check" size={13} className="text-green-500 flex-shrink-0" />
                         {f}

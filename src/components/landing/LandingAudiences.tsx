@@ -12,7 +12,7 @@ const TEACHER_FEATURES = [
 ];
 
 const STUDENT_FEATURES = [
-  { icon: "GraduationCap", text: "Подготовка к ОГЭ и ЕГЭ по вариантам ФИПИ" },
+  { icon: "GraduationCap", text: "Подготовка к итоговой аттестации по официальным вариантам" },
   { icon: "FileText", text: "Тренировочные тесты по любым темам" },
   { icon: "MessageSquare", text: "ИИ-помощник: объяснит тему и решит задачу" },
   { icon: "BookOpen", text: "Конспекты и материалы для самостоятельной учёбы" },

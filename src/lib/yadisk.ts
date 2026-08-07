@@ -2,7 +2,10 @@
 const OAUTH_URL = "https://functions.poehali.dev/9eb754b2-58e7-488a-a847-d938764be267";
 const PROXY_URL = "https://functions.poehali.dev/6ef07926-3479-451d-b645-5db24ffe7016";
 
-export const ROOT_FOLDER = "АОУСПТ";
+export const ROOT_FOLDER = "САОУ";
+// Прежнее имя корневой папки (до переименования платформы) — используется
+// только для одноразового переноса данных существующих пользователей.
+export const LEGACY_ROOT_FOLDER = "АОУСПТ";
 export const STUDENTS_FILE = `${ROOT_FOLDER}/students.json`;
 export const RESULTS_FOLDER = `${ROOT_FOLDER}/results`;
 export const WORKS_FILE = `${ROOT_FOLDER}/works.json`;
@@ -165,7 +168,33 @@ export const yadisk = {
       method: "POST", token, body: { path },
     }),
 
-  /** Проверка валидности токена через попытку получить список корня АОУСПТ */
+  move: (token: string, from: string, to: string) =>
+    proxyRequest<{ ok: boolean; moved: boolean }>("move", {
+      method: "POST", token, body: { from, to },
+    }),
+
+  /**
+   * Одноразовый перенос данных из старой папки «АОУСПТ» (прежнее название
+   * платформы) в новую «САОУ» — чтобы у учителей, подключивших Я.Диск ранее,
+   * ничего не потерялось после переименования. Если старой папки нет или
+   * новая уже существует — ничего не делает.
+   */
+  migrateLegacyFolder: async (token: string): Promise<boolean> => {
+    try {
+      const res = await yadisk.list(token, "/");
+      const hasLegacy = res.exists && res.items.some(
+        it => it.type === "dir" && it.name === LEGACY_ROOT_FOLDER);
+      if (!hasLegacy) return false;
+      const newRes = await yadisk.list(token, `/${ROOT_FOLDER}`);
+      if (newRes.exists) return false; // новая уже есть — не трогаем
+      const r = await yadisk.move(token, LEGACY_ROOT_FOLDER, ROOT_FOLDER);
+      return !!r.moved;
+    } catch {
+      return false;
+    }
+  },
+
+  /** Проверка валидности токена через попытку получить список корня САОУ */
   ping: async (token: string): Promise<boolean> => {
     try {
       await proxyRequest("list", { method: "GET", token, query: { path: "/" } });

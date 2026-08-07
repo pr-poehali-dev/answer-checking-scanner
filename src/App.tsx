@@ -22,6 +22,7 @@ import DocsPage from "./pages/DocsPage";
 import PublicHomePage from "./pages/PublicHomePage";
 import SiteVersionBadge from "./components/SiteVersionBadge";
 import AccessibilityPanel from "./components/AccessibilityPanel";
+import CookieConsent from "./components/CookieConsent";
 
 const queryClient = new QueryClient();
 
@@ -55,6 +56,7 @@ const App = () => (
         </Routes>
         <SiteVersionBadge />
         <AccessibilityPanel />
+        <CookieConsent />
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>

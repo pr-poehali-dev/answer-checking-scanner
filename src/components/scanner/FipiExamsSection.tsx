@@ -122,10 +122,10 @@ export function FipiExamsSection() {
       <div>
         <h2 className="text-2xl font-bold flex items-center gap-2">
           <Icon name="GraduationCap" size={28} className="text-blue-600" />
-          Экзамены ФИПИ
+          Готовые экзаменационные варианты
         </h2>
         <p className="text-sm text-gray-600 mt-1">
-          Готовые варианты ЕГЭ и ОГЭ из банка заданий ФИПИ. Без ИИ — мгновенная генерация.
+          Готовые варианты итоговой аттестации из банка официальных заданий. Без ИИ — мгновенная генерация.
           Каждый вариант собирается случайным образом из официальных заданий по структуре экзамена.
         </p>
       </div>
@@ -146,7 +146,7 @@ export function FipiExamsSection() {
                     : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
                 }`}
               >
-                {t}
+                {t === "ОГЭ" ? "9 класс" : "11 класс"}
               </button>
             ))}
           </div>
@@ -201,7 +201,7 @@ export function FipiExamsSection() {
         {lastResult && (
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-3">
             <div className="text-sm font-medium text-blue-900">
-              {lastResult.examType} · {lastResult.subject} · Вариант №{lastResult.variantNum}
+              {lastResult.examType === "ОГЭ" ? "9 класс" : "11 класс"} · {lastResult.subject} · Вариант №{lastResult.variantNum}
             </div>
             <div className="text-xs text-blue-700">
               Заданий: {lastResult.totalTasks} · Максимальный балл: {lastResult.totalPoints}
@@ -241,7 +241,7 @@ export function FipiExamsSection() {
               >
                 <div className="flex-1 min-w-0">
                   <div className="font-medium text-sm text-gray-900 truncate">
-                    {item.examType} · {item.subject} · Вариант №{item.variantNum}
+                    {item.examType === "ОГЭ" ? "9 класс" : "11 класс"} · {item.subject} · Вариант №{item.variantNum}
                   </div>
                   <div className="text-xs text-gray-500">
                     {new Date(item.createdAt).toLocaleString("ru-RU")} · {item.totalTasks} заданий · {item.totalPoints} б.

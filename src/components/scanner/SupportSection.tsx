@@ -12,7 +12,7 @@ const SECTIONS: { value: string; label: string }[] = [
   { value: "tests",         label: "Тесты" },
   { value: "synopsis",      label: "Конспекты" },
   { value: "presentations", label: "Презентации" },
-  { value: "exams",         label: "ОГЭ / ЕГЭ" },
+  { value: "exams",         label: "Итоговая аттестация" },
   { value: "chat",          label: "Чат с ИИ" },
   { value: "subscription",  label: "Подписка" },
   { value: "other",         label: "Другое" },

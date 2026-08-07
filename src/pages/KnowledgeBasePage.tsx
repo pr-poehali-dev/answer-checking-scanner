@@ -18,7 +18,7 @@ const TOPICS: TopicItem[] = [
   { id: "worksheets", label: "Рабочие листы", icon: "FileSpreadsheet" },
   { id: "synopsis", label: "Конспекты уроков", icon: "BookOpen" },
   { id: "presentations", label: "Презентации", icon: "Presentation" },
-  { id: "exams", label: "ОГЭ / ЕГЭ и ФИПИ", icon: "GraduationCap" },
+  { id: "exams", label: "Итоговая аттестация", icon: "GraduationCap" },
   { id: "chat", label: "Чат с ИИ", icon: "MessageSquare" },
   { id: "prompts", label: "Как правильно делать запросы", icon: "Sparkles" },
   { id: "tips", label: "Советы по созданию материала", icon: "Lightbulb" },
@@ -208,7 +208,7 @@ export default function KnowledgeBasePage() {
                 подключится автоматически, повторно подтверждать не нужно.
               </Step>
             </Card>
-            <Tip>В Яндекс.Диске появится папка «АОУСПТ» — там аккуратно разложены ученики, работы,
+            <Tip>В Яндекс.Диске появится папка «САОУ» — там аккуратно разложены ученики, работы,
               тесты, рабочие листы и презентации.</Tip>
           </SectionBlock>
 
@@ -341,16 +341,16 @@ export default function KnowledgeBasePage() {
             </Card>
           </SectionBlock>
 
-          <SectionBlock id="exams" icon="GraduationCap" title="ОГЭ / ЕГЭ и варианты ФИПИ">
+          <SectionBlock id="exams" icon="GraduationCap" title="Итоговая аттестация">
             <p className="text-sm text-muted-foreground leading-relaxed">
-              Раздел для подготовки к экзаменам. ИИ собирает тренировочные варианты по структуре ФИПИ,
-              а также доступны готовые варианты без участия ИИ.
+              Раздел для подготовки к итоговой аттестации (9 и 11 класс). ИИ собирает тренировочные
+              варианты по официальной структуре экзамена, а также доступны готовые варианты без участия ИИ.
             </p>
             <Card className="space-y-3">
-              <p className="text-sm"><span className="font-semibold">ОГЭ / ЕГЭ:</span> ИИ генерирует
-                варианты по выбранному предмету и теме по образцу ФИПИ.</p>
-              <p className="text-sm"><span className="font-semibold">Экзамены ФИПИ:</span> готовые
-                варианты без расхода токенов — можно сразу использовать.</p>
+              <p className="text-sm"><span className="font-semibold">Итоговая аттестация:</span> ИИ генерирует
+                варианты по выбранному предмету и теме по официальному образцу.</p>
+              <p className="text-sm"><span className="font-semibold">Готовые варианты:</span> собираются
+                без расхода токенов — можно сразу использовать.</p>
             </Card>
           </SectionBlock>
 
@@ -433,7 +433,7 @@ export default function KnowledgeBasePage() {
               <p className="text-sm"><span className="font-semibold">Презентации учителя:</span>
                 материалы к урокам, подготовленные преподавателем.</p>
               <p className="text-sm"><span className="font-semibold">Тренировочные тесты, конспекты,
-                ОГЭ/ЕГЭ:</span> инструменты для самостоятельной подготовки.</p>
+                итоговая аттестация:</span> инструменты для самостоятельной подготовки.</p>
               <p className="text-sm"><span className="font-semibold">Чат с ИИ:</span> помощь в учёбе и
                 объяснение тем.</p>
             </Card>
@@ -442,7 +442,7 @@ export default function KnowledgeBasePage() {
           <SectionBlock id="faq" icon="CircleHelp" title="Частые вопросы">
             <Card className="space-y-4">
               {[
-                ["Где хранятся мои файлы?", "В вашем личном Яндекс.Диске, в папке «АОУСПТ». Платформа не хранит их у себя."],
+                ["Где хранятся мои файлы?", "В вашем личном Яндекс.Диске, в папке «САОУ». Платформа не хранит их у себя."],
                 ["Почему генерация платная?", "ИИ-генерация расходует вычислительные ресурсы. Оплата идёт из баланса токенов, который вы пополняете."],
                 ["Можно ли работать с телефона?", "Да. Платформа адаптирована под мобильные устройства, а Яндекс.Диск подключается на любом устройстве автоматически."],
                 ["Материал получился не идеальным — что делать?", "Уточните запрос (тема, класс, акценты в описании) и сгенерируйте заново. Перед уроком всегда просматривайте результат."],

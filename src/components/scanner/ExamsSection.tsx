@@ -7,7 +7,7 @@ import { examApi, type ExamResponse } from "@/lib/api";
 import { downloadDocx } from "./TestsForm";
 import { yadisk, ROOT_FOLDER } from "@/lib/yadisk";
 
-const EXAMS_FOLDER = `${ROOT_FOLDER}/ОГЭ_ЕГЭ`;
+const EXAMS_FOLDER = `${ROOT_FOLDER}/Итоговая_аттестация`;
 const TASK_KEY = "gen:exams";
 
 const OGE_SUBJECTS_FALLBACK = [
@@ -182,10 +182,10 @@ export function ExamsSection() {
             <Icon name="GraduationCap" size={16} className="text-yellow-300" />
             <span className="text-xs font-semibold uppercase tracking-wider opacity-80">ИИ-генератор</span>
           </div>
-          <h2 className="text-xl font-bold mb-1">Варианты ОГЭ и ЕГЭ по структуре ФИПИ</h2>
+          <h2 className="text-xl font-bold mb-1">Варианты итоговой аттестации</h2>
           <p className="text-xs opacity-80">
-            ИИ создаёт полноценный вариант экзамена строго по структуре ФИПИ: нужное количество заданий,
-            правильные типы (выбор ответа, краткий ответ, развёрнутый), темы из кодификатора.
+            ИИ создаёт полноценный экзаменационный вариант по официальной структуре: нужное количество заданий,
+            правильные типы (выбор ответа, краткий ответ, развёрнутый), темы по учебной программе.
             Скачайте вариант для учеников и ответы для учителя.
           </p>
         </div>
@@ -220,10 +220,12 @@ export function ExamsSection() {
                       size={16}
                       className={examType === t ? "text-purple-600" : "text-muted-foreground"}
                     />
-                    <span className={`text-base font-bold ${examType === t ? "text-purple-700" : "text-foreground"}`}>{t}</span>
+                    <span className={`text-base font-bold ${examType === t ? "text-purple-700" : "text-foreground"}`}>
+                      {t === "ОГЭ" ? "9 класс" : "11 класс"}
+                    </span>
                   </div>
                   <p className="text-[11px] text-muted-foreground">
-                    {t === "ОГЭ" ? "9 класс · Государственная итоговая аттестация" : "11 класс · Единый государственный экзамен"}
+                    Итоговая аттестация
                   </p>
                 </button>
               ))}
@@ -248,9 +250,9 @@ export function ExamsSection() {
             <div className="flex items-start gap-2">
               <Icon name="Info" size={14} className="text-purple-500 mt-0.5 shrink-0" />
               <div>
-                <p className="text-xs font-semibold text-purple-800 mb-0.5">Структура строго по ФИПИ</p>
+                <p className="text-xs font-semibold text-purple-800 mb-0.5">Официальная структура заданий</p>
                 <p className="text-xs text-purple-700">
-                  Для каждого задания ИИ генерирует случайный вариант из тем кодификатора {examType}.
+                  Для каждого задания ИИ генерирует случайный вариант из тем учебной программы.
                   Вы получите два файла: вариант для учеников и ответы с критериями для учителя.
                 </p>
               </div>
@@ -287,7 +289,7 @@ export function ExamsSection() {
             ) : (
               <span className="flex items-center justify-center gap-2">
                 <Icon name="Sparkles" size={16} />
-                Сгенерировать вариант {examType} · {subject || "выберите предмет"}
+                Сгенерировать вариант · {subject || "выберите предмет"}
               </span>
             )}
           </button>
@@ -298,7 +300,7 @@ export function ExamsSection() {
                 <p className="text-xs text-center font-semibold text-purple-700">{stage}</p>
               )}
               <p className="text-xs text-muted-foreground text-center">
-                ИИ генерирует каждое задание по теме кодификатора ФИПИ — это занимает несколько минут.
+                ИИ генерирует каждое задание по теме учебной программы — это занимает несколько минут.
                 Можно перейти в другой раздел — генерация продолжится в фоне.
               </p>
             </div>

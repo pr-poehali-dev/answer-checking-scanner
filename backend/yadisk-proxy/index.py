@@ -67,7 +67,7 @@ def _ensure_folder_recursive(token: str, folder_path: str) -> dict:
 
 
 def handler(event: dict, context) -> dict:
-    """Прокси-функция к API Яндекс.Диска для приложения АОУСПТ."""
+    """Прокси-функция к API Яндекс.Диска для приложения САОУ."""
     if event.get("httpMethod") == "OPTIONS":
         return {"statusCode": 200, "headers": CORS, "body": ""}
 
@@ -229,5 +229,27 @@ def handler(event: dict, context) -> dict:
                 err = {"raw": raw.decode(errors="ignore")}
             return _resp(status, {"error": "Не удалось удалить", "details": err})
         return _resp(200, {"ok": True})
+
+    # Переименовать/переместить (используется для переноса старой папки
+    # «АОУСПТ» в новую «САОУ» после ребрендинга — без потери данных учителя)
+    if method == "POST" and action == "move":
+        src = (body.get("from") or "").strip()
+        dst = (body.get("to") or "").strip()
+        if not src or not dst:
+            return _resp(400, {"error": "from и to обязательны"})
+        url = (f"{API}/resources/move?from={urllib.parse.quote(src)}"
+               f"&path={urllib.parse.quote(dst)}&overwrite=false")
+        status, raw = _yreq("POST", url, token)
+        if status == 404:
+            return _resp(200, {"ok": True, "moved": False, "reason": "source_not_found"})
+        if status not in (201, 202):
+            try:
+                err = json.loads(raw.decode())
+            except Exception:
+                err = {"raw": raw.decode(errors="ignore")}
+            if status == 409:
+                return _resp(200, {"ok": True, "moved": False, "reason": "target_exists"})
+            return _resp(status, {"error": "Не удалось переместить", "details": err})
+        return _resp(200, {"ok": True, "moved": True})
 
     return _resp(404, {"error": "Неизвестное действие"})

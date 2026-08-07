@@ -865,6 +865,11 @@ export const appStore = {
     state = { ...state, yadiskSyncing: true };
     notify();
     try {
+      // Одноразовый перенос данных из старой папки «АОУСПТ» (прежнее
+      // название платформы) в «САОУ» — до чтения файлов, чтобы у уже
+      // подключивших Я.Диск учителей данные не «потерялись» после ребрендинга.
+      await yadisk.migrateLegacyFolder(token);
+
       let students: Student[] = state.students;
       let works: Work[] = state.works;
       let results: StudentResult[] = state.results;

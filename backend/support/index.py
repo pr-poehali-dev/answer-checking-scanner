@@ -1,5 +1,5 @@
 """
-Чат технической поддержки АОУСПТ.
+Чат технической поддержки САОУ.
 Действия через ?action=...
 
 Пользователь (ЛК):
@@ -255,7 +255,7 @@ def serialize_message(row) -> dict:
 
 
 def handler(event: dict, context) -> dict:
-    """Чат технической поддержки АОУСПТ."""
+    """Чат технической поддержки САОУ."""
     if event.get("httpMethod") == "OPTIONS":
         return {"statusCode": 200, "headers": CORS, "body": ""}
 

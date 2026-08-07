@@ -9,8 +9,8 @@ export const AUDIENCE_PRESETS = [
   "Ученики 7–8 классов",
   "Ученики 9 класса",
   "Ученики 10–11 классов",
-  "Подготовка к ОГЭ",
-  "Подготовка к ЕГЭ",
+  "Подготовка к итоговой аттестации (9 класс)",
+  "Подготовка к итоговой аттестации (11 класс)",
 ];
 
 export function triggerDownload(href: string, filename: string, revoke?: string) {

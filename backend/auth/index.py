@@ -1,5 +1,5 @@
 """
-API авторизации и управления пользователями АОУСПТ.
+API авторизации и управления пользователями САОУ.
 POST /login — вход (учитель/админ/tester)
 POST /signup — самостоятельная регистрация (имя, фамилия, email, пароль) — логин генерируется автоматически,
               требуется подтверждение email кодом (см. /confirm-email)
@@ -388,7 +388,7 @@ def record_consent(cur, *, user_id, login, full_name, email, phone, context,
 
 
 def handler(event: dict, context) -> dict:
-    """Авторизация, регистрация, управление пользователями и подписками АОУСПТ."""
+    """Авторизация, регистрация, управление пользователями и подписками САОУ."""
     if event.get("httpMethod") == "OPTIONS":
         return {"statusCode": 200, "headers": CORS, "body": ""}
 
@@ -415,7 +415,7 @@ def handler(event: dict, context) -> dict:
         last_name = (body.get("last_name") or "").strip()
         email = (body.get("email") or "").strip().lower()
         password = (body.get("password") or "").strip()
-        school = (body.get("school") or "АОУСПТ").strip()
+        school = (body.get("school") or "САОУ").strip()
         study_group = (body.get("study_group") or "").strip()[:64]
         # Роль самостоятельной регистрации: только учитель или ученик
         req_role = (body.get("role") or "teacher").strip().lower()
@@ -574,7 +574,7 @@ def handler(event: dict, context) -> dict:
             admin_token = _make_token("admin", "admin", admin_pw_hash)
             return _resp(200, {
                 "role": "admin", "login": "admin",
-                "full_name": "Администратор АОУСПТ", "school": "АОУСПТ",
+                "full_name": "Администратор САОУ", "school": "САОУ",
                 "token": admin_token,
                 "subscription_status": "active", "subscription_active": True,
                 "subscription_until": None,
@@ -833,7 +833,7 @@ def handler(event: dict, context) -> dict:
         login = body.get("login", "").strip()
         password = body.get("password", "").strip()
         full_name = body.get("full_name", "").strip()
-        school = body.get("school", "АОУСПТ").strip()
+        school = body.get("school", "САОУ").strip()
         role = body.get("role", "teacher").strip()
 
         if not login or not password or not full_name:
@@ -1001,7 +1001,7 @@ def handler(event: dict, context) -> dict:
             return _resp(403, {"error": "Нет доступа"})
 
         login = (body.get("login") or "").strip()
-        plan = (body.get("plan") or "АОУСПТ").strip()
+        plan = (body.get("plan") or "САОУ").strip()
         try:
             months = int(body.get("months") or 1)
         except (TypeError, ValueError):

@@ -180,7 +180,7 @@ export default function UdsMail({ login, token, myAddress }: Props) {
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto styled-scrollbar">
           {tab === "chats" ? (
             loadingList ? (
               <div className="flex items-center justify-center py-8 text-xs text-muted-foreground gap-2">
@@ -272,7 +272,7 @@ export default function UdsMail({ login, token, myAddress }: Props) {
             </div>
 
             {/* Сообщения */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-2 bg-slate-50">
+            <div className="flex-1 overflow-y-auto styled-scrollbar p-4 space-y-2 bg-slate-50">
               {loadingThread ? (
                 <div className="flex items-center justify-center py-8 text-xs text-muted-foreground gap-2">
                   <Icon name="Loader2" size={14} className="animate-spin" /> Загрузка…

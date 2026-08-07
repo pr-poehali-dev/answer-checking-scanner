@@ -89,7 +89,7 @@ export function SynopsisRow({ item, onGoPresentation, onGoTest, onGoWorksheet }:
       </div>
 
       {expanded && (
-        <div className="mt-3 ml-12 border border-border rounded-sm overflow-hidden max-h-[500px] overflow-y-auto">
+        <div className="mt-3 ml-12 border border-border rounded-sm overflow-hidden max-h-[500px] overflow-y-auto styled-scrollbar">
           <SynopsisTextView item={item} />
         </div>
       )}

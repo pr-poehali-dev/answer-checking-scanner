@@ -106,7 +106,7 @@ export default function StudentCabinet() {
           </button>
         </div>
 
-        <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
+        <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto styled-scrollbar">
           <p className="section-header px-3 mb-3" style={{ color: "hsl(var(--sidebar-foreground))", opacity: 0.45 }}>Разделы</p>
           {navItems.map((item) => (
             <div
@@ -189,7 +189,7 @@ export default function StudentCabinet() {
           </a>
         </header>
 
-        <main className="flex-1 overflow-y-auto pb-16 md:pb-0">
+        <main className="flex-1 overflow-y-auto styled-scrollbar pb-16 md:pb-0">
           <div className="px-3 md:px-6 py-4 md:py-6">
             <ActiveSection key={active} />
           </div>

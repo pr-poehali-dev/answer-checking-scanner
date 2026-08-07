@@ -121,7 +121,7 @@ export default function EmployeeDetail({ data, login, token, perms, myRole, isAd
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="bg-white rounded-xl max-w-lg w-full max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+      <div className="bg-white rounded-xl max-w-lg w-full max-h-[85vh] overflow-y-auto styled-scrollbar" onClick={e => e.stopPropagation()}>
         <div className="px-5 py-4 border-b border-border flex items-center justify-between sticky top-0 bg-white">
           <div>
             <p className="text-sm font-bold">{emp.full_name}</p>
@@ -245,7 +245,7 @@ export default function EmployeeDetail({ data, login, token, perms, myRole, isAd
 
           <div>
             <p className="text-xs font-semibold mb-2">История действий ({logs.length})</p>
-            <div className="space-y-1.5 max-h-64 overflow-y-auto">
+            <div className="space-y-1.5 max-h-64 overflow-y-auto styled-scrollbar">
               {logs.length === 0 && <p className="text-xs text-muted-foreground">Действий пока нет</p>}
               {logs.map((l, i) => (
                 <div key={i} className="text-xs border border-border rounded px-2.5 py-1.5">

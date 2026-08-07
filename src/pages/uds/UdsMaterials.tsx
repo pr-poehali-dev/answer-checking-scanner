@@ -122,7 +122,7 @@ export default function UdsMaterials({ login, token }: UdsMaterialsProps) {
       {/* Панель просмотра/отклонения */}
       {active && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setActive(null)}>
-          <div className="bg-white rounded-lg max-w-lg w-full max-h-[90vh] overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-white rounded-lg max-w-lg w-full max-h-[90vh] overflow-y-auto styled-scrollbar p-5" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
               <h3 className="font-bold">{active.title}</h3>
               <button onClick={() => setActive(null)}><Icon name="X" size={18} /></button>

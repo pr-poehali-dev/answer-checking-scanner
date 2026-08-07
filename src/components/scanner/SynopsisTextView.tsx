@@ -18,7 +18,7 @@ export function SynopsisTextView({ item }: { item: SynopsisItem }) {
   const lines = item.text.split("\n");
 
   return (
-    <div className="p-5 max-h-[600px] overflow-y-auto">
+    <div className="p-5 max-h-[600px] overflow-y-auto styled-scrollbar">
       <div className="prose prose-sm max-w-none space-y-2">
         {lines.map((line, i) => {
           if (line.startsWith("## ")) {

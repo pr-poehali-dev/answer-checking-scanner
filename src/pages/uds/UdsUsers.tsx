@@ -130,7 +130,7 @@ function UserDetail({ login, token, perms, targetLogin, onClose, onChanged }: {
   return (
     <>
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="bg-white rounded-xl max-w-lg w-full max-h-[88vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+      <div className="bg-white rounded-xl max-w-lg w-full max-h-[88vh] overflow-y-auto styled-scrollbar" onClick={e => e.stopPropagation()}>
         <div className="px-5 py-4 border-b border-border flex items-center justify-between sticky top-0 bg-white z-10">
           <div>
             <p className="text-sm font-bold">{user?.full_name || targetLogin}</p>

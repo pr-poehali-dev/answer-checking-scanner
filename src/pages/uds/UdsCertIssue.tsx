@@ -121,7 +121,7 @@ export default function UdsCertIssue({ login, token, cert, onDone, onLogout }: P
 
         {/* INSTALL — инструкция и ссылки */}
         {phase === "install" && (
-          <div className="space-y-4 max-h-[88vh] overflow-y-auto">
+          <div className="space-y-4 max-h-[88vh] overflow-y-auto styled-scrollbar">
             <div className="text-center">
               <Icon name="Download" size={26} className="text-blue-400 mx-auto mb-1" />
               <h1 className="text-xl font-bold">Установка КриптоПро</h1>

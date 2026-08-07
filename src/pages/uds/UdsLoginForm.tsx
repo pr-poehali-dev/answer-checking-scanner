@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import Icon from "@/components/ui/icon";
 import { CryptoProMedia } from "@/lib/cryptoPlugins";
 
@@ -51,6 +51,7 @@ export default function UdsLoginForm({
   setStep,
   setError,
 }: UdsLoginFormProps) {
+  const [showPassword, setShowPassword] = useState(false);
   // При открытии шага «cert» подгружаем список сертификатов КриптоПро
   useEffect(() => {
     if (step === "cert" && certList === null && !certLoading) {
@@ -167,9 +168,15 @@ export default function UdsLoginForm({
             </div>
             <div>
               <label className="text-xs text-gray-500 block mb-1">Пароль</label>
-              <input type="password" value={password} onChange={e => setPassword(e.target.value)}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Пароль" />
+              <div className="relative">
+                <input type={showPassword ? "text" : "password"} value={password} onChange={e => setPassword(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2.5 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Пароль" />
+                <button type="button" onClick={() => setShowPassword(v => !v)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors">
+                  <Icon name={showPassword ? "EyeOff" : "Eye"} size={15} />
+                </button>
+              </div>
             </div>
             {error && (
               <div className="flex items-start gap-2 p-2.5 rounded-lg bg-red-50 border border-red-200">

@@ -96,7 +96,7 @@ export default function UdsAllData({ login, token, targetLogin, targetName, onCl
             <p className="text-xs text-muted-foreground mt-3">Собираем данные с сервера…</p>
           </div>
         ) : !data ? null : (
-          <div className="flex-1 overflow-y-auto p-5 space-y-2">
+          <div className="flex-1 overflow-y-auto styled-scrollbar p-5 space-y-2">
             {data.sections.map(s => (
               <SectionBlock key={s.key} section={s}
                 open={openSection === s.key}
@@ -184,7 +184,7 @@ function FieldValue({ name, value }: { name: string; value: unknown }) {
     <div className={wide ? "sm:col-span-2" : ""}>
       <p className="text-[10px] text-muted-foreground uppercase tracking-wide">{label}</p>
       {isObj ? (
-        <pre className="text-[10px] bg-muted/50 rounded p-2 mt-0.5 overflow-x-auto whitespace-pre-wrap break-words max-h-64 overflow-y-auto">
+        <pre className="text-[10px] bg-muted/50 rounded p-2 mt-0.5 overflow-x-auto whitespace-pre-wrap break-words max-h-64 overflow-y-auto styled-scrollbar">
           {JSON.stringify(value, null, 2)}
         </pre>
       ) : typeof value === "boolean" ? (

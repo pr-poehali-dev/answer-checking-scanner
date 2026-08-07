@@ -246,7 +246,7 @@ export default function Index() {
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
+        <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto styled-scrollbar">
           <p className="section-header px-3 mb-3" style={{ color: "hsl(var(--sidebar-foreground))", opacity: 0.45 }}>Разделы</p>
           {NAV_ITEMS.filter((item) => {
             // Админ/тестер видят всё; обычный учитель — без скрытых админом разделов
@@ -377,7 +377,7 @@ export default function Index() {
         </header>
 
         {/* Контент */}
-        <main id="main-content" tabIndex={-1} className="flex-1 overflow-y-auto pb-16 md:pb-0">
+        <main id="main-content" tabIndex={-1} className="flex-1 overflow-y-auto styled-scrollbar pb-16 md:pb-0">
           <div className="px-3 md:px-6 py-4 md:py-6">
             {isMaintenance ? (
               <div className="flex flex-col items-center justify-center py-20 text-center">

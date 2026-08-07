@@ -15,6 +15,7 @@ interface TokenLog {
 export function ProfileCard() {
   const { teacher } = useAppStore();
   const [editing, setEditing] = useState(false);
+  const [showPasswords, setShowPasswords] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -237,13 +238,22 @@ export function ProfileCard() {
                 ].map(f => (
                   <div key={f.key}>
                     <label className="block text-xs text-muted-foreground mb-1">{f.label}</label>
-                    <input
-                      type="password"
-                      value={form[f.key as keyof typeof form]}
-                      onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))}
-                      className="w-full border border-border rounded-sm px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                      placeholder="••••••"
-                    />
+                    <div className="relative">
+                      <input
+                        type={showPasswords ? "text" : "password"}
+                        value={form[f.key as keyof typeof form]}
+                        onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))}
+                        className="w-full border border-border rounded-sm px-3 py-1.5 pr-8 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                        placeholder="••••••"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPasswords(v => !v)}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        <Icon name={showPasswords ? "EyeOff" : "Eye"} size={13} />
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>

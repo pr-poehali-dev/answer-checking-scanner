@@ -18,6 +18,7 @@ export default function UdsProfile({ login, token, panelRoleLabel, operatorNumbe
   const [newPassword, setNewPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
+  const [showPasswords, setShowPasswords] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [ok, setOk] = useState(false);
@@ -132,21 +133,39 @@ export default function UdsProfile({ login, token, panelRoleLabel, operatorNumbe
           </div>
           <div>
             <label className="text-xs text-gray-500 block mb-1">Новый пароль</label>
-            <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)}
-              placeholder="Минимум 6 символов"
-              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <div className="relative">
+              <input type={showPasswords ? "text" : "password"} value={newPassword} onChange={e => setNewPassword(e.target.value)}
+                placeholder="Минимум 6 символов"
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 pr-9 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              <button type="button" onClick={() => setShowPasswords(v => !v)}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors">
+                <Icon name={showPasswords ? "EyeOff" : "Eye"} size={14} />
+              </button>
+            </div>
           </div>
           {newPassword && (
             <div>
               <label className="text-xs text-gray-500 block mb-1">Повторите пароль</label>
-              <input type="password" value={confirm} onChange={e => setConfirm(e.target.value)}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              <div className="relative">
+                <input type={showPasswords ? "text" : "password"} value={confirm} onChange={e => setConfirm(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 pr-9 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                <button type="button" onClick={() => setShowPasswords(v => !v)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors">
+                  <Icon name={showPasswords ? "EyeOff" : "Eye"} size={14} />
+                </button>
+              </div>
             </div>
           )}
           <div className="pt-1 border-t border-border">
             <label className="text-xs text-gray-500 block mb-1 mt-2">Текущий пароль (подтверждение)*</label>
-            <input type="password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)}
-              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <div className="relative">
+              <input type={showPasswords ? "text" : "password"} value={currentPassword} onChange={e => setCurrentPassword(e.target.value)}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 pr-9 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              <button type="button" onClick={() => setShowPasswords(v => !v)}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors">
+                <Icon name={showPasswords ? "EyeOff" : "Eye"} size={14} />
+              </button>
+            </div>
           </div>
 
           {error && (

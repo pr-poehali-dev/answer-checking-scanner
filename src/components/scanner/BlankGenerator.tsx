@@ -254,7 +254,7 @@ export function BlankGenerator({ workId, workTitle, questionsCount: initQ, onClo
 
       <div className="flex flex-col lg:flex-row gap-0 flex-1 overflow-auto">
         {/* Настройки */}
-        <div className="lg:w-72 shrink-0 border-r bg-gray-50 p-4 space-y-4 overflow-y-auto">
+        <div className="lg:w-72 shrink-0 border-r bg-gray-50 p-4 space-y-4 overflow-y-auto styled-scrollbar">
 
           {/* Работа */}
           <section>
@@ -397,7 +397,7 @@ export function BlankGenerator({ workId, workTitle, questionsCount: initQ, onClo
                   {visibleStudents.every(s => selectedCodes.has(s.code)) ? "Снять выделение" : "Выбрать всех"}
                 </button>
 
-                <div className="max-h-48 overflow-y-auto border border-gray-200 rounded-lg bg-white divide-y divide-gray-100">
+                <div className="max-h-48 overflow-y-auto styled-scrollbar border border-gray-200 rounded-lg bg-white divide-y divide-gray-100">
                   {visibleStudents.map(s => {
                     const checked = selectedCodes.has(s.code);
                     return (

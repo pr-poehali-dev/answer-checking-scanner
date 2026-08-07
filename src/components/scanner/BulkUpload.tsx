@@ -190,7 +190,7 @@ export function BulkUpload() {
                 </button>
               </div>
             </div>
-            <div className="max-h-80 overflow-y-auto divide-y divide-border">
+            <div className="max-h-80 overflow-y-auto styled-scrollbar divide-y divide-border">
               {items.map(it => (
                 <div key={it.id} className="px-3 py-2 flex items-center gap-3 text-xs">
                   <Icon

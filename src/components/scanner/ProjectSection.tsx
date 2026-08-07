@@ -235,7 +235,7 @@ export function ProjectSection() {
                 <Icon name="Eye" size={14} />
                 Предпросмотр текста
               </summary>
-              <div className="px-4 py-3 max-h-96 overflow-y-auto text-sm whitespace-pre-wrap text-muted-foreground border-t border-border">
+              <div className="px-4 py-3 max-h-96 overflow-y-auto styled-scrollbar text-sm whitespace-pre-wrap text-muted-foreground border-t border-border">
                 {result.text}
               </div>
             </details>

@@ -125,7 +125,7 @@ export default function UdsSupport({ login, token }: Props) {
               </button>
             </div>
           </div>
-          <div className="border border-border rounded-lg bg-white divide-y divide-border overflow-hidden max-h-[70vh] overflow-y-auto">
+          <div className="border border-border rounded-lg bg-white divide-y divide-border overflow-hidden max-h-[70vh] overflow-y-auto styled-scrollbar">
             {tickets.length === 0 && !loading && (
               <p className="text-xs text-muted-foreground p-6 text-center">Обращений нет</p>
             )}
@@ -182,7 +182,7 @@ export default function UdsSupport({ login, token }: Props) {
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-4 space-y-2.5 max-h-[55vh]">
+              <div className="flex-1 overflow-y-auto styled-scrollbar p-4 space-y-2.5 max-h-[55vh]">
                 {messages.map(m => {
                   const isOp = m.sender_role === "operator";
                   const isSys = m.sender_role === "system";

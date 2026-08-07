@@ -15,11 +15,14 @@ import json
 import os
 import base64
 import hashlib
+import hmac
 import psycopg2
 import boto3
 from datetime import datetime
 
 SCHEMA = os.environ.get("MAIN_DB_SCHEMA", "t_p31556921_answer_checking_scan")
+# Секрет подписи сессионных токенов — тот же, что в функции входа (auth)
+TOKEN_SECRET = os.environ.get("TOKEN_SECRET", "")
 
 # Анонимам (по IP) можно скачать не более N материалов, дальше — регистрация + подписка 99₽
 FREE_DOWNLOADS_LIMIT = 5
@@ -45,6 +48,36 @@ def get_conn():
 
 def hash_token(s: str) -> str:
     return hashlib.sha256(s.encode()).hexdigest()
+
+
+def _make_token(role: str, login: str, password_hash: str) -> str:
+    """Собирает сессионный токен так же, как это делает функция входа (auth).
+    Нужно, чтобы принимать действующие токены пользователей, у которых в базе
+    ещё не сохранён хеш токена (вошли давно / входили на другом устройстве)."""
+    if not TOKEN_SECRET:
+        return f"{role}:{hashlib.sha256((login + password_hash + 'salt').encode()).hexdigest()}"
+    sig = hmac.new(
+        TOKEN_SECRET.encode(),
+        f"{role}:{login}:{password_hash}".encode(),
+        "sha256",
+    ).hexdigest()
+    return f"{role}:{login}:{sig}"
+
+
+def _token_matches_password(token: str, login: str, role: str, password_hash: str) -> bool:
+    """Проверяет токен пересчётом из пароля — для всех возможных ролей-префиксов."""
+    if not token or not password_hash:
+        return False
+    roles = {role, "teacher", "student", "tester"}
+    for r in roles:
+        if not r:
+            continue
+        try:
+            if hmac.compare_digest(token, _make_token(r, login, password_hash)):
+                return True
+        except Exception:
+            continue
+    return False
 
 
 def _resp(status: int, body: dict) -> dict:
@@ -83,14 +116,15 @@ def get_user(login: str, token: str, conn):
     cur = conn.cursor()
     cur.execute(
         f"""SELECT login, full_name, role, is_active, auth_token_hash,
-                   subscription_status, subscription_until
+                   subscription_status, subscription_until, password_hash
             FROM {SCHEMA}.users WHERE login = %s""",
         (login,),
     )
     row = cur.fetchone()
     if not row:
         return None
-    _login, full_name, role, is_active, stored_hash, sub_status, sub_until = row
+    (_login, full_name, role, is_active, stored_hash,
+     sub_status, sub_until, password_hash) = row
     if not is_active:
         return None
 
@@ -98,6 +132,19 @@ def get_user(login: str, token: str, conn):
     # Вариант 1: обычный auth-токен (учитель/ученик/УДС)
     if stored_hash and hash_token(token) == stored_hash:
         ok = True
+    # Вариант 1б: хеша токена в базе нет (или он от прежнего входа), но токен
+    # настоящий — проверяем его пересчётом из пароля, как делает вход. Иначе
+    # авторизованный пользователь не смог бы загрузить материал.
+    elif _token_matches_password(token, login, role, password_hash or ""):
+        ok = True
+        try:
+            cur.execute(
+                f"UPDATE {SCHEMA}.users SET auth_token_hash = %s WHERE login = %s",
+                (hash_token(token), login),
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
     # Вариант 2: токен образовательного учреждения (ou:...)
     elif token.startswith("ou:"):
         cur.execute(

@@ -21,6 +21,7 @@
 import json
 import os
 import hashlib
+import hmac
 from datetime import datetime
 import psycopg2
 
@@ -64,6 +65,38 @@ def get_conn():
 
 def hash_password(s: str) -> str:
     return hashlib.sha256(s.encode()).hexdigest()
+
+
+# Секрет подписи сессионных токенов — тот же, что в функции входа (auth)
+TOKEN_SECRET = os.environ.get("TOKEN_SECRET", "")
+
+
+def _make_token(role: str, login: str, password_hash: str) -> str:
+    """Собирает сессионный токен так же, как функция входа (auth)."""
+    if not TOKEN_SECRET:
+        return f"{role}:{hashlib.sha256((login + password_hash + 'salt').encode()).hexdigest()}"
+    sig = hmac.new(
+        TOKEN_SECRET.encode(),
+        f"{role}:{login}:{password_hash}".encode(),
+        "sha256",
+    ).hexdigest()
+    return f"{role}:{login}:{sig}"
+
+
+def _token_matches_password(token: str, login: str, role: str, password_hash: str) -> bool:
+    """Проверяет токен пересчётом из пароля — для пользователей, у которых
+    хеш токена в базе ещё не сохранён (вошли давно / с другого устройства)."""
+    if not token or not password_hash:
+        return False
+    for r in {role, "teacher", "student", "tester"}:
+        if not r:
+            continue
+        try:
+            if hmac.compare_digest(token, _make_token(r, login, password_hash)):
+                return True
+        except Exception:
+            continue
+    return False
 
 
 def _resp(status: int, body: dict) -> dict:
@@ -144,18 +177,32 @@ def get_caller_by_login(login: str, token: str, conn) -> dict | None:
 
     cur = conn.cursor()
     cur.execute(
-        f"SELECT role, is_active, auth_token_hash FROM {SCHEMA}.users WHERE login = %s",
+        f"""SELECT role, is_active, auth_token_hash, password_hash
+            FROM {SCHEMA}.users WHERE login = %s""",
         (login,)
     )
     row = cur.fetchone()
     if not row:
         return None
-    sys_role, is_active, stored_token_hash = row
+    sys_role, is_active, stored_token_hash, password_hash = row
     if not is_active:
         return None
 
-    # Проверяем токен: hash(token) должен совпасть с сохранённым
-    if not stored_token_hash or hash_password(token) != stored_token_hash:
+    # Проверяем токен: hash(token) должен совпасть с сохранённым.
+    # Если сохранённого хеша нет (вход был давно/с другого устройства) —
+    # проверяем токен пересчётом из пароля и восстанавливаем хеш.
+    if stored_token_hash and hash_password(token) == stored_token_hash:
+        pass
+    elif _token_matches_password(token, login, sys_role, password_hash or ""):
+        try:
+            cur.execute(
+                f"UPDATE {SCHEMA}.users SET auth_token_hash = %s WHERE login = %s",
+                (hash_password(token), login),
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+    else:
         return None
 
     cur.execute(

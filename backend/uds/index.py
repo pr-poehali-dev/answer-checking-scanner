@@ -70,6 +70,10 @@ CAN_TOKENS = {"developer", "advisor", "deputy", "head"}
 CAN_LKVIEW = {"developer", "deputy", "head"}
 # Кто может выпускать и отзывать сертификаты УДС (Глава и Зам Главы)
 CAN_CERT = {"head", "deputy"}
+# Кто может смотреть ВСЕ данные пользователя (Глава, Зам Главы и Советник)
+CAN_ALL_DATA = {"head", "deputy", "advisor"}
+# Срок хранения пользовательских данных: 2 месяца после последнего изменения
+DATA_RETENTION_DAYS = 60
 # Код выпуска сертификата (вводит Глава/Зам при назначении)
 CERT_ISSUE_CODE = os.environ.get("CERT_ISSUE_CODE", "di9u7")
 # Срок действия сертификата — строго 11 месяцев
@@ -208,6 +212,62 @@ def has_uds_access(caller) -> bool:
     return bool(caller and caller.get("is_panel") and (caller.get("is_admin") or caller.get("uds_registered")))
 
 
+# Таблицы пользовательских данных и колонка даты изменения — для автоочистки.
+# У каждой записи свой отсчёт: убирается та, что не менялась DATA_RETENTION_DAYS.
+RETENTION_TARGETS = [
+    ("teacher_materials", "updated_at"),
+    ("teacher_works", "updated_at"),
+    ("student_results", "updated_at"),
+    ("teacher_activity_log", "created_at"),
+    ("material_downloads", "created_at"),
+    ("ai_token_logs", "created_at"),
+]
+
+
+def run_retention_if_due(conn) -> dict:
+    """Автоочистка просроченных данных, но не чаще раза в сутки.
+    Вызывается при заходе сотрудника в УДС, чтобы не зависеть от внешнего
+    планировщика. Ошибки не мешают основной работе."""
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            f"""SELECT max(created_at) FROM {SCHEMA}.data_retention_log""")
+        row = cur.fetchone()
+        last = row[0] if row else None
+        if last is not None:
+            cur.execute("SELECT %s > NOW() - INTERVAL '1 day'", (last,))
+            if cur.fetchone()[0]:
+                return {"skipped": True}
+
+        cur.execute(f"SELECT NOW() - INTERVAL '{DATA_RETENTION_DAYS} days'")
+        cutoff = cur.fetchone()[0]
+        total = 0
+        for table, date_col in RETENTION_TARGETS:
+            cur.execute(
+                f"DELETE FROM {SCHEMA}.{table} WHERE {date_col} < %s", (cutoff,))
+            n = cur.rowcount if (cur.rowcount and cur.rowcount > 0) else 0
+            total += n
+            if n:
+                cur.execute(
+                    f"""INSERT INTO {SCHEMA}.data_retention_log
+                        (table_name, purged_count, cutoff_at) VALUES (%s,%s,%s)""",
+                    (table, n, cutoff))
+        # Отметка о запуске, даже если чистить было нечего (чтобы держать сутки)
+        if total == 0:
+            cur.execute(
+                f"""INSERT INTO {SCHEMA}.data_retention_log
+                    (table_name, purged_count, cutoff_at) VALUES (%s,%s,%s)""",
+                ("(проверка)", 0, cutoff))
+        conn.commit()
+        return {"purged": total}
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return {"error": str(e)}
+
+
 def perms_for(role: str, subrole: str = None) -> dict:
     is_curator = (role in FULL_ACCESS_ROLES) or (subrole == "curator")
     return {
@@ -222,6 +282,8 @@ def perms_for(role: str, subrole: str = None) -> dict:
         "can_block": (PANEL_ROLE_RANK.get(role, 0) >= 5) or is_curator,
         "can_block_user": True,           # блокировка/смена пароля ПОЛЬЗОВАТЕЛЕЙ — все
         "can_cert": role in CAN_CERT,     # выпуск/отзыв сертификатов — Глава и Зам
+        # Просмотр ВСЕХ данных пользователя — Глава, Зам Главы, Советник
+        "can_all_data": role in CAN_ALL_DATA,
         "is_curator": is_curator,         # является куратором (подроль или Глава/Зам)
         "can_assign_subrole": PANEL_ROLE_RANK.get(role, 0) >= 5,  # подроли назначают Глава/Зам
         "subrole": subrole,
@@ -785,6 +847,9 @@ def handler(event: dict, context) -> dict:
                 return _resp(401, {"error": "Не авторизованы"})
             role = caller.get("panel_role")
             access = has_uds_access(caller)
+            # Автоочистка просроченных данных (не чаще раза в сутки)
+            if access:
+                run_retention_if_due(conn)
             # Статус собственного сертификата (для полноэкранного выпуска в ЛК)
             my_cert = None
             if access:
@@ -1562,6 +1627,187 @@ def handler(event: dict, context) -> dict:
                 "created_at": str(c[4]) if c[4] else None,
             } for c in cur.fetchall()]
             return _resp(200, {"user": user, "payments": payments, "charges": charges})
+
+        # ── all-data — ВСЕ данные пользователя (Глава, Зам Главы, Советник) ───
+        if action == "all-data" and method == "GET":
+            if not perms["can_all_data"]:
+                return _resp(403, {"error": "Просмотр всех данных доступен только Главе, Зам. Главы и Советнику"})
+            tl = (qs.get("target_login") or "").strip()
+            if not tl:
+                return _resp(400, {"error": "Укажите пользователя"})
+            cur = conn.cursor()
+
+            def _rows(sql, args, cols):
+                """Выполняет запрос и возвращает список словарей по названиям колонок."""
+                cur.execute(sql, args)
+                out = []
+                for r in cur.fetchall():
+                    item = {}
+                    for i, c in enumerate(cols):
+                        v = r[i]
+                        item[c] = str(v) if hasattr(v, "isoformat") else v
+                    out.append(item)
+                return out
+
+            retention_note = f"Данные хранятся {DATA_RETENTION_DAYS} дней с даты последнего изменения"
+
+            # Работы (проверочные/контрольные) учителя
+            works = _rows(
+                f"""SELECT work_id, work_type, subject, class_label, work_date,
+                           total_questions, part1_count, part2_count, answer_key,
+                           max_score, topic, generated_by_ai, created_at, updated_at
+                    FROM {SCHEMA}.teacher_works WHERE teacher_login = %s
+                    ORDER BY updated_at DESC""", (tl,),
+                ["work_id", "work_type", "subject", "class_label", "work_date",
+                 "total_questions", "part1_count", "part2_count", "answer_key",
+                 "max_score", "topic", "generated_by_ai", "created_at", "updated_at"])
+
+            # Материалы С СОДЕРЖИМЫМ (конспекты, презентации, тесты, листы)
+            cur.execute(
+                f"""SELECT material_id, material_type, title, subject, class_label,
+                           topic, filename, size_bytes, uploaded_to_yadisk,
+                           content, created_at, updated_at
+                    FROM {SCHEMA}.teacher_materials WHERE teacher_login = %s
+                    ORDER BY updated_at DESC""", (tl,))
+            materials = []
+            for r in cur.fetchall():
+                try:
+                    cont = json.loads(r[9]) if r[9] else None
+                except Exception:
+                    cont = r[9]
+                materials.append({
+                    "material_id": r[0], "material_type": r[1], "title": r[2],
+                    "subject": r[3], "class_label": r[4], "topic": r[5],
+                    "filename": r[6], "size_bytes": r[7], "uploaded_to_yadisk": r[8],
+                    "content": cont,
+                    "created_at": str(r[10]) if r[10] else None,
+                    "updated_at": str(r[11]) if r[11] else None,
+                })
+
+            # Ученики учителя (коды привязки)
+            students = _rows(
+                f"""SELECT student_code, bind_code, full_name, class_label,
+                           bound_login, bound_at, created_at, updated_at
+                    FROM {SCHEMA}.student_codes WHERE teacher_login = %s
+                    ORDER BY full_name""", (tl,),
+                ["student_code", "bind_code", "full_name", "class_label",
+                 "bound_login", "bound_at", "created_at", "updated_at"])
+
+            # Результаты проверок работ
+            cur.execute(
+                f"""SELECT work_id, student_code, work_title, subject, work_date,
+                           correct_count, total_count, score, grade, answers,
+                           scanned_at, updated_at
+                    FROM {SCHEMA}.student_results WHERE teacher_login = %s
+                    ORDER BY updated_at DESC""", (tl,))
+            results = []
+            for r in cur.fetchall():
+                try:
+                    ans = json.loads(r[9]) if r[9] else []
+                except Exception:
+                    ans = []
+                results.append({
+                    "work_id": r[0], "student_code": r[1], "work_title": r[2],
+                    "subject": r[3], "work_date": r[4], "correct_count": r[5],
+                    "total_count": r[6], "score": r[7], "grade": r[8],
+                    "answers": ans,
+                    "scanned_at": str(r[10]) if r[10] else None,
+                    "updated_at": str(r[11]) if r[11] else None,
+                })
+
+            # Свои результаты, если это УЧЕНИК (по привязке)
+            my_results = _rows(
+                f"""SELECT sr.work_id, sr.work_title, sr.subject, sr.work_date,
+                           sr.correct_count, sr.total_count, sr.score, sr.grade,
+                           sr.teacher_login, sr.scanned_at
+                    FROM {SCHEMA}.student_results sr
+                    JOIN {SCHEMA}.student_codes sc
+                      ON sc.teacher_login = sr.teacher_login
+                     AND sc.student_code = sr.student_code
+                    WHERE sc.bound_login = %s
+                    ORDER BY sr.scanned_at DESC""", (tl,),
+                ["work_id", "work_title", "subject", "work_date", "correct_count",
+                 "total_count", "score", "grade", "teacher_login", "scanned_at"])
+
+            # Журнал действий
+            activity = _rows(
+                f"""SELECT action, entity_type, entity_id, details, created_at
+                    FROM {SCHEMA}.teacher_activity_log WHERE teacher_login = %s
+                    ORDER BY created_at DESC LIMIT 300""", (tl,),
+                ["action", "entity_type", "entity_id", "details", "created_at"])
+
+            # Платежи
+            payments = _rows(
+                f"""SELECT plan, amount, currency, months, provider, status, source,
+                           granted_by, created_at, paid_at, subscription_until
+                    FROM {SCHEMA}.payments
+                    WHERE user_login = %s ORDER BY created_at DESC""", (tl,),
+                ["plan", "amount", "currency", "months", "provider", "status",
+                 "source", "granted_by", "created_at", "paid_at", "subscription_until"])
+
+            # Списания ИИ
+            ai_logs = _rows(
+                f"""SELECT action, tokens, amount_kopecks, balance_kopecks_after, created_at
+                    FROM {SCHEMA}.ai_token_logs WHERE login = %s
+                    ORDER BY created_at DESC LIMIT 300""", (tl,),
+                ["action", "tokens", "amount_kopecks", "balance_kopecks_after", "created_at"])
+
+            # Согласия
+            consents = _rows(
+                f"""SELECT context, documents, app_version, privacy_revision,
+                           oferta_revision, ip_address, created_at
+                    FROM {SCHEMA}.user_consents WHERE login = %s
+                    ORDER BY created_at DESC""", (tl,),
+                ["context", "documents", "app_version", "privacy_revision",
+                 "oferta_revision", "ip_address", "created_at"])
+
+            # Обращения в поддержку
+            tickets = _rows(
+                f"""SELECT id, section, subject, status, operator_login,
+                           created_at, updated_at
+                    FROM {SCHEMA}.support_tickets WHERE login = %s
+                    ORDER BY created_at DESC""", (tl,),
+                ["id", "section", "subject", "status", "operator_login",
+                 "created_at", "updated_at"])
+
+            # Проектные работы
+            projects = _rows(
+                f"""SELECT id, work_type, work_label, topic, subject,
+                           word_count, page_estimate, created_at
+                    FROM {SCHEMA}.project_works WHERE author_login = %s
+                    ORDER BY created_at DESC""", (tl,),
+                ["id", "work_type", "work_label", "topic", "subject",
+                 "word_count", "page_estimate", "created_at"])
+
+            # Фиксируем факт просмотра (кто смотрел чужие данные)
+            cur.execute(
+                f"""INSERT INTO {SCHEMA}.uds_data_views
+                    (viewer_login, viewer_role, target_login) VALUES (%s,%s,%s)""",
+                (caller["login"], caller.get("panel_role"), tl))
+            log_action(cur, caller["login"], caller.get("panel_role"),
+                       "view_all_data", tl, {"target": tl})
+            conn.commit()
+
+            sections = [
+                {"key": "works", "label": "Работы (проверочные/контрольные)", "items": works},
+                {"key": "materials", "label": "Материалы (конспекты, презентации, тесты, листы)", "items": materials},
+                {"key": "students", "label": "Ученики и коды привязки", "items": students},
+                {"key": "results", "label": "Результаты проверок", "items": results},
+                {"key": "my_results", "label": "Свои результаты (как ученика)", "items": my_results},
+                {"key": "activity", "label": "Журнал действий", "items": activity},
+                {"key": "payments", "label": "Платежи", "items": payments},
+                {"key": "ai_logs", "label": "Списания ИИ", "items": ai_logs},
+                {"key": "consents", "label": "Согласия", "items": consents},
+                {"key": "tickets", "label": "Обращения в поддержку", "items": tickets},
+                {"key": "projects", "label": "Проектные работы", "items": projects},
+            ]
+            return _resp(200, {
+                "target_login": tl,
+                "retention_days": DATA_RETENTION_DAYS,
+                "retention_note": retention_note,
+                "total": sum(len(s["items"]) for s in sections),
+                "sections": sections,
+            })
 
         # ── grant-tokens — начислить ИИ-баланс (руб) пользователю ─────────────
         if action == "grant-tokens" and method == "POST":

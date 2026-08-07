@@ -1017,36 +1017,54 @@ export const appStore = {
       const dbWs: WorksheetItem[] = [];
       for (const m of data.materials) {
         const cls = parseClass(m.classLabel);
+        // Сохранённое на сервере содержимое материала (текст, слайды, задания)
+        const c = (m.content || {}) as Record<string, never>;
+        const str = (k: string, d = "") => (typeof c[k] === "string" ? c[k] as unknown as string : d);
+        const num = (k: string, d = 0) => (typeof c[k] === "number" ? c[k] as unknown as number : d);
+        const arr = <T,>(k: string): T[] => (Array.isArray(c[k]) ? c[k] as unknown as T[] : []);
         if (m.type === "presentation" && !localPresIds.has(m.id)) {
+          const outline = (c["outline"] || {}) as Record<string, unknown>;
           dbPres.push({
-            id: m.id, topic: m.title || m.topic || "", description: "", audience: "",
-            slidesCount: 0, filename: m.filename || "", size: m.size || 0,
+            id: m.id, topic: m.title || m.topic || "", description: str("description"),
+            audience: str("audience"),
+            slidesCount: num("slidesCount"), filename: m.filename || "", size: m.size || 0,
             yadiskPath: null, uploadedToYadisk: !!m.uploadedToYadisk,
             createdAt: m.createdAt || new Date().toISOString(),
-            outline: { subtitle: "", slides: [], conclusion: [] },
+            outline: {
+              subtitle: typeof outline.subtitle === "string" ? outline.subtitle : "",
+              slides: Array.isArray(outline.slides) ? outline.slides as PresentationItem["outline"]["slides"] : [],
+              conclusion: Array.isArray(outline.conclusion) ? outline.conclusion as string[] : [],
+            },
           });
         } else if (m.type === "synopsis" && !localSynIds.has(m.id)) {
           dbSyn.push({
             id: m.id, subject: m.subject || "", classNum: cls.classNum,
-            topic: m.title || m.topic || "", description: "", text: "", wordCount: 0,
+            topic: m.title || m.topic || "", description: str("description"),
+            text: str("text"), wordCount: num("wordCount"),
             createdAt: m.createdAt || new Date().toISOString(), filename: m.filename || undefined,
           });
         } else if (m.type === "test" && !localTestIds.has(m.id)) {
+          const q = (c["questions"] || {}) as Record<string, unknown>;
           dbTests.push({
-            id: m.id, workId: "", workType: "Тест", subject: m.subject || "",
-            classNum: cls.classNum, topic: m.title || m.topic || "", description: "",
-            part1Count: 0, part2Count: 0, filename: m.filename || "", size: m.size || 0,
+            id: m.id, workId: "", workType: (str("workType", "Тест") as WorkType), subject: m.subject || "",
+            classNum: cls.classNum, topic: m.title || m.topic || "", description: str("description"),
+            part1Count: num("part1Count"), part2Count: num("part2Count"),
+            filename: m.filename || "", size: m.size || 0,
             yadiskPath: null, uploadedToYadisk: !!m.uploadedToYadisk,
             createdAt: m.createdAt || new Date().toISOString(),
-            questions: { part1: [], part2: [] },
+            questions: {
+              part1: Array.isArray(q.part1) ? q.part1 as GeneratedTestItem["questions"]["part1"] : [],
+              part2: Array.isArray(q.part2) ? q.part2 as GeneratedTestItem["questions"]["part2"] : [],
+            },
           });
         } else if (m.type === "worksheet" && !localWsIds.has(m.id)) {
           dbWs.push({
             id: m.id, title: m.title || "", subject: m.subject || "", classNum: cls.classNum,
-            topic: m.topic || "", description: "", tasksCount: 0, imagesAdded: 0,
+            topic: m.topic || "", description: str("description"),
+            tasksCount: num("tasksCount"), imagesAdded: num("imagesAdded"),
             filename: m.filename || "", size: m.size || 0, yadiskPath: null,
             uploadedToYadisk: !!m.uploadedToYadisk, createdAt: m.createdAt || new Date().toISOString(),
-            intro: "", tasks: [],
+            intro: str("intro"), tasks: arr<WorksheetItem["tasks"][number]>("tasks"),
           });
         }
       }
@@ -1101,24 +1119,33 @@ export const appStore = {
       id: string; type: "presentation" | "synopsis" | "test" | "worksheet";
       title: string; subject?: string; classLabel?: string; topic?: string;
       filename?: string; size?: number; uploadedToYadisk?: boolean;
+      content?: unknown;
     }[] = [];
     state.presentations.forEach(p => items.push({
       id: p.id, type: "presentation", title: p.topic, topic: p.topic,
       filename: p.filename, size: p.size, uploadedToYadisk: p.uploadedToYadisk,
+      content: { description: p.description, audience: p.audience,
+                 slidesCount: p.slidesCount, outline: p.outline },
     }));
     state.synopses.forEach(s => items.push({
       id: s.id, type: "synopsis", title: s.topic, subject: s.subject,
       classLabel: String(s.classNum), topic: s.topic, filename: s.filename,
+      content: { description: s.description, text: s.text, wordCount: s.wordCount },
     }));
     state.generatedTests.forEach(g => items.push({
       id: g.id, type: "test", title: g.topic || `${g.workType}: ${g.subject}`,
       subject: g.subject, classLabel: String(g.classNum), topic: g.topic,
       filename: g.filename, size: g.size, uploadedToYadisk: g.uploadedToYadisk,
+      content: { workType: g.workType, description: g.description,
+                 part1Count: g.part1Count, part2Count: g.part2Count,
+                 questions: g.questions },
     }));
     state.worksheets.forEach(w => items.push({
       id: w.id, type: "worksheet", title: w.title, subject: w.subject,
       classLabel: String(w.classNum), topic: w.topic, filename: w.filename,
       size: w.size, uploadedToYadisk: w.uploadedToYadisk,
+      content: { description: w.description, tasksCount: w.tasksCount,
+                 imagesAdded: w.imagesAdded, intro: w.intro, tasks: w.tasks },
     }));
     if (!items.length) return;
     try {

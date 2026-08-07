@@ -1,0 +1,32 @@
+{
+  "tests": [
+    {
+      "name": "OPTIONS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    },
+    {
+      "name": "Unknown action returns 404",
+      "method": "GET",
+      "path": "/?action=nonexistent",
+      "expectedStatus": 404
+    },
+    {
+      "name": "Preview returns expired counts",
+      "method": "GET",
+      "path": "/?action=preview",
+      "expectedStatus": 200,
+      "expectedBody": { "retention_days": 60 },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Log returns history",
+      "method": "GET",
+      "path": "/?action=log",
+      "expectedStatus": 200,
+      "expectedBody": { "retention_days": 60 },
+      "bodyMatcher": "partial"
+    }
+  ]
+}

@@ -87,17 +87,25 @@ def handler(event: dict, context) -> dict:
             # Материалы
             cur.execute(
                 f"""SELECT material_id, material_type, title, subject, class_label,
-                           topic, filename, size_bytes, uploaded_to_yadisk, created_at
+                           topic, filename, size_bytes, uploaded_to_yadisk, created_at,
+                           content
                     FROM {SCHEMA}.teacher_materials WHERE teacher_login = %s
                     ORDER BY created_at DESC""",
                 (teacher_login,)
             )
-            materials = [{
-                "id": r[0], "type": r[1], "title": r[2], "subject": r[3],
-                "classLabel": r[4], "topic": r[5], "filename": r[6],
-                "size": r[7], "uploadedToYadisk": r[8],
-                "createdAt": r[9].isoformat() if r[9] else None,
-            } for r in cur.fetchall()]
+            materials = []
+            for r in cur.fetchall():
+                try:
+                    cont = json.loads(r[10]) if r[10] else None
+                except Exception:
+                    cont = r[10]
+                materials.append({
+                    "id": r[0], "type": r[1], "title": r[2], "subject": r[3],
+                    "classLabel": r[4], "topic": r[5], "filename": r[6],
+                    "size": r[7], "uploadedToYadisk": r[8],
+                    "createdAt": r[9].isoformat() if r[9] else None,
+                    "content": cont,
+                })
 
             # Ученики
             cur.execute(
@@ -203,11 +211,18 @@ def handler(event: dict, context) -> dict:
                 mtype = _s(m.get("type") or m.get("material_type"), 32)
                 if not mid or not mtype:
                     continue
+                # Полное содержимое материала (текст конспекта, структура
+                # презентации/теста, задания листа) — храним у себя, чтобы
+                # данные не зависели от Я.Диска и браузера.
+                content = m.get("content")
+                content_str = (json.dumps(content, ensure_ascii=False)
+                               if isinstance(content, (dict, list)) else _s(content))
                 cur.execute(
                     f"""INSERT INTO {SCHEMA}.teacher_materials
                         (teacher_login, material_id, material_type, title, subject,
-                         class_label, topic, filename, size_bytes, uploaded_to_yadisk)
-                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                         class_label, topic, filename, size_bytes, uploaded_to_yadisk,
+                         content, updated_at)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
                         ON CONFLICT (teacher_login, material_type, material_id) DO UPDATE SET
                             title = EXCLUDED.title,
                             subject = EXCLUDED.subject,
@@ -215,13 +230,16 @@ def handler(event: dict, context) -> dict:
                             topic = EXCLUDED.topic,
                             filename = EXCLUDED.filename,
                             size_bytes = EXCLUDED.size_bytes,
-                            uploaded_to_yadisk = EXCLUDED.uploaded_to_yadisk""",
+                            uploaded_to_yadisk = EXCLUDED.uploaded_to_yadisk,
+                            content = COALESCE(EXCLUDED.content, {SCHEMA}.teacher_materials.content),
+                            updated_at = NOW()""",
                     (
                         teacher_login, mid, mtype,
                         _s(m.get("title"), 512), _s(m.get("subject"), 128),
                         _s(m.get("classLabel"), 32), _s(m.get("topic"), 512),
                         _s(m.get("filename"), 256), int(m.get("size") or 0),
                         bool(m.get("uploadedToYadisk")),
+                        content_str,
                     ),
                 )
                 saved += 1

@@ -336,6 +336,7 @@ export interface TeacherMaterialDto {
   filename?: string;
   size?: number;
   uploadedToYadisk?: boolean;
+  content?: unknown;
 }
 
 export interface TeacherDataLoadResult {
@@ -348,6 +349,7 @@ export interface TeacherDataLoadResult {
     id: string; type: string; title: string; subject: string | null;
     classLabel: string | null; topic: string | null; filename: string | null;
     size: number; uploadedToYadisk: boolean; createdAt: string | null;
+    content?: Record<string, unknown> | null;
   }[];
   students: { code: string; bindCode: string | null; name: string; classLabel: string | null }[];
   results: {
@@ -394,9 +396,27 @@ export interface UdsPerms {
   can_support: boolean;
   can_block: boolean;
   can_block_user: boolean;
+  can_cert?: boolean;
+  /** Просмотр всех сохранённых данных пользователя (Глава, Зам. Главы, Советник). */
+  can_all_data?: boolean;
   is_curator?: boolean;
   can_assign_subrole?: boolean;
   subrole?: string | null;
+}
+
+/** Раздел данных пользователя: набор записей с произвольными полями. */
+export interface UdsDataSection {
+  key: string;
+  label: string;
+  items: Record<string, unknown>[];
+}
+
+export interface UdsAllData {
+  target_login: string;
+  retention_days: number;
+  retention_note: string;
+  total: number;
+  sections: UdsDataSection[];
 }
 
 export interface UdsCurator {
@@ -688,6 +708,10 @@ export const udsApi = {
 
   userDetail: (login: string, token: string, targetLogin: string) =>
     udsRequest<{ user: UdsUserDetail; payments: UdsPayment[]; charges: UdsCharge[] }>("user-detail", "GET", login, token, undefined, { target_login: targetLogin }),
+
+  /** ВСЕ сохранённые данные пользователя (только Глава, Зам. Главы, Советник). */
+  allData: (login: string, token: string, targetLogin: string) =>
+    udsRequest<UdsAllData>("all-data", "GET", login, token, undefined, { target_login: targetLogin }),
 
   grantTokens: (login: string, token: string, targetLogin: string, amountRub: number) =>
     udsRequest<{ ok: boolean; balance_rub: number }>("grant-tokens", "POST", login, token, { target_login: targetLogin, amount_rub: amountRub }),

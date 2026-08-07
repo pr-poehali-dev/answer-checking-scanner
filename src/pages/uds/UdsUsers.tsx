@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import Icon from "@/components/ui/icon";
 import { udsApi, UdsUser, UdsPerms, UdsUserDetail, UdsPayment, UdsCharge } from "@/lib/api";
+import UdsAllData from "./UdsAllData";
 
 const ROLE_LABELS: Record<string, string> = {
   teacher: "Учитель", student: "Ученик", tester: "Тестер", admin: "Админ",
@@ -101,6 +102,7 @@ function UserDetail({ login, token, perms, targetLogin, onClose, onChanged }: {
   const [tab, setTab] = useState<"info" | "payments" | "actions">("info");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [showAllData, setShowAllData] = useState(false);
 
   const reload = useCallback(async () => {
     try {
@@ -126,6 +128,7 @@ function UserDetail({ login, token, perms, targetLogin, onClose, onChanged }: {
   };
 
   return (
+    <>
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       <div className="bg-white rounded-xl max-w-lg w-full max-h-[88vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <div className="px-5 py-4 border-b border-border flex items-center justify-between sticky top-0 bg-white z-10">
@@ -136,7 +139,16 @@ function UserDetail({ login, token, perms, targetLogin, onClose, onChanged }: {
               {user && !user.is_active && <span className="text-red-500"> · заблокирован</span>}
             </p>
           </div>
-          <button onClick={onClose} className="p-1.5 rounded hover:bg-muted"><Icon name="X" size={16} /></button>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {perms.can_all_data && (
+              <button onClick={() => setShowAllData(true)}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 bg-primary text-primary-foreground text-[11px] font-bold rounded hover:opacity-90 uppercase tracking-wide">
+                <Icon name="Database" size={13} />
+                Все данные
+              </button>
+            )}
+            <button onClick={onClose} className="p-1.5 rounded hover:bg-muted"><Icon name="X" size={16} /></button>
+          </div>
         </div>
 
         <div className="flex border-b border-border px-5 gap-0 sticky top-[57px] bg-white z-10">
@@ -280,6 +292,13 @@ function UserDetail({ login, token, perms, targetLogin, onClose, onChanged }: {
         )}
       </div>
     </div>
+
+    {showAllData && (
+      <UdsAllData login={login} token={token} targetLogin={targetLogin}
+        targetName={user?.full_name || undefined}
+        onClose={() => setShowAllData(false)} />
+    )}
+    </>
   );
 }
 

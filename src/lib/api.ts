@@ -1310,6 +1310,48 @@ export interface PresentationOutline {
   conclusion: string[];
 }
 
+/** Полный слайд структуры (с фактом и запросами фото) — используется в редакторе. */
+export interface PresentationSlideFull {
+  title: string;
+  bullets: string[];
+  fact?: string;
+  image_queries?: string[];
+}
+
+/** Полная структура презентации, которую можно редактировать перед сборкой файла. */
+export interface PresentationOutlineFull {
+  subtitle: string;
+  mood?: string;
+  contents: string[];
+  slides: PresentationSlideFull[];
+  conclusion: string[];
+}
+
+/** Сериализованная дизайн-тема (цвета — hex-строки), приходит с backend. */
+export interface PresentationThemePayload {
+  name: string;
+  label: string;
+  layout: string;
+  mood?: string;
+  font_title?: string;
+  font_body?: string;
+  bullet_marker?: string;
+  decor?: object;
+  bg: string; title_bg: string; accent: string; accent2: string; accent3: string;
+  text: string; muted: string; white: string; title_sub: string; stripe: string; card_bg: string;
+}
+
+export interface PresentationOutlineResult {
+  outline: PresentationOutlineFull;
+  theme_name: string;
+  theme_payload: PresentationThemePayload;
+  /** 4 разных варианта оформления (включая theme_payload) — для выбора в редакторе. */
+  theme_options: PresentationThemePayload[];
+  topic: string;
+  spent_rub?: number;
+  balance_rub?: number;
+}
+
 export interface PresentationResponse {
   /** Прямая ссылка на готовый файл в хранилище (основной способ скачивания) */
   pptx_url?: string;
@@ -1344,6 +1386,63 @@ export const presentationApi = {
   /** Прогревает GigaChat-токен заранее, чтобы outline-запрос не тратил на него 15-20 сек */
   warmup: () => {
     fetch(`${PRESENTATION_URL}?action=warmup`).catch(() => {});
+  },
+
+  /** Шаг 1 отдельно: получить структуру + варианты дизайна (без сборки файла). Нужно для редактора. */
+  generateOutline: async (params: {
+    topic: string;
+    description?: string;
+    slidesCount?: number;
+    audience?: string;
+    login?: string;
+  }): Promise<PresentationOutlineResult> => {
+    const res = await fetchWithTimeout(
+      `${PRESENTATION_URL}?action=outline`,
+      {
+        topic: params.topic,
+        description: params.description ?? "",
+        audience: params.audience ?? "",
+        slidesCount: params.slidesCount ?? 8,
+        login: params.login ?? "",
+        customDesign: true,
+      },
+      580_000,
+    );
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const msg = d.error || `Ошибка генерации структуры (${res.status})`;
+      if (res.status === 504 || res.status === 502 || res.status === 503) {
+        throw new Error("ИИ-сервис не успел ответить. Попробуйте ещё раз или уменьшите количество слайдов.");
+      }
+      throw new Error(msg);
+    }
+    return d as PresentationOutlineResult;
+  },
+
+  /** Шаг 2 отдельно: собрать PPTX из (возможно отредактированной) структуры и выбранной темы. */
+  build: async (params: {
+    topic: string;
+    teacherName: string;
+    teacherSchool: string;
+    outline: PresentationOutlineFull;
+    themePayload: PresentationThemePayload;
+  }): Promise<PresentationResponse> => {
+    const res = await fetchWithTimeout(
+      `${PRESENTATION_URL}?action=build`,
+      {
+        topic: params.topic,
+        teacherName: params.teacherName,
+        teacherSchool: params.teacherSchool,
+        outline: params.outline,
+        theme_payload: params.themePayload,
+      },
+      30_000,
+    );
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(d.error || `Ошибка сборки PPTX (${res.status})`);
+    const result = d as PresentationResponse;
+    result.rawOutline = params.outline;
+    return result;
   },
 
   generate: async (

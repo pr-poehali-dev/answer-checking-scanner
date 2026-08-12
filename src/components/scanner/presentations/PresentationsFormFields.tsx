@@ -10,8 +10,6 @@ interface PresentationsFormFieldsProps {
   setAudience: (v: string) => void;
   slidesCount: number;
   setSlidesCount: (v: number) => void;
-  customDesign: boolean;
-  setCustomDesign: React.Dispatch<React.SetStateAction<boolean>>;
   busy: boolean;
   generate: () => void;
   teacher: { name?: string; school?: string } | null;
@@ -27,8 +25,6 @@ export function PresentationsFormFields({
   setAudience,
   slidesCount,
   setSlidesCount,
-  customDesign,
-  setCustomDesign,
   busy,
   generate,
   teacher,
@@ -106,57 +102,29 @@ export function PresentationsFormFields({
         </div>
       </div>
 
-      {/* Индивидуальный дизайн */}
-      <button
-        type="button"
-        onClick={() => setCustomDesign(v => !v)}
-        disabled={busy}
-        className={`w-full text-left rounded-xl border p-4 transition-all disabled:opacity-50 ${
-          customDesign
-            ? "border-transparent shadow-md"
-            : "border-border hover:border-primary/40 bg-white"
-        }`}
-        style={customDesign ? {
-          background: "linear-gradient(135deg, #6D28D9, #DB2777 55%, #F59E0B)",
-        } : undefined}
-      >
+      {/* Индивидуальный дизайн — теперь выбирается в редакторе после генерации */}
+      <div className="w-full rounded-xl border border-transparent p-4 shadow-sm"
+        style={{ background: "linear-gradient(135deg, #6D28D9, #DB2777 55%, #F59E0B)" }}>
         <div className="flex items-center gap-3">
-          <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${
-            customDesign ? "bg-white/20" : "bg-primary/10"
-          }`}>
-            <Icon name="Sparkles" size={18} className={customDesign ? "text-white" : "text-primary"} fallback="Wand2" />
+          <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 bg-white/20">
+            <Icon name="Sparkles" size={18} className="text-white" fallback="Wand2" />
           </div>
           <div className="min-w-0 flex-1">
-            <p className={`text-sm font-bold ${customDesign ? "text-white" : "text-foreground"}`}>
-              Индивидуальный дизайн
+            <p className="text-sm font-bold text-white">
+              Индивидуальный дизайн — на выбор
             </p>
-            <p className={`text-[11px] leading-snug ${customDesign ? "text-white/85" : "text-muted-foreground"}`}>
-              ИИ создаст уникальное современное оформление под вашу тему — стильные цвета и вёрстку
+            <p className="text-[11px] leading-snug text-white/85">
+              ИИ подберёт настроение под тему и предложит 4 разных варианта оформления — выберите и отредактируйте текст в редакторе перед скачиванием
             </p>
             <div className="flex items-center gap-1.5 mt-2">
               {DESIGN_SWATCHES.map((c, i) => (
-                <span
-                  key={i}
-                  className={`w-4 h-4 rounded-full transition-all ${
-                    customDesign ? "ring-1 ring-white/60 scale-100" : "opacity-40 scale-90"
-                  }`}
-                  style={{ backgroundColor: c }}
-                />
+                <span key={i} className="w-4 h-4 rounded-full ring-1 ring-white/60" style={{ backgroundColor: c }} />
               ))}
-              <span className={`text-[10px] ml-1 ${customDesign ? "text-white/70" : "text-muted-foreground"}`}>
-                пример палитры
-              </span>
+              <span className="text-[10px] ml-1 text-white/70">пример палитры</span>
             </div>
           </div>
-          <div className={`w-11 h-6 rounded-full flex-shrink-0 relative transition-all ${
-            customDesign ? "bg-white/30" : "bg-muted"
-          }`}>
-            <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${
-              customDesign ? "left-[22px]" : "left-0.5"
-            }`} />
-          </div>
         </div>
-      </button>
+      </div>
 
       {/* Подпись + Я.Диск */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

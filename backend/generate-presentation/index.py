@@ -284,7 +284,45 @@ def pick_theme(topic: str) -> dict:
 # ─── ИНДИВИДУАЛЬНЫЙ ДИЗАЙН ──────────────────────────────────────────────────
 import colorsys
 
-_CUSTOM_LAYOUTS = ["left_header", "split_diagonal", "top_banner", "sidebar_dark"]
+# 8 вариантов вёрстки шапки/титула/контента — каждый со своей геометрией и
+# расположением номера/заголовка/декора. См. _slide_header/_content_area_*.
+_CUSTOM_LAYOUTS = [
+    "left_header", "split_diagonal", "top_banner", "sidebar_dark",
+    "center_frame", "corner_tag", "ribbon", "stacked_bar",
+]
+
+# Шрифтовые пары (заголовок / основной текст) — доступные в PowerPoint Online
+# и типичной установке Office, чтобы файл открывался корректно у пользователя.
+_FONT_PAIRS = [
+    {"title": "Montserrat",     "body": "Calibri"},
+    {"title": "Georgia",        "body": "Calibri"},
+    {"title": "Trebuchet MS",   "body": "Trebuchet MS"},
+    {"title": "Bahnschrift",    "body": "Segoe UI"},
+    {"title": "Cambria",        "body": "Cambria"},
+    {"title": "Segoe UI Black", "body": "Segoe UI"},
+    {"title": "Verdana",        "body": "Verdana"},
+    {"title": "Franklin Gothic Medium", "body": "Calibri"},
+]
+
+# Стили маркера буллетов — не только «▸»
+_BULLET_MARKERS = ["▸", "●", "—", "◆", "›", "▪"]
+
+# «Настроение» презентации — влияет на насыщенность/светлоту палитры и выбор
+# графических примитивов декора. Определяется языковой моделью по теме урока
+# (см. generate_outline: поле "mood" в ответе ИИ).
+MOOD_PROFILES = {
+    "strict":    {"sat": (0.35, 0.55), "light_dark": (0.08, 0.14), "light_bg": (0.97, 0.99),
+                  "accent_sat": (0.45, 0.65), "prims": ["rect", "round_rect", "trapezoid"]},
+    "bright":    {"sat": (0.65, 0.9),  "light_dark": (0.12, 0.20), "light_bg": (0.95, 0.98),
+                  "accent_sat": (0.8, 0.95), "prims": ["oval", "diamond", "hexagon", "pentagon"]},
+    "minimal":   {"sat": (0.05, 0.18), "light_dark": (0.10, 0.16), "light_bg": (0.98, 0.995),
+                  "accent_sat": (0.35, 0.55), "prims": ["rect", "round_rect"]},
+    "playful":   {"sat": (0.6, 0.85),  "light_dark": (0.14, 0.22), "light_bg": (0.94, 0.97),
+                  "accent_sat": (0.75, 0.95), "prims": ["oval", "diamond", "parallelogram", "pentagon"]},
+    "elegant":   {"sat": (0.4, 0.6),   "light_dark": (0.07, 0.12), "light_bg": (0.96, 0.98),
+                  "accent_sat": (0.5, 0.7), "prims": ["round_rect", "hexagon", "trapezoid"]},
+}
+_MOOD_NAMES = list(MOOD_PROFILES.keys())
 
 
 def _hsl(h: float, s: float, l: float) -> "RGBColor":
@@ -293,13 +331,19 @@ def _hsl(h: float, s: float, l: float) -> "RGBColor":
     return RGBColor(int(r * 255), int(g * 255), int(b * 255))
 
 
-def make_custom_theme(seed_text: str = "", variant: int = 0) -> dict:
+def make_custom_theme(seed_text: str = "", variant: int = 0, mood: str = "") -> dict:
     """
-    Генерирует уникальную современную дизайн-тему НА ЛЕТУ: палитра, вёрстка и
-    графическая композиция собираются процедурно во время запроса (не из готовых
-    шаблонов). variant позволяет получить другой вариант для той же темы.
+    Генерирует уникальную современную дизайн-тему НА ЛЕТУ: палитра, вёрстка,
+    шрифты и графическая композиция собираются процедурно во время запроса
+    (не из готовых шаблонов). variant позволяет получить другой вариант для
+    той же темы. mood («strict»/«bright»/«minimal»/«playful»/«elegant») —
+    настроение, которое определяет ИИ по теме урока — влияет на насыщенность
+    палитры и набор графических примитивов декора.
     """
     rnd = random.Random((seed_text + "|" + str(variant) + "|" + str(random.random())).encode("utf-8"))
+
+    mood = mood if mood in MOOD_PROFILES else rnd.choice(_MOOD_NAMES)
+    profile = MOOD_PROFILES[mood]
 
     # Базовый тон «под тему»: завязан на текст темы, но с лёгкой вариацией —
     # биология тяготеет к зелёному, история к тёплому и т.д., но не одинаково.
@@ -308,17 +352,26 @@ def make_custom_theme(seed_text: str = "", variant: int = 0) -> dict:
     acc2_h = (base_h + rnd.choice([0.5, 0.45, 0.55, 0.33, 0.66])) % 1.0  # доп. акцент
     acc3_h = (base_h + rnd.choice([0.08, -0.08, 0.12])) % 1.0
 
-    title_bg = _hsl(base_h, rnd.uniform(0.55, 0.8), rnd.uniform(0.10, 0.16))   # глубокий тёмный
-    accent2  = _hsl(acc2_h, rnd.uniform(0.7, 0.92), rnd.uniform(0.50, 0.60))   # яркий неон-акцент
-    accent3  = _hsl(acc3_h, rnd.uniform(0.6, 0.85), rnd.uniform(0.55, 0.68))
-    bg       = _hsl(base_h, rnd.uniform(0.18, 0.35), rnd.uniform(0.96, 0.985)) # очень светлый фон
-    card_bg  = _hsl(base_h, rnd.uniform(0.25, 0.45), rnd.uniform(0.90, 0.95))
-    title_sub= _hsl(base_h, rnd.uniform(0.35, 0.6), rnd.uniform(0.78, 0.86))
-    text     = _hsl(base_h, rnd.uniform(0.3, 0.5), rnd.uniform(0.08, 0.13))
-    muted    = _hsl(base_h, rnd.uniform(0.2, 0.35), rnd.uniform(0.40, 0.50))
+    sat_lo, sat_hi = profile["sat"]
+    dark_lo, dark_hi = profile["light_dark"]
+    bg_lo, bg_hi = profile["light_bg"]
+    asat_lo, asat_hi = profile["accent_sat"]
+
+    title_bg = _hsl(base_h, rnd.uniform(sat_lo, sat_hi), rnd.uniform(dark_lo, dark_hi))
+    accent2  = _hsl(acc2_h, rnd.uniform(asat_lo, asat_hi), rnd.uniform(0.48, 0.62))
+    accent3  = _hsl(acc3_h, rnd.uniform(asat_lo - 0.1, asat_hi), rnd.uniform(0.52, 0.68))
+    bg       = _hsl(base_h, rnd.uniform(0.12, sat_lo + 0.15), rnd.uniform(bg_lo, bg_hi))
+    card_bg  = _hsl(base_h, rnd.uniform(0.18, sat_lo + 0.2), rnd.uniform(0.89, 0.95))
+    title_sub= _hsl(base_h, rnd.uniform(0.3, 0.55), rnd.uniform(0.76, 0.87))
+    text     = _hsl(base_h, rnd.uniform(0.25, 0.45), rnd.uniform(0.08, 0.14))
+    muted    = _hsl(base_h, rnd.uniform(0.15, 0.32), rnd.uniform(0.38, 0.50))
+
+    fonts = rnd.choice(_FONT_PAIRS)
+    bullet_marker = rnd.choice(_BULLET_MARKERS)
 
     return {
         "name":      "custom",
+        "mood":      mood,
         "bg":        bg,
         "title_bg":  title_bg,
         "accent":    title_bg,
@@ -332,7 +385,10 @@ def make_custom_theme(seed_text: str = "", variant: int = 0) -> dict:
         "card_bg":   card_bg,
         "label":     "ИНДИВИДУАЛЬНЫЙ ДИЗАЙН",
         "layout":    rnd.choice(_CUSTOM_LAYOUTS),
-        "decor":     generate_decor_recipe(rnd),
+        "font_title": fonts["title"],
+        "font_body":  fonts["body"],
+        "bullet_marker": bullet_marker,
+        "decor":     generate_decor_recipe(rnd, prims_pool=profile["prims"]),
     }
 
 
@@ -343,6 +399,10 @@ _THEME_COLOR_KEYS = ["bg", "title_bg", "accent", "accent2", "accent3",
 def theme_to_payload(theme: dict) -> dict:
     """Сериализует тему в JSON (цвета → hex-строки) для передачи outline→build."""
     out = {"name": theme["name"], "label": theme["label"], "layout": theme["layout"],
+           "mood": theme.get("mood", ""),
+           "font_title": theme.get("font_title", "Calibri"),
+           "font_body": theme.get("font_body", "Calibri"),
+           "bullet_marker": theme.get("bullet_marker", "▸"),
            "decor": theme.get("decor") or {}}
     for k in _THEME_COLOR_KEYS:
         # RGBColor — подкласс str, str(color) даёт 6-символьный hex (напр. '1A2B3C')
@@ -355,6 +415,10 @@ def theme_from_payload(payload: dict) -> dict:
     theme = {"name": payload.get("name", "custom"),
              "label": payload.get("label", "ИНДИВИДУАЛЬНЫЙ ДИЗАЙН"),
              "layout": payload.get("layout", "top_banner"),
+             "mood": payload.get("mood", ""),
+             "font_title": payload.get("font_title", "Calibri"),
+             "font_body": payload.get("font_body", "Calibri"),
+             "bullet_marker": payload.get("bullet_marker", "▸"),
              "decor": payload.get("decor") or {}}
     for k in _THEME_COLOR_KEYS:
         hexv = str(payload.get(k, "FFFFFF")).lstrip("#") or "FFFFFF"
@@ -624,6 +688,7 @@ def generate_outline(topic: str, description: str, slides_count: int, audience: 
         + (f"Контекст учителя: {description[:800]}\n" if description else "")
         + 'Верни JSON строго в формате:\n'
         '{"subtitle":"развёрнутый подзаголовок 6-10 слов",'
+        '"mood":"одно из strict|bright|minimal|playful|elegant — настроение оформления, подходящее теме",'
         '"contents":["название раздела 1","название раздела 2","..."],'
         '"slides":[{'
         '"title":"заголовок слайда 4-7 слов",'
@@ -631,7 +696,10 @@ def generate_outline(topic: str, description: str, slides_count: int, audience: 
         '"fact":"Интересный факт или цитата эксперта — 15-25 слов",'
         '"image_queries":["конкретный запрос фото 1 на русском","конкретный запрос фото 2","конкретный запрос фото 3"]}],'
         '"conclusion":["Вывод 1 — 10-20 слов","Вывод 2","Вывод 3"]}\n'
-        f"Ровно {slides_count} слайдов. bullets — ровно 5 штук на каждый слайд. image_queries — 3 разных запроса."
+        f"Ровно {slides_count} слайдов. bullets — ровно 5 штук на каждый слайд. image_queries — 3 разных запроса.\n"
+        "Поле mood выбери осмысленно: strict — для точных/юридических/официальных тем, "
+        "bright — для активных/событийных тем, minimal — для нейтральных и вдумчивых тем, "
+        "playful — для тем про детей/творчество/начальную школу, elegant — для искусства/литературы/истории."
     )
 
     # ~300 токенов на слайд (5 тезисов × ~25 слов + заголовок + fact + 3 queries + запас)
@@ -679,9 +747,13 @@ def generate_outline(topic: str, description: str, slides_count: int, audience: 
         raise RuntimeError("ИИ вернул пустые слайды")
 
     contents = data.get("contents") or [s["title"] for s in norm_slides]
+    mood = str(data.get("mood") or "").strip().lower()
+    if mood not in MOOD_PROFILES:
+        mood = ""
 
     return {
         "subtitle": (data.get("subtitle") or "").strip(),
+        "mood": mood,
         "contents": [str(c).strip() for c in contents if str(c).strip()][:slides_count],
         "slides": norm_slides,
         "conclusion": [str(c).strip() for c in (data.get("conclusion") or []) if str(c).strip()][:5],
@@ -747,13 +819,15 @@ if not _DECOR_PRIMS:
     _DECOR_PRIMS = {"oval": MSO_SHAPE.OVAL, "rect": MSO_SHAPE.RECTANGLE}
 
 
-def generate_decor_recipe(rnd: "random.Random") -> dict:
+def generate_decor_recipe(rnd: "random.Random", prims_pool: list | None = None) -> dict:
     """
     Процедурно генерирует УНИКАЛЬНУЮ графическую композицию во время запроса.
     Возвращает «рецепт» — список инструкций рисования в долях от размера слайда
     (0..1), цвета как роль+степень растворения. Каждый вызов даёт новый дизайн.
+    prims_pool — набор фигур, характерный для настроения (mood) презентации;
+    если не задан — используются все доступные примитивы.
     """
-    prims = list(_DECOR_PRIMS.keys())
+    prims = [p for p in (prims_pool or []) if p in _DECOR_PRIMS] or list(_DECOR_PRIMS.keys())
     n = rnd.randint(3, 7)
     # Композиционная «зона тяготения» — графика концентрируется в случайном углу/крае
     anchors = ["tr", "tl", "br", "bl", "right", "left", "scatter"]
@@ -833,11 +907,21 @@ def _decorate(slide, theme: dict, on_dark: bool):
             pass
 
 
+# Шрифты/маркер текущей темы — выставляются в начале build_pptx() и
+# используются всеми _add_text/_add_bullets по умолчанию, чтобы каждая
+# презентация имела свою шрифтовую пару без переписывания каждого вызова.
+_CUR_FONT_TITLE = "Calibri"
+_CUR_FONT_BODY = "Calibri"
+_CUR_BULLET_MARKER = "▸"
+
+
 def _add_text(slide, x, y, w, h, text: str, *, size: int = 18, bold: bool = False,
               color: RGBColor = None, align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP,
-              font: str = "Calibri", italic: bool = False):
+              font: str = None, italic: bool = False):
     if color is None:
         color = RGBColor(0x22, 0x2A, 0x35)
+    if font is None:
+        font = _CUR_FONT_TITLE if (bold and size >= 20) else _CUR_FONT_BODY
     box = slide.shapes.add_textbox(x, y, w, h)
     tf = box.text_frame
     tf.word_wrap = True
@@ -859,12 +943,16 @@ def _add_text(slide, x, y, w, h, text: str, *, size: int = 18, bold: bool = Fals
 
 
 def _add_bullets(slide, x, y, w, h, bullets: list, *, size: int = 17,
-                 color: RGBColor = None, font: str = "Calibri",
-                 accent2: RGBColor = None, space_after: int = 8):
+                 color: RGBColor = None, font: str = None,
+                 accent2: RGBColor = None, space_after: int = 8, marker: str = None):
     if color is None:
         color = RGBColor(0x22, 0x2A, 0x35)
     if accent2 is None:
         accent2 = RGBColor(0xC2, 0x8B, 0x42)
+    if font is None:
+        font = _CUR_FONT_BODY
+    if marker is None:
+        marker = _CUR_BULLET_MARKER
     box = slide.shapes.add_textbox(x, y, w, h)
     tf = box.text_frame
     tf.word_wrap = True
@@ -875,7 +963,7 @@ def _add_bullets(slide, x, y, w, h, bullets: list, *, size: int = 17,
         p.alignment = PP_ALIGN.LEFT
         p.space_after = Pt(space_after)
         dot = p.add_run()
-        dot.text = "▸  "
+        dot.text = f"{marker}  "
         dot.font.name = font
         dot.font.size = Pt(size)
         dot.font.color.rgb = accent2
@@ -981,6 +1069,57 @@ def _slide_header(slide, title: str, slide_num: int, total: int,
                   align=PP_ALIGN.RIGHT, anchor=MSO_ANCHOR.BOTTOM)
         _add_rect(slide, 0, Inches(1.55), SLIDE_W, Emu(9144), theme["accent2"])
 
+    elif layout == "center_frame":
+        # Тонкая рамка по периметру + заголовок по центру шапки
+        _add_rect(slide, 0, 0, SLIDE_W, Inches(1.6), theme["bg"])
+        _add_rect(slide, 0, Inches(1.6), SLIDE_W, Emu(18000), theme["accent2"])
+        _add_rect(slide, 0, 0, Emu(45000), SLIDE_H, theme["accent2"])
+        _add_rect(slide, SLIDE_W - Emu(45000), 0, Emu(45000), SLIDE_H, theme["accent2"])
+        _add_text(slide, Inches(0.5), Inches(0.2), Inches(2.5), Inches(0.4),
+                  f"{slide_num:02d} / {total:02d}", size=11, bold=True,
+                  color=theme["accent2"], align=PP_ALIGN.LEFT)
+        _add_text(slide, Inches(0.6), Inches(0.55), SLIDE_W - Inches(1.2), Inches(0.9),
+                  title, size=27, bold=True, color=theme["accent"],
+                  align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+
+    elif layout == "corner_tag":
+        # Заголовок слева на светлом фоне, крупный номер-«бейдж» в правом углу
+        _add_rect(slide, 0, 0, SLIDE_W, Inches(1.5), theme["bg"])
+        _add_rect(slide, 0, Inches(0.45), Inches(0.1), Inches(0.75), theme["accent2"])
+        _add_text(slide, Inches(0.35), Inches(0.35), Inches(9.5), Inches(1.0),
+                  title, size=27, bold=True, color=theme["accent"],
+                  align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.MIDDLE)
+        badge_w = Inches(1.35)
+        _add_rect(slide, SLIDE_W - badge_w, 0, badge_w, Inches(1.5), theme["accent"])
+        _add_text(slide, SLIDE_W - badge_w, 0, badge_w, Inches(1.5),
+                  f"{slide_num:02d}", size=30, bold=True, color=theme["accent2"],
+                  align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+        _add_rect(slide, 0, Inches(1.5), SLIDE_W, Emu(28000), theme["accent2"])
+
+    elif layout == "ribbon":
+        # Диагональная «лента» слева-сверху с номером, заголовок правее
+        _add_rect(slide, 0, 0, SLIDE_W, Inches(1.35), theme["accent"])
+        ribbon_w = Inches(2.2)
+        _add_rect(slide, 0, 0, ribbon_w, Inches(1.35), theme["accent2"])
+        _add_text(slide, 0, 0, ribbon_w, Inches(1.35),
+                  f"{slide_num:02d}", size=40, bold=True, color=theme["accent"],
+                  align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+        _add_text(slide, ribbon_w + Inches(0.3), 0, SLIDE_W - ribbon_w - Inches(0.6), Inches(1.35),
+                  title, size=25, bold=True, color=theme["white"],
+                  align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.MIDDLE)
+        _add_rect(slide, 0, Inches(1.35), SLIDE_W, Emu(30000), theme["accent2"])
+
+    elif layout == "stacked_bar":
+        # Два слоя-полосы разной толщины (акцент + основной) и заголовок снизу
+        _add_rect(slide, 0, 0, SLIDE_W, Emu(210000), theme["accent2"])
+        _add_rect(slide, 0, Emu(210000), SLIDE_W, Inches(1.3), theme["accent"])
+        _add_text(slide, Inches(0.4), Emu(210000), Inches(2.2), Inches(1.3),
+                  f"{slide_num:02d}", size=34, bold=True, color=theme["accent2"],
+                  align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.MIDDLE)
+        _add_text(slide, Inches(2.3), Emu(210000), SLIDE_W - Inches(2.7), Inches(1.3),
+                  title, size=25, bold=True, color=theme["white"],
+                  align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.MIDDLE)
+
     else:  # top_banner (default)
         _add_rect(slide, 0, 0, SLIDE_W, Inches(1.45), theme["accent"])
         _add_rect(slide, 0, Inches(1.45), Inches(0.18),
@@ -1005,6 +1144,12 @@ def _content_area_top(theme: dict) -> float:
         return Inches(1.6)
     elif layout == "left_header":
         return Inches(1.7)
+    elif layout == "center_frame":
+        return Inches(1.85)
+    elif layout == "corner_tag":
+        return Inches(1.65)
+    elif layout in ("ribbon", "stacked_bar"):
+        return Inches(1.5)
     return Inches(1.58)          # top_banner
 
 
@@ -1012,6 +1157,8 @@ def _content_area_x(theme: dict) -> float:
     layout = theme.get("layout", "top_banner")
     if layout == "sidebar_dark":
         return Inches(2.0)       # после сайдбара
+    if layout == "center_frame":
+        return Inches(0.55)      # с учётом боковой рамки
     return Inches(0.32)
 
 
@@ -1229,6 +1376,11 @@ def place_slide_content(slide, theme, rnd, ct, cx, content_h, bullets, fact, img
 def build_pptx(topic: str, subtitle: str, contents: list, slides_data: list,
                conclusion: list, teacher_name: str, teacher_school: str,
                theme: dict, images: dict) -> bytes:
+    global _CUR_FONT_TITLE, _CUR_FONT_BODY, _CUR_BULLET_MARKER
+    _CUR_FONT_TITLE = theme.get("font_title") or "Calibri"
+    _CUR_FONT_BODY = theme.get("font_body") or "Calibri"
+    _CUR_BULLET_MARKER = theme.get("bullet_marker") or "▸"
+
     prs = Presentation()
     prs.slide_width = SLIDE_W
     prs.slide_height = SLIDE_H
@@ -1286,6 +1438,60 @@ def build_pptx(topic: str, subtitle: str, contents: list, slides_data: list,
         _add_text(slide, Inches(5.8), Inches(2.5), Inches(7.0), Inches(1.5),
                   datetime.now().strftime("%d.%m.%Y"), size=28,
                   color=theme["title_sub"], align=PP_ALIGN.LEFT)
+
+    elif layout == "center_frame":
+        # Тонкая рамка по периметру, заголовок и подзаголовок строго по центру
+        _add_rect(slide, 0, 0, Emu(60000), SLIDE_H, theme["accent2"])
+        _add_rect(slide, SLIDE_W - Emu(60000), 0, Emu(60000), SLIDE_H, theme["accent2"])
+        _add_rect(slide, 0, 0, SLIDE_W, Emu(60000), theme["accent2"])
+        _add_rect(slide, 0, SLIDE_H - Emu(60000), SLIDE_W, Emu(60000), theme["accent2"])
+        _add_text(slide, Inches(1.0), Inches(2.6), SLIDE_W - Inches(2.0), Inches(0.5),
+                  theme["label"], size=12, bold=True, color=theme["accent2"], align=PP_ALIGN.CENTER)
+        _add_text(slide, Inches(1.0), Inches(3.1), SLIDE_W - Inches(2.0), Inches(1.8),
+                  topic, size=38, bold=True, color=theme["white"], align=PP_ALIGN.CENTER)
+        if subtitle:
+            _add_text(slide, Inches(1.5), Inches(4.9), SLIDE_W - Inches(3.0), Inches(0.8),
+                      subtitle, size=16, color=theme["title_sub"], align=PP_ALIGN.CENTER)
+
+    elif layout == "corner_tag":
+        # Крупный «бейдж»-квадрат в углу, заголовок рядом слева
+        tag = Inches(2.4)
+        _add_rect(slide, SLIDE_W - tag, 0, tag, tag, theme["accent2"])
+        _add_text(slide, SLIDE_W - tag, 0, tag, tag,
+                  datetime.now().strftime("%Y"), size=34, bold=True,
+                  color=theme["accent"], align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+        _add_text(slide, Inches(0.7), Inches(2.2), Inches(9.5), Inches(0.5),
+                  theme["label"], size=12, bold=True, color=theme["accent2"])
+        _add_text(slide, Inches(0.7), Inches(2.75), Inches(11.0), Inches(2.2),
+                  topic, size=40, bold=True, color=theme["white"], align=PP_ALIGN.LEFT)
+        if subtitle:
+            _add_text(slide, Inches(0.7), Inches(4.95), Inches(10.5), Inches(0.8),
+                      subtitle, size=16, color=theme["title_sub"])
+
+    elif layout == "ribbon":
+        # Широкая косая «лента»-акцент по диагонали через середину слайда
+        _add_rect(slide, 0, Inches(3.3), SLIDE_W, Inches(1.0), theme["accent2"])
+        _add_text(slide, Inches(0.7), Inches(0.7), Inches(10), Inches(0.5),
+                  theme["label"], size=12, bold=True, color=theme["accent2"])
+        _add_text(slide, Inches(0.7), Inches(1.3), Inches(11.8), Inches(1.9),
+                  topic, size=40, bold=True, color=theme["white"], align=PP_ALIGN.LEFT)
+        if subtitle:
+            _add_text(slide, Inches(0.7), Inches(3.45), Inches(11.0), Inches(0.7),
+                      subtitle, size=16, bold=True, color=theme["accent"], align=PP_ALIGN.LEFT)
+
+    elif layout == "stacked_bar":
+        # Несколько горизонтальных полос убывающей ширины — «слоистая» композиция
+        for i, wfrac in enumerate([1.0, 0.82, 0.64]):
+            _add_rect(slide, 0, Inches(4.3) + i * Inches(0.35),
+                      SLIDE_W * wfrac, Inches(0.28),
+                      theme["accent2"] if i == 0 else theme["accent3"])
+        _add_text(slide, Inches(0.7), Inches(1.3), Inches(11), Inches(0.5),
+                  theme["label"], size=12, bold=True, color=theme["accent2"])
+        _add_text(slide, Inches(0.7), Inches(1.85), Inches(11.8), Inches(2.2),
+                  topic, size=42, bold=True, color=theme["white"], align=PP_ALIGN.LEFT)
+        if subtitle:
+            _add_text(slide, Inches(0.7), Inches(5.55), Inches(11.0), Inches(0.7),
+                      subtitle, size=15, color=theme["title_sub"])
 
     else:  # top_banner
         _add_rect(slide, 0, Inches(4.6), SLIDE_W, Inches(2.9), theme["accent"])
@@ -1577,12 +1783,24 @@ def handler(event: dict, context) -> dict:
 
         # Каждая презентация — уникальный современный дизайн (генерируется на лету).
         # Если variant не задан явно — берём случайный, чтобы одна тема давала разный стиль.
+        # mood определяет ИИ по теме — влияет на насыщенность палитры и декор.
         variant = design_variant or random.randint(1, 10_000)
-        theme = make_custom_theme(topic, variant)
+        mood = outline.get("mood") or ""
+        theme = make_custom_theme(topic, variant, mood)
+        # Сразу готовим ещё 3 альтернативных варианта дизайна (с другим настроением
+        # каждый) — чтобы в редакторе можно было выбрать оформление без повторного
+        # обращения к ИИ, и варианты были заметно разными, а не однотипными.
+        other_moods = [m for m in _MOOD_NAMES if m != mood] or _MOOD_NAMES
+        random.shuffle(other_moods)
+        theme_options = [theme_to_payload(theme)]
+        for i, alt_mood in enumerate(other_moods[:3]):
+            alt = make_custom_theme(topic, (variant + (i + 1) * 777) % 100_000 + 1, alt_mood)
+            theme_options.append(theme_to_payload(alt))
         return _resp(200, {
             "outline": outline,
             "theme_name": theme["name"],
             "theme_payload": theme_to_payload(theme),
+            "theme_options": theme_options,
             "topic": topic,
             "spent_rub": spent_rub,
             "balance_rub": balance_rub,
@@ -1608,11 +1826,33 @@ def handler(event: dict, context) -> dict:
         # Восстанавливаем тему: при «обновить дизайн» генерируем новый индивидуальный
         # на лету, иначе из payload, иначе по имени.
         if regen_design:
-            theme = make_custom_theme(topic, design_variant or random.randint(1, 10_000))
+            outline_mood = (outline or {}).get("mood") or "" if isinstance(outline, dict) else ""
+            theme = make_custom_theme(topic, design_variant or random.randint(1, 10_000), outline_mood)
         elif theme_payload:
             theme = theme_from_payload(theme_payload)
         else:
             theme = make_custom_theme(topic, random.randint(1, 10_000))
+
+        # Нормализуем слайды: редактор мог поправить текст, удалить/добавить
+        # слайды — гарантируем, что у каждого есть все нужные поля для сборки.
+        norm_build_slides = []
+        for s in (outline.get("slides") or []):
+            if not isinstance(s, dict):
+                continue
+            title = str(s.get("title") or "").strip()
+            bullets = [str(b).strip() for b in (s.get("bullets") or []) if str(b).strip()]
+            if not title or not bullets:
+                continue
+            image_queries = [str(q).strip() for q in (s.get("image_queries") or []) if str(q).strip()]
+            if not image_queries:
+                image_queries = [title, topic, title]
+            norm_build_slides.append({
+                "title": title,
+                "bullets": bullets[:7],
+                "fact": str(s.get("fact") or "").strip(),
+                "image_queries": image_queries[:3],
+            })
+        outline["slides"] = norm_build_slides
 
         # Скачиваем до 3 фото на слайд параллельно
         images = {}

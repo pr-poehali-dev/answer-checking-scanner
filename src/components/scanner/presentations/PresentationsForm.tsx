@@ -3,7 +3,7 @@ import Icon from "@/components/ui/icon";
 import { usePersistedState, clearPersistedState } from "@/hooks/usePersistedState";
 import { taskRunner, useTaskState } from "@/lib/taskRunner";
 import { appStore, useAppStore, type PresentationItem } from "@/store/appStore";
-import { presentationApi } from "@/lib/api";
+import { presentationApi, type PresentationOutlineFull, type PresentationThemePayload } from "@/lib/api";
 import { yadisk } from "@/lib/yadisk";
 import {
   PRESENTATIONS_FOLDER,
@@ -14,9 +14,10 @@ import {
 } from "./presentationUtils";
 import { PresentationsFormFields } from "./PresentationsFormFields";
 import { PresentationsProgress } from "./PresentationsProgress";
+import { PresentationEditor } from "./PresentationEditor";
 
 const TASK_KEY = "gen:presentations";
-const REDESIGN_KEY = "gen:presentations-redesign";
+const BUILD_KEY = "gen:presentations-build";
 
 export function PresentationsForm() {
   const { teacher, yadiskConnected, storageMode } = useAppStore();
@@ -25,18 +26,19 @@ export function PresentationsForm() {
   const [description, setDescription] = usePersistedState("presentations:description", "");
   const [audience, setAudience]       = usePersistedState("presentations:audience", AUDIENCE_PRESETS[3]);
   const [slidesCount, setSlidesCount] = usePersistedState("presentations:slidesCount", 8);
-  const [customDesign, setCustomDesign] = usePersistedState("presentations:customDesign", false);
   const task = useTaskState(TASK_KEY);
-  const redesignTask = useTaskState(REDESIGN_KEY);
+  const buildTask = useTaskState(BUILD_KEY);
   const busy = task.running;
   const elapsed = task.elapsed;
   const progress = task.progress;
-  const error = task.error || redesignTask.error;
-  const success = task.success || redesignTask.success;
-  const redesigning = redesignTask.running;
-  const [lastDesign, setLastDesign]   = useState<
-    { topic: string; rawOutline: object; variant: number; teacherName: string; teacherSchool: string } | null
-  >(null);
+  const error = task.error || buildTask.error;
+  const success = task.success || buildTask.success;
+
+  // Данные для редактора: структура + варианты дизайна, полученные после генерации
+  const [editorData, setEditorData] = useState<{
+    topic: string; outline: PresentationOutlineFull; themeOptions: PresentationThemePayload[];
+    audience: string; slidesCount: number; teacherName: string; teacherSchool: string;
+  } | null>(null);
 
   // Прогреваем токен при открытии вкладки — экономим 15-20 сек на генерации
   useEffect(() => { presentationApi.warmup(); }, []);
@@ -57,6 +59,7 @@ export function PresentationsForm() {
   const autoStage = STAGE_HINTS.slice().reverse().find(([p]) => progress >= p)?.[1] ?? "";
   const displayStage = task.stage || autoStage;
 
+  // Шаг 1: генерируем структуру + варианты дизайна, затем открываем редактор
   const generate = () => {
     if (busy) return;
     if (!topic.trim()) { taskRunner.run({ key: TASK_KEY, run: async () => { throw new Error("Укажите тему урока"); } }); return; }
@@ -64,13 +67,10 @@ export function PresentationsForm() {
 
     const params = {
       topic: topic.trim(), description: description.trim(),
-      audience, slidesCount, customDesign,
+      audience, slidesCount,
       teacherName: teacher.name, teacherSchool: teacher.school, login: teacher.login,
-      yadiskToken: teacher.yadiskToken,
-      useYadisk: storageMode === "yadisk" && yadiskConnected && !!teacher.yadiskToken,
     };
 
-    setLastDesign(null);
     setTopic("");
     setDescription("");
     clearPersistedState("presentations:topic");
@@ -80,23 +80,54 @@ export function PresentationsForm() {
       key: TASK_KEY,
       autoProgress: true,
       run: async (handle) => {
-        const result = await presentationApi.generate(
-          { topic: params.topic, description: params.description, audience: params.audience,
-            slidesCount: params.slidesCount, customDesign: params.customDesign,
-            teacherName: params.teacherName, teacherSchool: params.teacherSchool, login: params.login },
-          (s) => handle.setStage(s),
-        );
+        handle.setStage("ИИ генерирует структуру презентации…");
+        const result = await presentationApi.generateOutline({
+          topic: params.topic, description: params.description,
+          audience: params.audience, slidesCount: params.slidesCount, login: params.login,
+        });
+
+        if (result.balance_rub !== undefined) {
+          appStore.setAiBalance(Math.round(result.balance_rub * 100));
+        }
+
+        setEditorData({
+          topic: params.topic, outline: result.outline, themeOptions: result.theme_options,
+          audience: params.audience, slidesCount: params.slidesCount,
+          teacherName: params.teacherName, teacherSchool: params.teacherSchool,
+        });
+
+        const spentStr = (result.spent_rub ?? 0) > 0 ? ` · Списано: ${(result.spent_rub ?? 0).toFixed(2)} ₽` : '';
+        return `Структура готова — отредактируйте текст и оформление, затем скачайте.${spentStr}`;
+      },
+    });
+  };
+
+  // Шаг 2: собираем PPTX из (возможно отредактированной) структуры и выбранной темы
+  const handleDownload = (outline: PresentationOutlineFull, theme: PresentationThemePayload) => {
+    if (!editorData || !teacher || buildTask.running) return;
+    const data = editorData;
+
+    taskRunner.run({
+      key: BUILD_KEY,
+      autoProgress: true,
+      run: async (handle) => {
+        handle.setStage("Подбираем фотографии и собираем файл…");
+        const result = await presentationApi.build({
+          topic: data.topic, teacherName: data.teacherName, teacherSchool: data.teacherSchool,
+          outline, themePayload: theme,
+        });
 
         let yadiskPath: string | null = null;
         let uploadedToYadisk = false;
+        const useYadisk = storageMode === "yadisk" && yadiskConnected && !!teacher.yadiskToken;
 
-        if (params.useYadisk && params.yadiskToken) {
+        if (useYadisk && teacher.yadiskToken) {
           try {
             handle.setStage("Загружаем на Яндекс.Диск…");
-            await yadisk.ensureFolder(params.yadiskToken, PRESENTATIONS_FOLDER);
+            await yadisk.ensureFolder(teacher.yadiskToken, PRESENTATIONS_FOLDER);
             const date = new Date().toISOString().slice(0, 10);
             yadiskPath = `${PRESENTATIONS_FOLDER}/${date} ${result.filename}`;
-            await yadisk.uploadBinary(params.yadiskToken, yadiskPath, await getPptxBase64(result), true);
+            await yadisk.uploadBinary(teacher.yadiskToken, yadiskPath, await getPptxBase64(result), true);
             uploadedToYadisk = true;
           } catch (e) {
             console.error("Yadisk upload failed", e);
@@ -104,80 +135,18 @@ export function PresentationsForm() {
         }
 
         const item: PresentationItem = {
-          id: String(Date.now()), topic: params.topic, description: params.description,
-          audience: params.audience, slidesCount: params.slidesCount, filename: result.filename, size: result.size,
+          id: String(Date.now()), topic: data.topic, description: "",
+          audience: data.audience, slidesCount: data.slidesCount, filename: result.filename, size: result.size,
           yadiskPath, uploadedToYadisk, createdAt: new Date().toISOString(),
           outline: result.outline,
         };
-        if (result.balance_rub !== undefined) {
-          appStore.setAiBalance(Math.round(result.balance_rub * 100));
-        }
-
         appStore.addPresentation(item);
         downloadPresentation(result, result.filename);
+        setEditorData(null);
 
-        if (result.rawOutline) {
-          setLastDesign({
-            topic: params.topic, rawOutline: result.rawOutline, variant: 1,
-            teacherName: params.teacherName, teacherSchool: params.teacherSchool,
-          });
-        } else {
-          setLastDesign(null);
-        }
-
-        const spentStr = (result.spent_rub ?? 0) > 0 ? ` · Списано: ${result.spent_rub!.toFixed(2)} ₽` : '';
         return uploadedToYadisk
-          ? `Готово! Презентация сохранена на Я.Диск и скачана.${spentStr}`
-          : `Презентация скачана.${spentStr}`;
-      },
-    });
-  };
-
-  const regenerateDesign = () => {
-    if (!lastDesign || !teacher || redesigning) return;
-    const design = lastDesign;
-    const params = {
-      audience, slidesCount,
-      yadiskToken: teacher.yadiskToken,
-      useYadisk: storageMode === "yadisk" && yadiskConnected && !!teacher.yadiskToken,
-    };
-
-    taskRunner.run({
-      key: REDESIGN_KEY,
-      autoProgress: true,
-      run: async (handle) => {
-        handle.setStage("Создаём новый дизайн…");
-        const result = await presentationApi.redesign({
-          topic: design.topic,
-          teacherName: design.teacherName,
-          teacherSchool: design.teacherSchool,
-          rawOutline: design.rawOutline,
-          designVariant: design.variant,
-        });
-
-        let yadiskPath: string | null = null;
-        let uploadedToYadisk = false;
-        if (params.useYadisk && params.yadiskToken) {
-          try {
-            await yadisk.ensureFolder(params.yadiskToken, PRESENTATIONS_FOLDER);
-            const date = new Date().toISOString().slice(0, 10);
-            yadiskPath = `${PRESENTATIONS_FOLDER}/${date} ${result.filename}`;
-            await yadisk.uploadBinary(params.yadiskToken, yadiskPath, await getPptxBase64(result), true);
-            uploadedToYadisk = true;
-          } catch (e) {
-            console.error("Yadisk upload failed", e);
-          }
-        }
-
-        appStore.addPresentation({
-          id: String(Date.now()), topic: design.topic, description: "",
-          audience: params.audience, slidesCount: params.slidesCount, filename: result.filename, size: result.size,
-          yadiskPath, uploadedToYadisk, createdAt: new Date().toISOString(),
-          outline: result.outline,
-        });
-        downloadPresentation(result, result.filename);
-        setLastDesign({ ...design, variant: design.variant + 1 });
-        return "Готов новый вариант дизайна — файл скачан.";
+          ? "Готово! Презентация сохранена на Я.Диск и скачана."
+          : "Презентация скачана.";
       },
     });
   };
@@ -204,8 +173,6 @@ export function PresentationsForm() {
           setAudience={setAudience}
           slidesCount={slidesCount}
           setSlidesCount={setSlidesCount}
-          customDesign={customDesign}
-          setCustomDesign={setCustomDesign}
           busy={busy}
           generate={generate}
           teacher={teacher}
@@ -232,26 +199,18 @@ export function PresentationsForm() {
           <Icon name={busy ? "Loader2" : "Wand2"} size={16} className={busy ? "animate-spin" : ""} fallback="Sparkles" />
           {busy ? "Генерация идёт…" : "Создать презентацию"}
         </button>
-
-        {/* Сгенерировать заново дизайн (только после индивидуального дизайна) */}
-        {lastDesign && !busy && (
-          <button
-            onClick={regenerateDesign}
-            disabled={redesigning}
-            className="w-full inline-flex items-center justify-center gap-2.5 px-4 py-3 text-sm font-bold rounded-xl border-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-            style={{ borderColor: "#7C3AED", color: "#6D28D9", background: "white" }}
-          >
-            <Icon name={redesigning ? "Loader2" : "RefreshCw"} size={16}
-              className={redesigning ? "animate-spin" : ""} fallback="Sparkles" />
-            {redesigning ? "Создаём новый дизайн…" : "Сгенерировать заново дизайн"}
-          </button>
-        )}
-        {lastDesign && !busy && (
-          <p className="text-[10px] text-muted-foreground text-center -mt-3">
-            Тот же материал — новое уникальное оформление. Без повторного списания.
-          </p>
-        )}
       </div>
+
+      {editorData && (
+        <PresentationEditor
+          topic={editorData.topic}
+          outline={editorData.outline}
+          themeOptions={editorData.themeOptions}
+          busy={buildTask.running}
+          onDownload={handleDownload}
+          onClose={() => setEditorData(null)}
+        />
+      )}
     </div>
   );
 }

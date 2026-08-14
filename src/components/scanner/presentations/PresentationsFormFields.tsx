@@ -96,13 +96,10 @@ export function PresentationsFormFields({
               </button>
             ))}
           </div>
-          <p className="text-[10px] text-muted-foreground mt-1.5">
-            всего {slidesCount + 3} слайда (+ титул, выводы, финал)
-          </p>
         </div>
       </div>
 
-      {/* Индивидуальный дизайн — теперь выбирается в редакторе после генерации */}
+      {/* Оформление подбирает ИИ — выбор вариантов будет доступен в редакторе после генерации */}
       <div className="w-full rounded-xl border border-transparent p-4 shadow-sm"
         style={{ background: "linear-gradient(135deg, #6D28D9, #DB2777 55%, #F59E0B)" }}>
         <div className="flex items-center gap-3">
@@ -111,10 +108,10 @@ export function PresentationsFormFields({
           </div>
           <div className="min-w-0 flex-1">
             <p className="text-sm font-bold text-white">
-              Индивидуальный дизайн — на выбор
+              Оформление подбирает ИИ
             </p>
             <p className="text-[11px] leading-snug text-white/85">
-              ИИ подберёт настроение под тему и предложит 4 разных варианта оформления — выберите и отредактируйте текст в редакторе перед скачиванием
+              Цвета, шрифты и композиция каждый раз разные — под настроение темы. Готовые варианты можно сравнить и отредактировать в редакторе перед скачиванием
             </p>
             <div className="flex items-center gap-1.5 mt-2">
               {DESIGN_SWATCHES.map((c, i) => (

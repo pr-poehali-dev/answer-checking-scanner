@@ -60,10 +60,6 @@ export function PresentationCard({ item }: { item: PresentationItem }) {
           <p className="text-sm font-bold leading-tight truncate mb-1">{item.topic}</p>
           <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-muted-foreground">
             <span className="inline-flex items-center gap-1">
-              <Icon name="Layers" size={10} />
-              {item.outline.slides.length + 3} слайдов
-            </span>
-            <span className="inline-flex items-center gap-1">
               <Icon name="HardDrive" size={10} />
               {formatBytes(item.size)}
             </span>

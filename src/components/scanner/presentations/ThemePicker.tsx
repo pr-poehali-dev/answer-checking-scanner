@@ -49,7 +49,7 @@ export function ThemePicker({ options, selectedIndex, onSelect }: ThemePickerPro
           </div>
           <div className="px-2 py-1.5 bg-white">
             <p className="text-[10px] font-semibold truncate">{LAYOUT_LABELS[t.layout] || t.layout}</p>
-            <p className="text-[9px] text-muted-foreground truncate">{MOOD_LABELS[t.mood || ""] || "Индивидуальный"}</p>
+            <p className="text-[9px] text-muted-foreground truncate">{MOOD_LABELS[t.mood || ""] || "Своё оформление"}</p>
           </div>
         </button>
       ))}

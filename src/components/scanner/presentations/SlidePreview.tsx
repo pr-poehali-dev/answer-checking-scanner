@@ -177,9 +177,11 @@ export function TitleSlidePreview({ theme, topic, subtitle, className = "" }: Ti
       className={`relative overflow-hidden rounded-md shadow-sm border border-black/5 flex flex-col items-center justify-center text-center px-[6%] ${className}`}
       style={{ aspectRatio: ASPECT, background: hex(theme.title_bg) }}
     >
-      <span className="uppercase tracking-widest font-bold mb-2" style={{ color: hex(theme.accent2), fontSize: "3.5%" }}>
-        {theme.label || "ИНДИВИДУАЛЬНЫЙ ДИЗАЙН"}
-      </span>
+      {theme.label && (
+        <span className="uppercase tracking-widest font-bold mb-2" style={{ color: hex(theme.accent2), fontSize: "3.5%" }}>
+          {theme.label}
+        </span>
+      )}
       <span className="font-bold leading-tight line-clamp-3" style={{ color: hex(theme.white), fontFamily: titleFont, fontSize: "7.5%" }}>
         {topic || "Тема презентации"}
       </span>

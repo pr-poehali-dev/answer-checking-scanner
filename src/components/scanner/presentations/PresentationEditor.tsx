@@ -105,7 +105,7 @@ export function PresentationEditor({
           style={{ background: "hsl(var(--muted))" }}>
           <div className="min-w-0">
             <p className="text-sm font-bold truncate">{topic}</p>
-            <p className="text-[11px] text-muted-foreground">Редактор презентации — {total} слайдов содержания</p>
+            <p className="text-[11px] text-muted-foreground">Редактор презентации</p>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             <button

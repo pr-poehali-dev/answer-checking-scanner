@@ -383,7 +383,7 @@ def make_custom_theme(seed_text: str = "", variant: int = 0, mood: str = "") -> 
         "title_sub": title_sub,
         "stripe":    accent2,
         "card_bg":   card_bg,
-        "label":     "ИНДИВИДУАЛЬНЫЙ ДИЗАЙН",
+        "label":     "",
         "layout":    rnd.choice(_CUSTOM_LAYOUTS),
         "font_title": fonts["title"],
         "font_body":  fonts["body"],
@@ -413,7 +413,7 @@ def theme_to_payload(theme: dict) -> dict:
 def theme_from_payload(payload: dict) -> dict:
     """Восстанавливает тему из JSON-payload (hex-строки → RGBColor)."""
     theme = {"name": payload.get("name", "custom"),
-             "label": payload.get("label", "ИНДИВИДУАЛЬНЫЙ ДИЗАЙН"),
+             "label": payload.get("label", ""),
              "layout": payload.get("layout", "top_banner"),
              "mood": payload.get("mood", ""),
              "font_title": payload.get("font_title", "Calibri"),
@@ -859,12 +859,27 @@ def generate_decor_recipe(rnd: "random.Random", prims_pool: list | None = None) 
             "line_rot": rnd.choice([0, 12, -12, 90])}
 
 
-def _decorate(slide, theme: dict, on_dark: bool):
+def _fresh_decor(seed: str, mood: str) -> dict:
     """
-    Рисует процедурно сгенерированную композицию из theme['decor'] (рецепт).
+    Генерирует НОВЫЙ рецепт декора на основе seed (например заголовка слайда) —
+    используется на каждом слайде отдельно, чтобы графическая композиция не
+    повторялась внутри одной презентации (в отличие от единого theme['decor']).
+    """
+    rnd = random.Random((seed + "|" + str(random.random())).encode("utf-8"))
+    prims_pool = MOOD_PROFILES.get(mood, {}).get("prims")
+    return generate_decor_recipe(rnd, prims_pool=prims_pool)
+
+
+def _decorate(slide, theme: dict, on_dark: bool, recipe: dict = None):
+    """
+    Рисует процедурно сгенерированную графическую композицию.
     on_dark — тёмный фон (титул) или светлый (контент): подбираем мягкость.
+    Если recipe не передан — берётся theme['decor'] (для обратной совместимости);
+    для содержательных слайдов рецепт генерируется заново под каждый слайд
+    (см. вызовы с _fresh_decor), чтобы декор не повторялся между слайдами.
     """
-    recipe = theme.get("decor")
+    if recipe is None:
+        recipe = theme.get("decor")
     if not recipe or not recipe.get("shapes"):
         return
     base = theme["title_bg"] if on_dark else theme["bg"]
@@ -918,6 +933,8 @@ _CUR_BULLET_MARKER = "▸"
 def _add_text(slide, x, y, w, h, text: str, *, size: int = 18, bold: bool = False,
               color: RGBColor = None, align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP,
               font: str = None, italic: bool = False):
+    if not text:
+        return None
     if color is None:
         color = RGBColor(0x22, 0x2A, 0x35)
     if font is None:
@@ -1519,6 +1536,8 @@ def build_pptx(topic: str, subtitle: str, contents: list, slides_data: list,
     if contents:
         slide = prs.slides.add_slide(blank)
         _add_rect(slide, 0, 0, SLIDE_W, SLIDE_H, theme["bg"])
+        cd = _fresh_decor(f"{theme.get('name','')}|contents", theme.get("mood", ""))
+        _decorate(slide, theme, on_dark=False, recipe=cd)
 
         if layout == "sidebar_dark":
             _add_rect(slide, 0, 0, Inches(1.8), SLIDE_H, theme["accent"])
@@ -1526,23 +1545,67 @@ def build_pptx(topic: str, subtitle: str, contents: list, slides_data: list,
             _add_text(slide, 0, Inches(0.5), Inches(1.8), Inches(1.2),
                       "СО\nДЕР\nЖА\nНИЕ", size=12, bold=True, color=theme["accent2"],
                       align=PP_ALIGN.CENTER)
-            cx = Inches(2.1)
-            cw = Inches(10.8)
-            cy = Inches(0.4)
-        else:
+            cx, cw, cy = Inches(2.1), Inches(10.8), Inches(0.4)
+        elif layout == "split_diagonal":
+            _add_rect(slide, 0, 0, SLIDE_W, Inches(1.5), theme["accent"])
+            _add_rect(slide, Inches(10.5), 0, Inches(2.83), Inches(1.5), theme["accent2"])
+            _add_text(slide, Inches(0.4), Inches(0.15), Inches(10.0), Inches(1.1),
+                      "Содержание урока", size=26, bold=True, color=theme["white"],
+                      align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.MIDDLE)
+            _add_rect(slide, 0, Inches(1.5), Inches(0.14), SLIDE_H - Inches(1.5), theme["accent2"])
+            cx, cw, cy = Inches(0.5), Inches(5.7), Inches(1.85)
+        elif layout == "left_header":
+            _add_rect(slide, 0, 0, SLIDE_W, Inches(1.55), theme["accent"])
+            _add_text(slide, Inches(0.4), Inches(0.22), Inches(10.3), Inches(1.05),
+                      "Содержание урока", size=26, bold=True, color=theme["white"],
+                      align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.MIDDLE)
+            _add_rect(slide, 0, Inches(1.55), SLIDE_W, Emu(9144), theme["accent2"])
+            cx, cw, cy = Inches(0.4), Inches(5.9), Inches(1.9)
+        elif layout == "center_frame":
+            _add_rect(slide, 0, 0, SLIDE_W, Inches(1.5), theme["bg"])
+            _add_rect(slide, 0, Inches(1.5), SLIDE_W, Emu(18000), theme["accent2"])
+            _add_text(slide, Inches(0.6), Inches(0.4), SLIDE_W - Inches(1.2), Inches(0.9),
+                      "Содержание урока", size=27, bold=True, color=theme["accent"],
+                      align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+            cx, cw, cy = Inches(0.7), Inches(5.6), Inches(1.85)
+        elif layout == "corner_tag":
+            badge_w = Inches(1.35)
+            _add_rect(slide, 0, 0, SLIDE_W, Inches(1.5), theme["bg"])
+            _add_text(slide, Inches(0.35), Inches(0.35), Inches(9.5), Inches(1.0),
+                      "Содержание урока", size=27, bold=True, color=theme["accent"],
+                      align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.MIDDLE)
+            _add_rect(slide, SLIDE_W - badge_w, 0, badge_w, Inches(1.5), theme["accent"])
+            _add_rect(slide, 0, Inches(1.5), SLIDE_W, Emu(28000), theme["accent2"])
+            cx, cw, cy = Inches(0.4), Inches(5.9), Inches(1.85)
+        elif layout == "ribbon":
+            ribbon_w = Inches(2.2)
+            _add_rect(slide, 0, 0, SLIDE_W, Inches(1.35), theme["accent"])
+            _add_rect(slide, 0, 0, ribbon_w, Inches(1.35), theme["accent2"])
+            _add_text(slide, ribbon_w + Inches(0.3), 0, SLIDE_W - ribbon_w - Inches(0.6), Inches(1.35),
+                      "Содержание урока", size=25, bold=True, color=theme["white"],
+                      align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.MIDDLE)
+            _add_rect(slide, 0, Inches(1.35), SLIDE_W, Emu(30000), theme["accent2"])
+            cx, cw, cy = Inches(0.4), Inches(5.9), Inches(1.7)
+        elif layout == "stacked_bar":
+            _add_rect(slide, 0, 0, SLIDE_W, Emu(210000), theme["accent2"])
+            _add_rect(slide, 0, Emu(210000), SLIDE_W, Inches(1.3), theme["accent"])
+            _add_text(slide, Inches(0.4), Emu(210000), SLIDE_W - Inches(0.8), Inches(1.3),
+                      "Содержание урока", size=25, bold=True, color=theme["white"],
+                      align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.MIDDLE)
+            cx, cw, cy = Inches(0.4), Inches(5.9), Inches(1.75)
+        else:  # top_banner (default)
             _add_rect(slide, 0, 0, SLIDE_W, Inches(1.45), theme["accent"])
             _add_rect(slide, 0, Inches(1.45), Inches(0.18),
                       SLIDE_H - Inches(1.45), theme["accent2"])
             _add_text(slide, Inches(0.55), Inches(0.28), Inches(11.5), Inches(0.9),
                       "Содержание урока", size=28, bold=True, color=theme["white"],
                       align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.MIDDLE)
-            cx = Inches(0.38)
-            cw = Inches(6.0)
-            cy = Inches(1.65)
+            cx, cw, cy = Inches(0.38), Inches(6.0), Inches(1.65)
 
         mid = (len(contents) + 1) // 2
         left_items = contents[:mid]
         right_items = contents[mid:]
+        right_x = SLIDE_W - Inches(0.4) - cw
 
         if layout == "sidebar_dark":
             # Нумерованный список крупными карточками
@@ -1556,12 +1619,27 @@ def build_pptx(topic: str, subtitle: str, contents: list, slides_data: list,
                           anchor=MSO_ANCHOR.MIDDLE)
                 _add_text(slide, cx + Inches(0.75), card_y, cw - Inches(0.85), Inches(0.62),
                           item, size=15, color=theme["text"], anchor=MSO_ANCHOR.MIDDLE)
+        elif layout in ("corner_tag", "ribbon", "stacked_bar"):
+            # Одна колонка карточек с номером слева от текста
+            avail_h = SLIDE_H - cy - Inches(0.6)
+            row_h = min(Inches(0.85), avail_h / max(len(contents), 1))
+            for i, item in enumerate(contents):
+                row_y = cy + i * (row_h + Inches(0.12))
+                if row_y + row_h > SLIDE_H - Inches(0.55):
+                    break
+                _add_rect(slide, cx, row_y, SLIDE_W - cx - Inches(0.4), row_h, theme["card_bg"])
+                _add_rect(slide, cx, row_y, Emu(70000), row_h, theme["accent2"])
+                _add_text(slide, cx + Inches(0.2), row_y, Inches(0.6), row_h,
+                          f"{i+1:02d}", size=14, bold=True, color=theme["accent2"],
+                          anchor=MSO_ANCHOR.MIDDLE)
+                _add_text(slide, cx + Inches(0.85), row_y, SLIDE_W - cx - Inches(1.3), row_h,
+                          item, size=15, color=theme["text"], anchor=MSO_ANCHOR.MIDDLE)
         else:
             _add_bullets(slide, cx, cy, cw, Inches(5.4),
                          left_items, size=17, color=theme["text"],
                          accent2=theme["accent2"], space_after=14)
             if right_items:
-                _add_bullets(slide, Inches(6.8), cy, cw, Inches(5.4),
+                _add_bullets(slide, right_x, cy, cw, Inches(5.4),
                              right_items, size=17, color=theme["text"],
                              accent2=theme["accent2"], space_after=14)
         _footer(slide, teacher_name, teacher_school, theme)
@@ -1570,7 +1648,9 @@ def build_pptx(topic: str, subtitle: str, contents: list, slides_data: list,
     for idx, s in enumerate(slides_data, start=1):
         slide = prs.slides.add_slide(blank)
         _add_rect(slide, 0, 0, SLIDE_W, SLIDE_H, theme["bg"])
-        _decorate(slide, theme, on_dark=False)
+        # У каждого слайда — своя графическая композиция (не повторяется внутри презентации)
+        slide_decor = _fresh_decor(f"{theme.get('name','')}|{s['title']}|{idx}", theme.get("mood", ""))
+        _decorate(slide, theme, on_dark=False, recipe=slide_decor)
         _slide_header(slide, s["title"], idx, total_content, teacher_name, theme)
 
         slide_imgs = images.get(idx) or []  # list[bytes], до 3 штук
@@ -1591,6 +1671,8 @@ def build_pptx(topic: str, subtitle: str, contents: list, slides_data: list,
     if conclusion:
         slide = prs.slides.add_slide(blank)
         _add_rect(slide, 0, 0, SLIDE_W, SLIDE_H, theme["bg"])
+        ccd = _fresh_decor(f"{theme.get('name','')}|conclusion", theme.get("mood", ""))
+        _decorate(slide, theme, on_dark=False, recipe=ccd)
 
         if layout == "sidebar_dark":
             _add_rect(slide, 0, 0, Inches(1.8), SLIDE_H, theme["accent"])
@@ -1606,6 +1688,54 @@ def build_pptx(topic: str, subtitle: str, contents: list, slides_data: list,
                 _add_text(slide, Inches(2.65), cy + Emu(50000), Inches(10.0),
                           Inches(1.4), item, size=16, color=theme["text"],
                           anchor=MSO_ANCHOR.MIDDLE)
+
+        elif layout == "center_frame":
+            _add_rect(slide, 0, 0, Emu(60000), SLIDE_H, theme["accent2"])
+            _add_rect(slide, SLIDE_W - Emu(60000), 0, Emu(60000), SLIDE_H, theme["accent2"])
+            _add_text(slide, Inches(1.0), Inches(0.4), SLIDE_W - Inches(2.0), Inches(0.8),
+                      "Ключевые выводы", size=28, bold=True, color=theme["accent"],
+                      align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+            row_y0 = Inches(1.5)
+            for i, item in enumerate(conclusion[:4]):
+                row_y = row_y0 + i * Inches(1.25)
+                _add_rect(slide, Inches(1.0), row_y, SLIDE_W - Inches(2.0), Inches(1.05), theme["card_bg"])
+                _add_text(slide, Inches(1.25), row_y, SLIDE_W - Inches(2.5), Inches(1.05),
+                          item, size=15, color=theme["text"], anchor=MSO_ANCHOR.MIDDLE)
+
+        elif layout == "corner_tag":
+            tag = Inches(1.6)
+            _add_rect(slide, SLIDE_W - tag, 0, tag, tag, theme["accent2"])
+            _add_text(slide, Inches(0.6), Inches(0.35), Inches(9), Inches(1.0),
+                      "Ключевые выводы", size=28, bold=True, color=theme["accent"], align=PP_ALIGN.LEFT)
+            row_y0 = Inches(1.6)
+            for i, item in enumerate(conclusion[:4]):
+                row_y = row_y0 + i * Inches(1.25)
+                _add_rect(slide, Inches(0.6), row_y, SLIDE_W - Inches(1.2), Emu(70000), theme["accent2"])
+                _add_text(slide, Inches(0.6), row_y + Inches(0.15), SLIDE_W - Inches(1.2), Inches(0.9),
+                          item, size=15, color=theme["text"], anchor=MSO_ANCHOR.TOP)
+
+        elif layout == "ribbon":
+            _add_rect(slide, 0, 0, SLIDE_W, Inches(1.2), theme["accent"])
+            _add_text(slide, Inches(0.5), 0, Inches(11), Inches(1.2),
+                      "Ключевые выводы", size=28, bold=True, color=theme["white"],
+                      align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.MIDDLE)
+            _add_rect(slide, 0, Inches(1.2), SLIDE_W, Emu(30000), theme["accent2"])
+            for i, item in enumerate(conclusion[:4]):
+                row_y = Inches(1.5) + i * Inches(1.25)
+                _add_rect(slide, Inches(0.5), row_y, Emu(90000), Inches(1.0), theme["accent2"])
+                _add_text(slide, Inches(0.75), row_y, SLIDE_W - Inches(1.3), Inches(1.0),
+                          item, size=15, color=theme["text"], anchor=MSO_ANCHOR.MIDDLE)
+
+        elif layout == "stacked_bar":
+            _add_rect(slide, 0, 0, SLIDE_W, Emu(210000), theme["accent2"])
+            _add_rect(slide, 0, Emu(210000), SLIDE_W, Inches(1.0), theme["accent"])
+            _add_text(slide, Inches(0.4), Emu(210000), SLIDE_W - Inches(0.8), Inches(1.0),
+                      "Ключевые выводы", size=25, bold=True, color=theme["white"],
+                      align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.MIDDLE)
+            _add_bullets(slide, Inches(0.5), Inches(1.55), SLIDE_W - Inches(1.0), Inches(4.9),
+                         conclusion, size=18, color=theme["text"],
+                         accent2=theme["accent2"], space_after=13)
+
         elif layout in ("split_diagonal", "left_header"):
             # Двухколонная сетка карточек
             _add_rect(slide, 0, 0, SLIDE_W, Inches(1.3), theme["accent"])
@@ -1622,7 +1752,8 @@ def build_pptx(topic: str, subtitle: str, contents: list, slides_data: list,
                 _add_text(slide, col_x + Inches(0.15), row_y + Inches(0.2),
                           col_w - Inches(0.3), Inches(2.2),
                           item, size=15, color=theme["text"], anchor=MSO_ANCHOR.TOP)
-        else:
+
+        else:  # top_banner (default)
             _add_rect(slide, 0, 0, SLIDE_W, Inches(1.45), theme["accent"])
             _add_rect(slide, 0, Inches(1.45), Inches(0.18),
                       SLIDE_H - Inches(1.45), theme["accent2"])
@@ -1641,6 +1772,8 @@ def build_pptx(topic: str, subtitle: str, contents: list, slides_data: list,
     # ── 5. Финальный слайд ───────────────────────────────────────────────
     slide = prs.slides.add_slide(blank)
     _add_rect(slide, 0, 0, SLIDE_W, SLIDE_H, theme["title_bg"])
+    fcd = _fresh_decor(f"{theme.get('name','')}|final", theme.get("mood", ""))
+    _decorate(slide, theme, on_dark=True, recipe=fcd)
 
     if layout == "sidebar_dark":
         _add_rect(slide, SLIDE_W - Inches(0.55), 0, Inches(0.55), SLIDE_H, theme["accent2"])
@@ -1651,7 +1784,23 @@ def build_pptx(topic: str, subtitle: str, contents: list, slides_data: list,
     elif layout == "left_header":
         _add_rect(slide, 0, 0, Inches(0.5), SLIDE_H, theme["accent2"])
         _add_rect(slide, 0, SLIDE_H - Inches(2.0), SLIDE_W, Inches(0.06), theme["accent2"])
-    else:
+    elif layout == "center_frame":
+        _add_rect(slide, 0, 0, Emu(60000), SLIDE_H, theme["accent2"])
+        _add_rect(slide, SLIDE_W - Emu(60000), 0, Emu(60000), SLIDE_H, theme["accent2"])
+        _add_rect(slide, 0, 0, SLIDE_W, Emu(60000), theme["accent2"])
+        _add_rect(slide, 0, SLIDE_H - Emu(60000), SLIDE_W, Emu(60000), theme["accent2"])
+    elif layout == "corner_tag":
+        tag = Inches(1.8)
+        _add_rect(slide, SLIDE_W - tag, 0, tag, tag, theme["accent2"])
+        _add_rect(slide, 0, SLIDE_H - Emu(60000), SLIDE_W, Emu(60000), theme["accent2"])
+    elif layout == "ribbon":
+        _add_rect(slide, 0, Inches(3.4), SLIDE_W, Inches(0.9), theme["accent2"])
+    elif layout == "stacked_bar":
+        for i, wfrac in enumerate([1.0, 0.82, 0.64]):
+            _add_rect(slide, 0, Inches(4.6) + i * Inches(0.3),
+                      SLIDE_W * wfrac, Inches(0.24),
+                      theme["accent2"] if i == 0 else theme["accent3"])
+    else:  # top_banner (default)
         _add_rect(slide, 0, Inches(4.55), SLIDE_W, Inches(0.08), theme["accent2"])
         _add_rect(slide, 0, 0, Inches(0.45), SLIDE_H, theme["accent2"])
 

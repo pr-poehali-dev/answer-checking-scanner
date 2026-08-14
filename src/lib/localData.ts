@@ -4,7 +4,7 @@
 
 const PREFIX = "aousp_data_";
 
-export interface LocalSnapshot<S, W, R, P, T, WS, SY> {
+export interface LocalSnapshot<S, W, R, P, T, WS, SY, EX> {
   students: S[];
   works: W[];
   results: R[];
@@ -12,13 +12,14 @@ export interface LocalSnapshot<S, W, R, P, T, WS, SY> {
   generatedTests: T[];
   worksheets: WS[];
   synopses: SY[];
+  exams: EX[];
   savedAt: string;
 }
 
 type AnySnapshot = LocalSnapshot<
   Record<string, unknown>, Record<string, unknown>, Record<string, unknown>,
   Record<string, unknown>, Record<string, unknown>, Record<string, unknown>,
-  Record<string, unknown>
+  Record<string, unknown>, Record<string, unknown>
 >;
 
 function key(login: string) {
@@ -47,6 +48,7 @@ function minimal(data: AnySnapshot): AnySnapshot {
     generatedTests: [],
     worksheets: [],
     synopses: [],
+    exams: [],
     savedAt: data.savedAt,
   };
 }
@@ -84,6 +86,7 @@ export function loadLocalData(login: string): AnySnapshot | null {
       generatedTests: Array.isArray(d.generatedTests) ? d.generatedTests : [],
       worksheets: Array.isArray(d.worksheets) ? d.worksheets : [],
       synopses: Array.isArray(d.synopses) ? d.synopses : [],
+      exams: Array.isArray(d.exams) ? d.exams : [],
       savedAt: typeof d.savedAt === "string" ? d.savedAt : "",
     };
   } catch { return null; }

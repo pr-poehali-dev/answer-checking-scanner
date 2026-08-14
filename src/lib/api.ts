@@ -328,7 +328,7 @@ export interface TeacherWorkDto {
 
 export interface TeacherMaterialDto {
   id: string;
-  type: "presentation" | "synopsis" | "test" | "worksheet";
+  type: "presentation" | "synopsis" | "test" | "worksheet" | "exam";
   title: string;
   subject?: string;
   classLabel?: string;

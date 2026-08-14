@@ -1790,7 +1790,7 @@ def handler(event: dict, context) -> dict:
 
             sections = [
                 {"key": "works", "label": "Работы (проверочные/контрольные)", "items": works},
-                {"key": "materials", "label": "Материалы (конспекты, презентации, тесты, листы)", "items": materials},
+                {"key": "materials", "label": "Материалы (конспекты, презентации, тесты, листы, экзамены)", "items": materials},
                 {"key": "students", "label": "Ученики и коды привязки", "items": students},
                 {"key": "results", "label": "Результаты проверок", "items": results},
                 {"key": "my_results", "label": "Свои результаты (как ученика)", "items": my_results},

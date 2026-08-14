@@ -111,6 +111,7 @@ function _persistLocal() {
     generatedTests: state.generatedTests as unknown as Record<string, unknown>[],
     worksheets: state.worksheets as unknown as Record<string, unknown>[],
     synopses: state.synopses as unknown as Record<string, unknown>[],
+    exams: state.exams as unknown as Record<string, unknown>[],
   });
 }
 
@@ -293,6 +294,22 @@ export interface WorksheetItem {
   tasks: WorksheetTask[];
 }
 
+/** Вариант итоговой аттестации (ОГЭ/ЕГЭ) — как ИИ-генерации, так и готовый из банка ФИПИ. */
+export interface ExamItem {
+  id: string;
+  /** "ai" — сгенерирован ИИ по кодификатору, "fipi" — готовый вариант из банка заданий */
+  source: "ai" | "fipi";
+  examType: "ОГЭ" | "ЕГЭ";
+  subject: string;
+  variantNum: number;
+  totalTasks: number;
+  totalPoints: number;
+  filename: string;
+  answersFilename: string;
+  yadiskPath: string | null;
+  createdAt: string;
+}
+
 export type AppState = {
   teacher: Teacher | null;
   students: Student[];
@@ -302,6 +319,7 @@ export type AppState = {
   generatedTests: GeneratedTestItem[];
   worksheets: WorksheetItem[];
   synopses: SynopsisItem[];
+  exams: ExamItem[];
   yadiskConnected: boolean;
   yadiskUser: YadiskUser | null;
   yadiskSyncing: boolean;
@@ -325,6 +343,7 @@ let state: AppState = {
   generatedTests: (_localData?.generatedTests || []) as unknown as GeneratedTestItem[],
   worksheets: (_localData?.worksheets || []) as unknown as WorksheetItem[],
   synopses: (_localData?.synopses || []) as unknown as SynopsisItem[],
+  exams: (_localData?.exams || []) as unknown as ExamItem[],
   yadiskConnected: false,
   yadiskUser: null,
   yadiskSyncing: false,
@@ -544,6 +563,7 @@ export const appStore = {
       generatedTests: [],
       worksheets: [],
       synopses: [],
+      exams: [],
     };
     notify();
   },
@@ -559,7 +579,7 @@ export const appStore = {
     state = {
       ...state,
       students: [], works: [], results: [],
-      presentations: [], generatedTests: [], worksheets: [], synopses: [],
+      presentations: [], generatedTests: [], worksheets: [], synopses: [], exams: [],
     };
     notify();
   },
@@ -726,6 +746,19 @@ export const appStore = {
 
   removeSynopsis: (id: string) => {
     state = { ...state, synopses: state.synopses.filter(s => s.id !== id) };
+    notify();
+    _persistLocal();
+  },
+
+  addExam: (item: ExamItem) => {
+    state = { ...state, exams: [item, ...state.exams].slice(0, 50) };
+    notify();
+    _persistLocal();
+    appStore.syncMaterialsToDb();
+  },
+
+  removeExam: (id: string) => {
+    state = { ...state, exams: state.exams.filter(e => e.id !== id) };
     notify();
     _persistLocal();
   },
@@ -1094,10 +1127,12 @@ export const appStore = {
       const localSynIds = new Set(state.synopses.map(s => s.id));
       const localTestIds = new Set(state.generatedTests.map(g => g.id));
       const localWsIds = new Set(state.worksheets.map(w => w.id));
+      const localExamIds = new Set(state.exams.map(e => e.id));
       const dbPres: PresentationItem[] = [];
       const dbSyn: SynopsisItem[] = [];
       const dbTests: GeneratedTestItem[] = [];
       const dbWs: WorksheetItem[] = [];
+      const dbExams: ExamItem[] = [];
       for (const m of data.materials) {
         const cls = parseClass(m.classLabel);
         // Сохранённое на сервере содержимое материала (текст, слайды, задания)
@@ -1149,11 +1184,21 @@ export const appStore = {
             uploadedToYadisk: !!m.uploadedToYadisk, createdAt: m.createdAt || new Date().toISOString(),
             intro: str("intro"), tasks: arr<WorksheetItem["tasks"][number]>("tasks"),
           });
+        } else if (m.type === "exam" && !localExamIds.has(m.id)) {
+          const examType = str("examType", "ОГЭ") === "ЕГЭ" ? "ЕГЭ" : "ОГЭ";
+          dbExams.push({
+            id: m.id, source: str("source", "ai") === "fipi" ? "fipi" : "ai",
+            examType, subject: m.subject || "",
+            variantNum: num("variantNum"), totalTasks: num("totalTasks"),
+            totalPoints: num("totalPoints"), filename: m.filename || "",
+            answersFilename: str("answersFilename"), yadiskPath: null,
+            createdAt: m.createdAt || new Date().toISOString(),
+          });
         }
       }
 
       if (dbStudents.length || dbWorks.length || dbResults.length ||
-          dbPres.length || dbSyn.length || dbTests.length || dbWs.length) {
+          dbPres.length || dbSyn.length || dbTests.length || dbWs.length || dbExams.length) {
         state = {
           ...state,
           students: [...state.students, ...dbStudents],
@@ -1163,6 +1208,7 @@ export const appStore = {
           synopses: [...state.synopses, ...dbSyn],
           generatedTests: [...state.generatedTests, ...dbTests],
           worksheets: [...state.worksheets, ...dbWs],
+          exams: [...state.exams, ...dbExams],
         };
         notify();
       }
@@ -1214,12 +1260,12 @@ export const appStore = {
     } catch { /* ignore */ }
   },
 
-  /** Учитель: дублирует каталог материалов (презентации/конспекты/тесты/листы) в БД. */
+  /** Учитель: дублирует каталог материалов (презентации/конспекты/тесты/листы/экзамены) в БД. */
   syncMaterialsToDb: async (): Promise<void> => {
     const t = state.teacher;
     if (!t || (t.role !== "teacher" && t.role !== "tester")) return;
     const items: {
-      id: string; type: "presentation" | "synopsis" | "test" | "worksheet";
+      id: string; type: "presentation" | "synopsis" | "test" | "worksheet" | "exam";
       title: string; subject?: string; classLabel?: string; topic?: string;
       filename?: string; size?: number; uploadedToYadisk?: boolean;
       content?: unknown;
@@ -1249,6 +1295,14 @@ export const appStore = {
       size: w.size, uploadedToYadisk: w.uploadedToYadisk,
       content: { description: w.description, tasksCount: w.tasksCount,
                  imagesAdded: w.imagesAdded, intro: w.intro, tasks: w.tasks },
+    }));
+    state.exams.forEach(ex => items.push({
+      id: ex.id, type: "exam", title: `${ex.examType} · ${ex.subject} · Вариант ${ex.variantNum}`,
+      subject: ex.subject, filename: ex.filename, size: 0,
+      uploadedToYadisk: !!ex.yadiskPath,
+      content: { source: ex.source, examType: ex.examType, variantNum: ex.variantNum,
+                 totalTasks: ex.totalTasks, totalPoints: ex.totalPoints,
+                 answersFilename: ex.answersFilename },
     }));
     if (!items.length) return;
     try {

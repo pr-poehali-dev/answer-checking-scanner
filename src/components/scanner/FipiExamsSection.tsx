@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import Icon from "@/components/ui/icon";
-import { useAppStore } from "@/store/appStore";
+import { appStore, useAppStore, type ExamItem } from "@/store/appStore";
 import { examBuilderApi, type ExamBuilderResponse } from "@/lib/api";
 import { downloadDocx } from "./TestsForm";
 
@@ -17,22 +17,12 @@ const EGE_FALLBACK = [
 
 type ExamType = "ОГЭ" | "ЕГЭ";
 
-interface HistoryItem {
-  id: string;
-  examType: ExamType;
-  subject: string;
-  variantNum: number;
-  totalTasks: number;
-  totalPoints: number;
-  filename: string;
-  answers_filename: string;
-  createdAt: string;
-}
-
-const HISTORY_KEY = "fipi_exams_history";
-
 export function FipiExamsSection() {
-  const { teacher } = useAppStore();
+  const { teacher, exams } = useAppStore();
+  // История хранится централизованно в appStore (синхронизируется в БД —
+  // видна учителю на любом устройстве и администратору УДС в «Все данные»).
+  const history = exams.filter(e => e.source === "fipi");
+
   const [examType, setExamType] = useState<ExamType>("ОГЭ");
   const [subject, setSubject] = useState("");
   const [subjects, setSubjects] = useState<string[]>([]);
@@ -40,10 +30,6 @@ export function FipiExamsSection() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [lastResult, setLastResult] = useState<ExamBuilderResponse | null>(null);
-  const [history, setHistory] = useState<HistoryItem[]>(() => {
-    try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]"); }
-    catch { return []; }
-  });
 
   useEffect(() => {
     const fallback = examType === "ОГЭ" ? OGE_FALLBACK : EGE_FALLBACK;
@@ -58,12 +44,6 @@ export function FipiExamsSection() {
       })
       .catch(() => {});
   }, [examType]);
-
-  const saveHistory = (items: HistoryItem[]) => {
-    setHistory(items);
-    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(items.slice(0, 50))); }
-    catch { /* ignore */ }
-  };
 
   const handleGenerate = async () => {
     if (!subject) {
@@ -84,18 +64,20 @@ export function FipiExamsSection() {
       setLastResult(result);
       setSuccess(`Вариант №${result.variantNum} готов: ${result.totalTasks} заданий, ${result.totalPoints} баллов.`);
 
-      const item: HistoryItem = {
+      const item: ExamItem = {
         id: Date.now().toString(),
+        source: "fipi",
         examType: result.examType,
         subject: result.subject,
         variantNum: result.variantNum,
         totalTasks: result.totalTasks,
         totalPoints: result.totalPoints,
         filename: result.filename,
-        answers_filename: result.answers_filename,
+        answersFilename: result.answers_filename,
         createdAt: new Date().toISOString(),
+        yadiskPath: null,
       };
-      saveHistory([item, ...history]);
+      appStore.addExam(item);
     } catch (e) {
       setError((e as Error).message || "Не удалось создать вариант");
     } finally {
@@ -114,7 +96,7 @@ export function FipiExamsSection() {
   };
 
   const removeHistoryItem = (id: string) => {
-    saveHistory(history.filter(h => h.id !== id));
+    appStore.removeExam(id);
   };
 
   return (

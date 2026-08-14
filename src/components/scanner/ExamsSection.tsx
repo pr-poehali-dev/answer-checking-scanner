@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import Icon from "@/components/ui/icon";
 import { usePersistedState } from "@/hooks/usePersistedState";
 import { taskRunner, useTaskState } from "@/lib/taskRunner";
-import { appStore, useAppStore } from "@/store/appStore";
+import { appStore, useAppStore, type ExamItem } from "@/store/appStore";
 import { examApi, type ExamResponse } from "@/lib/api";
 import { downloadDocx } from "./TestsForm";
 import { yadisk, ROOT_FOLDER } from "@/lib/yadisk";
@@ -23,21 +23,11 @@ const EGE_SUBJECTS_FALLBACK = [
 
 type ExamType = "ОГЭ" | "ЕГЭ";
 
-interface HistoryItem {
-  id: string;
-  examType: ExamType;
-  subject: string;
-  variantNum: number;
-  totalTasks: number;
-  totalPoints: number;
-  filename: string;
-  answers_filename: string;
-  createdAt: string;
-  yadiskPath: string | null;
-}
-
 export function ExamsSection() {
-  const { teacher, yadiskConnected, storageMode } = useAppStore();
+  const { teacher, yadiskConnected, storageMode, exams } = useAppStore();
+  // История хранится централизованно в appStore (синхронизируется в БД —
+  // видна учителю на любом устройстве и администратору УДС в «Все данные»).
+  const history = exams.filter(e => e.source === "ai");
 
   const [examType, setExamType] = usePersistedState<ExamType>("exams:examType", "ОГЭ");
   const [subject, setSubject] = usePersistedState("exams:subject", "");
@@ -48,13 +38,6 @@ export function ExamsSection() {
   const error = task.error;
   const success = task.success;
   const [lastResult, setLastResult] = useState<ExamResponse | null>(null);
-  const [history, setHistory] = useState<HistoryItem[]>(() => {
-    try {
-      return JSON.parse(localStorage.getItem("exams_history") || "[]");
-    } catch {
-      return [];
-    }
-  });
 
   // Загружаем список предметов при смене типа экзамена
   useEffect(() => {
@@ -75,11 +58,6 @@ export function ExamsSection() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [examType]);
 
-  const saveHistory = (items: HistoryItem[]) => {
-    setHistory(items);
-    localStorage.setItem("exams_history", JSON.stringify(items.slice(0, 30)));
-  };
-
   const generate = () => {
     if (busy) return;
     if (!subject) { taskRunner.run({ key: TASK_KEY, run: async () => { throw new Error("Выберите предмет"); } }); return; }
@@ -93,7 +71,6 @@ export function ExamsSection() {
       yadiskToken: teacher.yadiskToken,
       useYadisk: storageMode === "yadisk" && yadiskConnected && !!teacher.yadiskToken,
     };
-    const historySnapshot = history;
     setLastResult(null);
 
     taskRunner.run({
@@ -132,19 +109,20 @@ export function ExamsSection() {
           }
         }
 
-        const item: HistoryItem = {
+        const item: ExamItem = {
           id: String(Date.now()),
+          source: "ai",
           examType: params.examType,
           subject: params.subject,
           variantNum: result.variantNum,
           totalTasks: result.totalTasks,
           totalPoints: result.totalPoints,
           filename: result.filename,
-          answers_filename: result.answers_filename,
+          answersFilename: result.answers_filename,
           createdAt: new Date().toISOString(),
           yadiskPath,
         };
-        saveHistory([item, ...historySnapshot]);
+        appStore.addExam(item);
 
         if (result.balance_rub !== undefined) {
           appStore.setAiBalance(Math.round(result.balance_rub * 100));
@@ -157,7 +135,7 @@ export function ExamsSection() {
     });
   };
 
-  const redownload = (item: HistoryItem) => {
+  const redownload = (item: ExamItem) => {
     if (!lastResult || lastResult.variantNum !== item.variantNum) {
       alert("Перегенерируйте вариант — файл не сохраняется в браузере.");
       return;
@@ -167,7 +145,7 @@ export function ExamsSection() {
   };
 
   const removeHistory = (id: string) => {
-    saveHistory(history.filter(h => h.id !== id));
+    appStore.removeExam(id);
   };
 
   return (

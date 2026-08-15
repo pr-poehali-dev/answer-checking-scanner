@@ -23,6 +23,8 @@ from datetime import datetime
 SCHEMA = os.environ.get("MAIN_DB_SCHEMA", "t_p31556921_answer_checking_scan")
 # Секрет подписи сессионных токенов — тот же, что в функции входа (auth)
 TOKEN_SECRET = os.environ.get("TOKEN_SECRET", "")
+# Пароль администратора — для проверки admin-токена (см. get_user)
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 
 # Анонимам (по IP) можно скачать не более N материалов, дальше — регистрация + подписка 99₽
 FREE_DOWNLOADS_LIMIT = 5
@@ -105,7 +107,10 @@ def cdn_url(key: str) -> str:
 def get_user(login: str, token: str, conn):
     """Проверяет пользователя по токену.
 
-    Поддерживает два вида токенов:
+    Поддерживает несколько видов токенов:
+    0) Администратор (login == "admin"): токен подписан ADMIN_PASSWORD, а не
+       строкой из БД — у admin в users нет настоящего пароля/хеша токена,
+       поэтому проверяем его отдельно (как это делает check_admin_token в auth).
     1) Обычные пользователи (учитель/ученик/тестер): auth_token_hash = sha256(token).
     2) Сотрудники образовательного учреждения (директор/зам/педагог), вошедшие
        через функцию institution — их токен вида 'ou:sha256(login+password_hash+ou_salt)'.
@@ -113,6 +118,17 @@ def get_user(login: str, token: str, conn):
     """
     if not login or not token:
         return None
+
+    if login == "admin":
+        if not ADMIN_PASSWORD or not token.startswith("admin:"):
+            return None
+        admin_pw_hash = hashlib.sha256(ADMIN_PASSWORD.encode()).hexdigest()
+        expected = _make_token("admin", "admin", admin_pw_hash)
+        if not hmac.compare_digest(token, expected):
+            return None
+        return {"login": "admin", "full_name": "Администратор САОУ", "role": "admin",
+                "subscription_active": True}
+
     cur = conn.cursor()
     cur.execute(
         f"""SELECT login, full_name, role, is_active, auth_token_hash,

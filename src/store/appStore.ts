@@ -1,5 +1,5 @@
 // Глобальное хранилище приложения САОУ
-import { authApi } from "@/lib/api";
+import { authApi, type AuthUser } from "@/lib/api";
 import { yadisk, yadiskOAuth, yadiskStorage, ROOT_FOLDER, STUDENTS_FILE, WORKS_FILE, type YadiskUser } from "@/lib/yadisk";
 import { getDeviceFingerprint } from "@/lib/deviceFingerprint";
 import { saveLocalData, loadLocalData, clearLocalData } from "@/lib/localData";
@@ -360,6 +360,34 @@ function notify() {
   listeners.forEach(l => l());
 }
 
+// Общая логика после успешного подтверждения email (по коду или по ссылке) —
+// сохраняет пользователя как активную сессию, как при обычном логине.
+function applyConfirmedUser(user: AuthUser) {
+  const signupTeacher: Teacher = {
+    login: user.login,
+    name: user.full_name,
+    firstName: user.first_name,
+    lastName: user.last_name,
+    email: user.email,
+    school: user.school,
+    role: user.role,
+    authToken: user.token,
+    yadiskToken: null,
+    subscriptionStatus: user.subscription_status || "none",
+    subscriptionActive: !!user.subscription_active,
+    subscriptionUntil: user.subscription_until,
+    trialActive: !!user.trial_active,
+    trialExpired: !!user.trial_expired,
+    trialUntil: user.trial_until || null,
+    trialAiCallsToday: user.trial_ai_calls_today || 0,
+    trialAiLimit: user.trial_ai_limit || 5,
+    aiTokensKopecks: 0,
+  };
+  saveSession(signupTeacher);
+  state = { ...state, teacher: signupTeacher, storageMode: loadStorageMode(signupTeacher.login) };
+  notify();
+}
+
 export const appStore = {
   getState: (): AppState => state,
 
@@ -447,29 +475,19 @@ export const appStore = {
   > => {
     try {
       const user = await authApi.confirmEmail(login, code);
-      const signupTeacher: Teacher = {
-        login: user.login,
-        name: user.full_name,
-        firstName: user.first_name,
-        lastName: user.last_name,
-        email: user.email,
-        school: user.school,
-        role: user.role,
-        authToken: user.token,
-        yadiskToken: null,
-        subscriptionStatus: user.subscription_status || "none",
-        subscriptionActive: !!user.subscription_active,
-        subscriptionUntil: user.subscription_until,
-        trialActive: !!user.trial_active,
-        trialExpired: !!user.trial_expired,
-        trialUntil: user.trial_until || null,
-        trialAiCallsToday: user.trial_ai_calls_today || 0,
-        trialAiLimit: user.trial_ai_limit || 5,
-        aiTokensKopecks: 0,
-      };
-      saveSession(signupTeacher);
-      state = { ...state, teacher: signupTeacher, storageMode: loadStorageMode(signupTeacher.login) };
-      notify();
+      applyConfirmedUser(user);
+      return { ok: true, role: user.role };
+    } catch (e) {
+      return { ok: false, error: (e as Error).message || "Не удалось подтвердить email" };
+    }
+  },
+
+  confirmEmailLink: async (token: string): Promise<
+    { ok: true; role: UserRole } | { ok: false; error: string }
+  > => {
+    try {
+      const user = await authApi.confirmEmailLink(token);
+      applyConfirmedUser(user);
       return { ok: true, role: user.role };
     } catch (e) {
       return { ok: false, error: (e as Error).message || "Не удалось подтвердить email" };

@@ -7,6 +7,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import YadiskCallback from "./pages/YadiskCallback";
+import ConfirmEmailPage from "./pages/ConfirmEmailPage";
 import OfertaPage from "./pages/OfertaPage";
 import PrivacyPage from "./pages/PrivacyPage";
 import SjouPage from "./pages/SjouPage";
@@ -38,6 +39,7 @@ const App = () => (
         <Routes>
           <Route path="/" element={<Index />} />
           <Route path="/yadisk-callback" element={<YadiskCallback />} />
+          <Route path="/confirm-email" element={<ConfirmEmailPage />} />
           <Route path="/oferta" element={<OfertaPage />} />
           <Route path="/privacy" element={<PrivacyPage />} />
           <Route path="/knowledge-base" element={<KnowledgeBasePage />} />

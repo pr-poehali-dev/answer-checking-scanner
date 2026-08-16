@@ -103,7 +103,7 @@ export default function LoginPage({ onLogin, initialMode = "login", onBack }: Lo
     setLoading(false);
     if (res.ok) {
       setConfirmLogin(res.login);
-      setConfirmHint(`Мы отправили код подтверждения на ${res.email}`);
+      setConfirmHint(`Мы отправили письмо на ${res.email} — введите код из письма или перейдите по ссылке в нём`);
       setMode("confirm");
     } else {
       setError(res.error || "Ошибка регистрации");
@@ -209,6 +209,9 @@ export default function LoginPage({ onLogin, initialMode = "login", onBack }: Lo
                   autoFocus
                   className="w-full px-3 py-2.5 border border-border rounded-sm text-center text-lg tracking-[0.4em] font-semibold focus:outline-none focus:ring-1 focus:ring-ring"
                 />
+                <p className="text-[11px] text-muted-foreground mt-1.5">
+                  Письмо не пришло? Проверьте папку «Спам» — или нажмите «Отправить код ещё раз» ниже.
+                </p>
               </div>
 
               {error && (

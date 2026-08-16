@@ -4,6 +4,7 @@ POST /login — вход (учитель/админ/tester)
 POST /signup — самостоятельная регистрация (имя, фамилия, email, пароль) — логин генерируется автоматически,
               требуется подтверждение email кодом (см. /confirm-email)
 POST /confirm-email — подтвердить 6-значный код с почты, выдать рабочий токен
+POST /confirm-email-link — подтвердить по токену из ссылки в письме, выдать рабочий токен
 POST /resend-email-code — повторно отправить код подтверждения email
 POST /register — добавление пользователя админом
 POST /me — получить актуальный статус подписки (по токену)
@@ -281,26 +282,32 @@ SMTP_HOST = os.environ.get("UDS_SMTP_HOST", "").strip()
 SMTP_PORT = int(os.environ.get("UDS_SMTP_PORT") or "465")
 SMTP_USER = os.environ.get("UDS_SMTP_USER", "").strip()
 SMTP_PASSWORD = os.environ.get("UDS_SMTP_PASSWORD", "").strip()
+# Отдельный SMTP-хост (если общий не отвечает) — как в backend/uds/mail.py
+MAIL_SMTP_HOST = os.environ.get("MAIL_SMTP_HOST", "").strip()
+SMTP_TIMEOUT = 7
+# Публичный адрес сайта — для ссылки подтверждения в письме
+SITE_URL = os.environ.get("SITE_URL", "").strip().rstrip("/") or "https://poehali.dev"
 
 
 def gen_email_code() -> str:
     return "".join(str(random.randint(0, 9)) for _ in range(6))
 
 
-def issue_email_code(cur, login: str) -> str:
-    """Инвалидирует старые коды и создаёт новый 6-значный код подтверждения email."""
+def issue_email_code(cur, login: str) -> tuple[str, str]:
+    """Инвалидирует старые коды и создаёт новый 6-значный код + токен ссылки подтверждения email."""
     cur.execute(
         f"UPDATE {SCHEMA}.email_verify_codes SET used = TRUE WHERE login = %s AND used = FALSE",
         (login,)
     )
     code = gen_email_code()
+    verify_token = secrets.token_urlsafe(32)
     expires = datetime.utcnow() + timedelta(minutes=EMAIL_CONFIRM_TTL_MIN)
     cur.execute(
-        f"""INSERT INTO {SCHEMA}.email_verify_codes (login, code, expires_at)
-            VALUES (%s, %s, %s)""",
-        (login, code, expires)
+        f"""INSERT INTO {SCHEMA}.email_verify_codes (login, code, verify_token, expires_at)
+            VALUES (%s, %s, %s, %s)""",
+        (login, code, verify_token, expires)
     )
-    return code
+    return code, verify_token
 
 
 def verify_email_code(cur, login: str, code: str) -> str:
@@ -326,29 +333,133 @@ def verify_email_code(cur, login: str, code: str) -> str:
     return "ok"
 
 
-def send_confirmation_email(to_email: str, code: str) -> None:
+def verify_email_token(cur, token: str) -> str | None:
+    """Проверяет токен ссылки подтверждения. Возвращает login при успехе, иначе None."""
+    if not token:
+        return None
+    cur.execute(
+        f"""SELECT id, login, expires_at FROM {SCHEMA}.email_verify_codes
+            WHERE verify_token = %s AND used = FALSE""",
+        (token,)
+    )
+    row = cur.fetchone()
+    if not row:
+        return None
+    code_id, login, expires_at = row
+    if datetime.utcnow() > expires_at:
+        cur.execute(f"UPDATE {SCHEMA}.email_verify_codes SET used = TRUE WHERE id = %s", (code_id,))
+        return None
+    cur.execute(f"UPDATE {SCHEMA}.email_verify_codes SET used = TRUE WHERE id = %s", (code_id,))
+    return login
+
+
+def _finish_email_confirmation(cur, login: str) -> dict:
+    """Отмечает email подтверждённым и выдаёт рабочий токен — общая логика
+    для подтверждения по коду (confirm-email) и по ссылке (confirm-email-link)."""
+    cur.execute(
+        f"""SELECT password_hash, full_name, first_name, last_name, email, school, role, is_active
+            FROM {SCHEMA}.users WHERE login = %s""",
+        (login,)
+    )
+    row = cur.fetchone()
+    if not row:
+        return _resp(404, {"error": "Пользователь не найден"})
+    pw_hash, full_name, first_name, last_name, email, school, role, is_active = row
+    if not is_active:
+        return _resp(403, {"error": "Аккаунт заблокирован. Обратитесь к администратору."})
+
+    token = _make_token(role, login, pw_hash)
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    cur.execute(
+        f"UPDATE {SCHEMA}.users SET email_confirmed = TRUE, auth_token_hash = %s WHERE login = %s",
+        (token_hash, login)
+    )
+    return _resp(200, {
+        "success": True, "login": login, "role": role,
+        "full_name": full_name, "first_name": first_name, "last_name": last_name,
+        "email": email, "school": school, "token": token,
+        "subscription_status": "none", "subscription_active": False, "subscription_until": None,
+    })
+
+
+def _smtp_candidates():
+    """Список вариантов (host, port, mode) для перебора — общий хост часто
+    обрывает соединение, поэтому пробуем несколько комбинаций подряд."""
+    hosts = []
+    for h in [MAIL_SMTP_HOST, SMTP_HOST, "mail.hosting.reg.ru"]:
+        if h and h not in hosts:
+            hosts.append(h)
+    candidates = []
+    for h in hosts:
+        candidates.append((h, 465, "ssl"))
+        candidates.append((h, 587, "starttls"))
+    return candidates
+
+
+def send_confirmation_email(to_email: str, code: str, verify_token: str = "", site_url: str = "") -> None:
+    """Отправляет письмо с кодом и ссылкой подтверждения. Перебирает несколько
+    комбинаций host/port (как в backend/uds/mail.py) — устойчиво к обрыву
+    соединения на общем хосте хостинга. Логирует каждую попытку."""
     if not (SMTP_HOST and SMTP_USER and SMTP_PASSWORD):
         raise RuntimeError("Отправка email не настроена")
+
+    base = (site_url or "").strip().rstrip("/") or SITE_URL
+    link = f"{base}/confirm-email?token={verify_token}" if verify_token else ""
     subject = "САОУ — подтверждение регистрации"
     text_body = (
+        f"Здравствуйте!\n\n"
         f"Ваш код подтверждения регистрации в системе САОУ:\n\n"
         f"  {code}\n\n"
-        f"Код действует {EMAIL_CONFIRM_TTL_MIN} минут. Если вы не регистрировались — просто проигнорируйте это письмо."
+        + (f"Либо просто перейдите по ссылке, чтобы подтвердить email:\n{link}\n\n" if link else "")
+        + f"Код и ссылка действуют {EMAIL_CONFIRM_TTL_MIN} минут. "
+        f"Если вы не регистрировались — просто проигнорируйте это письмо."
     )
     msg = MIMEText(text_body, "plain", "utf-8")
     msg["Subject"] = subject
     msg["From"] = f"САОУ <{SMTP_USER}>"
     msg["To"] = to_email
+    raw = msg.as_string()
+
+    import socket
     ctx = ssl.create_default_context()
-    if SMTP_PORT == 465:
-        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, context=ctx, timeout=15) as s:
-            s.login(SMTP_USER, SMTP_PASSWORD)
-            s.sendmail(SMTP_USER, [to_email], msg.as_string())
-    else:
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as s:
-            s.ehlo(); s.starttls(context=ctx); s.ehlo()
-            s.login(SMTP_USER, SMTP_PASSWORD)
-            s.sendmail(SMTP_USER, [to_email], msg.as_string())
+    last_err = None
+    auth_failed = False
+    unresolved = set()
+    for host, port, mode in _smtp_candidates():
+        if host in unresolved:
+            continue
+        try:
+            socket.getaddrinfo(host, port)
+        except Exception:
+            unresolved.add(host)
+            last_err = f"хост {host} не найден"
+            print(f"[AUTH SMTP] DNS FAIL {host}")
+            continue
+        try:
+            if mode == "ssl":
+                with smtplib.SMTP_SSL(host, port, context=ctx, timeout=SMTP_TIMEOUT) as s:
+                    s.login(SMTP_USER, SMTP_PASSWORD)
+                    s.sendmail(SMTP_USER, [to_email], raw)
+            else:
+                with smtplib.SMTP(host, port, timeout=SMTP_TIMEOUT) as s:
+                    s.ehlo(); s.starttls(context=ctx); s.ehlo()
+                    s.login(SMTP_USER, SMTP_PASSWORD)
+                    s.sendmail(SMTP_USER, [to_email], raw)
+            print(f"[AUTH SMTP] OK via {host}:{port} ({mode}) to={to_email}")
+            return
+        except smtplib.SMTPAuthenticationError as e:
+            auth_failed = True
+            last_err = f"неверный логин или пароль почты ({e.smtp_code})"
+            print(f"[AUTH SMTP] AUTH FAIL {host}:{port}: {e}")
+            break
+        except Exception as e:
+            last_err = str(e)
+            print(f"[AUTH SMTP] FAIL {host}:{port} ({mode}): {e}")
+            continue
+
+    if auth_failed:
+        raise RuntimeError("Неверный пароль почты отправителя. Проверьте UDS_SMTP_PASSWORD.")
+    raise RuntimeError(f"Не удалось подключиться к почтовому серверу: {last_err or 'соединение закрыто'}")
 
 
 # ── Журнал согласий (доказательная база) ────────────────────────────────────
@@ -417,6 +528,7 @@ def handler(event: dict, context) -> dict:
         password = (body.get("password") or "").strip()
         school = (body.get("school") or "САОУ").strip()
         study_group = (body.get("study_group") or "").strip()[:64]
+        site_url = (body.get("site_url") or "").strip()
         # Роль самостоятельной регистрации: только учитель или ученик
         req_role = (body.get("role") or "teacher").strip().lower()
         role = "student" if req_role == "student" else "teacher"
@@ -463,9 +575,9 @@ def handler(event: dict, context) -> dict:
                 ip=reg_ip,
                 user_agent=headers.get("user-agent", ""),
             )
-            code = issue_email_code(cur, login)
+            code, verify_token = issue_email_code(cur, login)
             try:
-                send_confirmation_email(email, code)
+                send_confirmation_email(email, code, verify_token, site_url)
             except Exception as e:
                 conn.rollback()
                 return _resp(500, {"error": f"Не удалось отправить код на email: {e}"})
@@ -500,37 +612,35 @@ def handler(event: dict, context) -> dict:
                 conn.commit()
                 return _resp(400, {"error": "Неверный код. Попробуйте ещё раз."})
 
-            cur.execute(
-                f"""SELECT password_hash, full_name, first_name, last_name, email, school, role, is_active
-                    FROM {SCHEMA}.users WHERE login = %s""",
-                (login,)
-            )
-            row = cur.fetchone()
-            if not row:
-                return _resp(404, {"error": "Пользователь не найден"})
-            pw_hash, full_name, first_name, last_name, email, school, role, is_active = row
-            if not is_active:
-                return _resp(403, {"error": "Аккаунт заблокирован. Обратитесь к администратору."})
-
-            token = _make_token(role, login, pw_hash)
-            token_hash = hashlib.sha256(token.encode()).hexdigest()
-            cur.execute(
-                f"UPDATE {SCHEMA}.users SET email_confirmed = TRUE, auth_token_hash = %s WHERE login = %s",
-                (token_hash, login)
-            )
+            resp = _finish_email_confirmation(cur, login)
             conn.commit()
-            return _resp(200, {
-                "success": True, "login": login, "role": role,
-                "full_name": full_name, "first_name": first_name, "last_name": last_name,
-                "email": email, "school": school, "token": token,
-                "subscription_status": "none", "subscription_active": False, "subscription_until": None,
-            })
+            return resp
+        finally:
+            conn.close()
+
+    # ── POST confirm-email-link — подтвердить по токену из ссылки в письме ──
+    if method == "POST" and route == "confirm-email-link":
+        token = (body.get("token") or "").strip()
+        if not token:
+            return _resp(400, {"error": "Укажите token"})
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            login = verify_email_token(cur, token)
+            if not login:
+                conn.commit()
+                return _resp(400, {"error": "Ссылка недействительна или устарела. Запросите новый код/ссылку."})
+
+            resp = _finish_email_confirmation(cur, login)
+            conn.commit()
+            return resp
         finally:
             conn.close()
 
     # ── POST resend-email-code — повторно отправить код подтверждения ───────
     if method == "POST" and route == "resend-email-code":
         login = (body.get("login") or "").strip()
+        site_url = (body.get("site_url") or "").strip()
         if not login:
             return _resp(400, {"error": "Укажите login"})
         conn = get_conn()
@@ -543,9 +653,9 @@ def handler(event: dict, context) -> dict:
             email, confirmed = row
             if confirmed:
                 return _resp(400, {"error": "Email уже подтверждён"})
-            code = issue_email_code(cur, login)
+            code, verify_token = issue_email_code(cur, login)
             try:
-                send_confirmation_email(email, code)
+                send_confirmation_email(email, code, verify_token, site_url)
             except Exception as e:
                 conn.rollback()
                 return _resp(500, {"error": f"Не удалось отправить email: {e}"})

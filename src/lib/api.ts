@@ -107,7 +107,7 @@ export const authApi = {
   signup: (payload: { first_name: string; last_name: string; email: string; password: string; school?: string; role?: "teacher" | "student"; study_group?: string; consent?: Record<string, string> }) =>
     request<{ success: boolean; need_confirmation: boolean; login: string; email: string; role: UserRole }>("signup", {
       method: "POST",
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ ...payload, site_url: window.location.origin }),
     }),
 
   confirmEmail: (login: string, code: string) =>
@@ -116,10 +116,16 @@ export const authApi = {
       body: JSON.stringify({ login, code }),
     }),
 
+  confirmEmailLink: (token: string) =>
+    request<AuthUser & { success: boolean }>("confirm-email-link", {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    }),
+
   resendEmailCode: (login: string) =>
     request<{ ok: boolean; hint: string }>("resend-email-code", {
       method: "POST",
-      body: JSON.stringify({ login }),
+      body: JSON.stringify({ login, site_url: window.location.origin }),
     }),
 
   getLkVisibility: () =>

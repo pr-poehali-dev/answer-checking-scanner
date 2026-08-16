@@ -27,6 +27,7 @@ import smtplib
 import hashlib
 import hmac
 import secrets
+import base64
 import psycopg2
 from email.mime.text import MIMEText
 from email import utils as email_utils
@@ -281,13 +282,56 @@ def is_valid_email(email: str) -> bool:
 EMAIL_CONFIRM_TTL_MIN = 15
 SMTP_HOST = os.environ.get("UDS_SMTP_HOST", "").strip()
 SMTP_PORT = int(os.environ.get("UDS_SMTP_PORT") or "465")
-SMTP_USER = os.environ.get("UDS_SMTP_USER", "").strip()
-SMTP_PASSWORD = os.environ.get("UDS_SMTP_PASSWORD", "").strip()
+# Резервные логин/пароль (старый способ) — используются, только если не
+# получилось взять рабочий ящик bint.kod@saou.ru из system_mailboxes (см. ниже)
+SMTP_USER_FALLBACK = os.environ.get("UDS_SMTP_USER", "").strip()
+SMTP_PASSWORD_FALLBACK = os.environ.get("UDS_SMTP_PASSWORD", "").strip()
 # Отдельный SMTP-хост (если общий не отвечает) — как в backend/uds/mail.py
 MAIL_SMTP_HOST = os.environ.get("MAIL_SMTP_HOST", "").strip()
 SMTP_TIMEOUT = 7
 # Публичный адрес сайта — для ссылки подтверждения в письме
 SITE_URL = os.environ.get("SITE_URL", "").strip().rstrip("/") or "https://poehali.dev"
+# Тот же системный ящик, которым УДС стабильно шлёт коды подтверждения email —
+# он уже создан на хостинге и его пароль лежит зашифрованным в system_mailboxes.
+REGISTER_SENDER = os.environ.get("UDS_REGISTER_SENDER", "bint.kod@saou.ru")
+
+
+def _mail_fernet():
+    """Расшифровщик пароля почтового ящика — тот же ключ, что в backend/uds/mail.py."""
+    from cryptography.fernet import Fernet
+    key = os.environ.get("MAIL_ENCRYPTION_KEY", "").strip()
+    if not key:
+        raise RuntimeError("MAIL_ENCRYPTION_KEY не задан")
+    try:
+        return Fernet(key.encode())
+    except Exception:
+        derived = base64.urlsafe_b64encode(hashlib.sha256(key.encode()).digest())
+        return Fernet(derived)
+
+
+def _sender_credentials(cur) -> tuple[str, str]:
+    """Возвращает (email, пароль) отправителя писем регистрации.
+
+    Приоритет — уже рабочий ящик bint.kod@saou.ru, которым УДС стабильно
+    шлёт коды подтверждения (пароль хранится зашифрованным в system_mailboxes,
+    т.к. ящик создан через ISPmanager). Если по какой-то причине запись не
+    найдена — резервный вариант: логин/пароль из секретов UDS_SMTP_*.
+    """
+    try:
+        cur.execute(
+            f"SELECT password_enc FROM {SCHEMA}.system_mailboxes "
+            f"WHERE LOWER(email_address) = %s AND status = 'active'",
+            (REGISTER_SENDER.lower(),)
+        )
+        row = cur.fetchone()
+        if row and row[0]:
+            password = _mail_fernet().decrypt(row[0].encode()).decode()
+            return REGISTER_SENDER, password
+    except Exception as e:
+        print(f"[AUTH SMTP] system_mailboxes lookup failed: {e}")
+    if SMTP_USER_FALLBACK and SMTP_PASSWORD_FALLBACK:
+        return SMTP_USER_FALLBACK, SMTP_PASSWORD_FALLBACK
+    raise RuntimeError("Отправка email не настроена: нет ни system_mailboxes, ни UDS_SMTP_USER/PASSWORD")
 
 
 def gen_email_code() -> str:
@@ -397,12 +441,14 @@ def _smtp_candidates():
     return candidates
 
 
-def send_confirmation_email(to_email: str, code: str, verify_token: str = "", site_url: str = "") -> None:
-    """Отправляет письмо с кодом и ссылкой подтверждения. Перебирает несколько
-    комбинаций host/port (как в backend/uds/mail.py) — устойчиво к обрыву
-    соединения на общем хосте хостинга. Логирует каждую попытку."""
-    if not (SMTP_HOST and SMTP_USER and SMTP_PASSWORD):
-        raise RuntimeError("Отправка email не настроена")
+def send_confirmation_email(cur, to_email: str, code: str, verify_token: str = "", site_url: str = "") -> None:
+    """Отправляет письмо с кодом и ссылкой подтверждения через тот же ящик
+    bint.kod@saou.ru, которым УДС стабильно шлёт коды подтверждения email
+    (см. _sender_credentials). Перебирает несколько комбинаций host/port —
+    устойчиво к обрыву соединения на общем хосте хостинга. Логирует попытки."""
+    smtp_user, smtp_password = _sender_credentials(cur)
+    if not SMTP_HOST:
+        raise RuntimeError("Отправка email не настроена (UDS_SMTP_HOST)")
 
     base = (site_url or "").strip().rstrip("/") or SITE_URL
     link = f"{base}/confirm-email?token={verify_token}" if verify_token else ""
@@ -417,14 +463,14 @@ def send_confirmation_email(to_email: str, code: str, verify_token: str = "", si
     )
     msg = MIMEText(text_body, "plain", "utf-8")
     msg["Subject"] = subject
-    msg["From"] = f"САОУ <{SMTP_USER}>"
+    msg["From"] = f"САОУ <{smtp_user}>"
     msg["To"] = to_email
-    msg["Reply-To"] = SMTP_USER
+    msg["Reply-To"] = smtp_user
     # Date и Message-ID обязательны для многих почтовых провайдеров (mail.ru,
     # Яндекс) — без них письмо часто уходит в спам или отклоняется молча,
     # даже если SMTP-сервер принял его с кодом 250 OK.
     msg["Date"] = email_utils.formatdate(localtime=True)
-    msg["Message-ID"] = email_utils.make_msgid(domain=SMTP_USER.split("@")[-1] or "poehali.dev")
+    msg["Message-ID"] = email_utils.make_msgid(domain=smtp_user.split("@")[-1] or "saou.ru")
     raw = msg.as_string()
 
     import socket
@@ -445,14 +491,14 @@ def send_confirmation_email(to_email: str, code: str, verify_token: str = "", si
         try:
             if mode == "ssl":
                 with smtplib.SMTP_SSL(host, port, context=ctx, timeout=SMTP_TIMEOUT) as s:
-                    s.login(SMTP_USER, SMTP_PASSWORD)
-                    s.sendmail(SMTP_USER, [to_email], raw)
+                    s.login(smtp_user, smtp_password)
+                    s.sendmail(smtp_user, [to_email], raw)
             else:
                 with smtplib.SMTP(host, port, timeout=SMTP_TIMEOUT) as s:
                     s.ehlo(); s.starttls(context=ctx); s.ehlo()
-                    s.login(SMTP_USER, SMTP_PASSWORD)
-                    s.sendmail(SMTP_USER, [to_email], raw)
-            print(f"[AUTH SMTP] OK via {host}:{port} ({mode}) to={to_email}")
+                    s.login(smtp_user, smtp_password)
+                    s.sendmail(smtp_user, [to_email], raw)
+            print(f"[AUTH SMTP] OK via {host}:{port} ({mode}) user={smtp_user} to={to_email}")
             return
         except smtplib.SMTPAuthenticationError as e:
             auth_failed = True
@@ -465,7 +511,7 @@ def send_confirmation_email(to_email: str, code: str, verify_token: str = "", si
             continue
 
     if auth_failed:
-        raise RuntimeError("Неверный пароль почты отправителя. Проверьте UDS_SMTP_PASSWORD.")
+        raise RuntimeError("Неверный пароль почты отправителя.")
     raise RuntimeError(f"Не удалось подключиться к почтовому серверу: {last_err or 'соединение закрыто'}")
 
 
@@ -584,7 +630,7 @@ def handler(event: dict, context) -> dict:
             )
             code, verify_token = issue_email_code(cur, login)
             try:
-                send_confirmation_email(email, code, verify_token, site_url)
+                send_confirmation_email(cur, email, code, verify_token, site_url)
             except Exception as e:
                 conn.rollback()
                 return _resp(500, {"error": f"Не удалось отправить код на email: {e}"})
@@ -662,7 +708,7 @@ def handler(event: dict, context) -> dict:
                 return _resp(400, {"error": "Email уже подтверждён"})
             code, verify_token = issue_email_code(cur, login)
             try:
-                send_confirmation_email(email, code, verify_token, site_url)
+                send_confirmation_email(cur, email, code, verify_token, site_url)
             except Exception as e:
                 conn.rollback()
                 return _resp(500, {"error": f"Не удалось отправить email: {e}"})

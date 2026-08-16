@@ -427,11 +427,27 @@ def _finish_email_confirmation(cur, login: str) -> dict:
     })
 
 
+def _server_host_from_isp():
+    """Извлекает хост персонального сервера хостинга из ISPMANAGER_URL
+    (напр. server185.hosting.reg.ru) — его IP явно разрешён в SPF-записи
+    домена (ip4:...), в отличие от общего mail.hosting.reg.ru. Отправка через
+    хост вне SPF приводит к «550 spam message rejected» у mail.ru/Яндекса."""
+    url = os.environ.get("ISPMANAGER_URL", "").strip()
+    if not url:
+        return None
+    host = url.replace("https://", "").replace("http://", "")
+    host = host.split("/")[0].split(":")[0]
+    return host or None
+
+
 def _smtp_candidates():
-    """Список вариантов (host, port, mode) для перебора — общий хост часто
-    обрывает соединение, поэтому пробуем несколько комбинаций подряд."""
+    """Список вариантов (host, port, mode) для перебора при отправке.
+
+    Приоритет — персональному серверу хостинга (server185...), т.к. его IP
+    указан в SPF-записи домена явно; общий mail.hosting.reg.ru может слать
+    с IP вне SPF, из-за чего письмо отклоняется как поддельное (SPF fail)."""
     hosts = []
-    for h in [MAIL_SMTP_HOST, SMTP_HOST, "mail.hosting.reg.ru"]:
+    for h in [MAIL_SMTP_HOST, _server_host_from_isp(), SMTP_HOST, "mail.hosting.reg.ru"]:
         if h and h not in hosts:
             hosts.append(h)
     candidates = []

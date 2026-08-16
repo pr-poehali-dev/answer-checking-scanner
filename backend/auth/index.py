@@ -29,6 +29,7 @@ import hmac
 import secrets
 import psycopg2
 from email.mime.text import MIMEText
+from email import utils as email_utils
 from datetime import datetime, timedelta
 
 CORS = {
@@ -418,6 +419,12 @@ def send_confirmation_email(to_email: str, code: str, verify_token: str = "", si
     msg["Subject"] = subject
     msg["From"] = f"САОУ <{SMTP_USER}>"
     msg["To"] = to_email
+    msg["Reply-To"] = SMTP_USER
+    # Date и Message-ID обязательны для многих почтовых провайдеров (mail.ru,
+    # Яндекс) — без них письмо часто уходит в спам или отклоняется молча,
+    # даже если SMTP-сервер принял его с кодом 250 OK.
+    msg["Date"] = email_utils.formatdate(localtime=True)
+    msg["Message-ID"] = email_utils.make_msgid(domain=SMTP_USER.split("@")[-1] or "poehali.dev")
     raw = msg.as_string()
 
     import socket

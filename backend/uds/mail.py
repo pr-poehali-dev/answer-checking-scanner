@@ -428,6 +428,75 @@ def send_external_email(from_address: str, from_password: str, from_name: str,
     raise RuntimeError(f"Не удалось подключиться к почтовому серверу: {last_err or 'соединение закрыто'}")
 
 
+def send_bulk_email(from_address: str, from_password: str, from_name: str,
+                     recipients: list, subject: str, body: str) -> tuple:
+    """Рассылка одного письма списку получателей через ОДНО SMTP-соединение
+    (быстрее и надёжнее, чем открывать соединение на каждого адресата).
+
+    recipients — список email-адресов (строк). Возвращает (sent_count, failed),
+    где failed — список email-адресов, на которые не удалось отправить.
+    """
+    if not SMTP_HOST:
+        raise RuntimeError("SMTP не настроен (UDS_SMTP_HOST)")
+    if not recipients:
+        return 0, []
+
+    msg_tmpl_from = f"{from_name} <{from_address}>" if from_name else from_address
+
+    import socket
+    ctx = ssl.create_default_context()
+    last_err = None
+    unresolved = set()
+    for host, port, mode in _smtp_candidates():
+        if host in unresolved:
+            continue
+        try:
+            socket.getaddrinfo(host, port)
+        except Exception:
+            unresolved.add(host)
+            last_err = f"хост {host} не найден"
+            continue
+        try:
+            if mode == "ssl":
+                smtp = smtplib.SMTP_SSL(host, port, context=ctx, timeout=SMTP_TIMEOUT)
+            else:
+                smtp = smtplib.SMTP(host, port, timeout=SMTP_TIMEOUT)
+                smtp.ehlo(); smtp.starttls(context=ctx); smtp.ehlo()
+            smtp.login(from_address, from_password)
+        except smtplib.SMTPAuthenticationError as e:
+            last_err = f"неверный логин или пароль почты ({e.smtp_code})"
+            print(f"[UDS SMTP BULK] AUTH FAIL {host}:{port}: {e}")
+            break
+        except Exception as e:
+            last_err = str(e)
+            print(f"[UDS SMTP BULK] CONNECT FAIL {host}:{port} ({mode}): {e}")
+            continue
+
+        # Соединение установлено — рассылаем всем получателям через него
+        sent = 0
+        failed = []
+        for to_address in recipients:
+            try:
+                msg = MIMEMultipart("alternative")
+                msg["Subject"] = subject or "(без темы)"
+                msg["From"] = msg_tmpl_from
+                msg["To"] = to_address
+                msg.attach(MIMEText(body, "plain", "utf-8"))
+                smtp.sendmail(from_address, [to_address], msg.as_string())
+                sent += 1
+            except Exception as e:
+                print(f"[UDS SMTP BULK] send to {to_address} failed: {e}")
+                failed.append(to_address)
+        try:
+            smtp.quit()
+        except Exception:
+            pass
+        print(f"[UDS SMTP BULK] OK via {host}:{port} ({mode}) sent={sent} failed={len(failed)}")
+        return sent, failed
+
+    raise RuntimeError(f"Не удалось подключиться к почтовому серверу: {last_err or 'соединение закрыто'}")
+
+
 def thread_key(a: str, b: str) -> str:
     """Детерминированный ключ треда для пары адресов."""
     x, y = sorted([(a or "").lower(), (b or "").lower()])

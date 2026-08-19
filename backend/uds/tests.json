@@ -133,6 +133,13 @@
       "path": "/?action=create-my-mailbox",
       "body": {},
       "expectedStatus": 403
+    },
+    {
+      "name": "mailing-send without auth returns 403",
+      "method": "POST",
+      "path": "/?action=mailing-send",
+      "body": { "audience": "all", "status": "planned", "subject": "Тест", "body": "Текст" },
+      "expectedStatus": 403
     }
   ]
 }

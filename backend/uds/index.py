@@ -16,6 +16,9 @@
   GET  ?action=audit-log&target_login=  — логи действий (по сотруднику или все)
   GET  ?action=users           — пользователи (поиск ?q=, привязка)
   GET  ?action=user&target_login=  — карточка пользователя
+  POST ?action=mailing-send    — массовая рассылка письма (только Глава/Зам. Главы):
+                                  {audience: all|staff|roles, roles?: [...], status: planned|important|danger,
+                                   subject, body}
 """
 import json
 import os
@@ -72,6 +75,20 @@ CAN_LKVIEW = {"developer", "deputy", "head"}
 CAN_CERT = {"head", "deputy"}
 # Кто может смотреть ВСЕ данные пользователя (Глава, Зам Главы и Советник)
 CAN_ALL_DATA = {"head", "deputy", "advisor"}
+# Кто может делать массовую рассылку писем (Глава и Зам Главы)
+CAN_MAILING = {"head", "deputy"}
+
+# Ящики-отправители рассылки — свои для каждого статуса важности
+MAILING_SENDERS = {
+    "planned": "info@saou.ru",
+    "important": "uprav@saou.ru",
+    "danger": "mvm@saou.ru",
+}
+MAILING_STATUS_LABELS = {
+    "planned": "Плановая",
+    "important": "Важно",
+    "danger": "Опасность",
+}
 # Срок хранения пользовательских данных: 2 месяца после последнего изменения
 DATA_RETENTION_DAYS = 60
 # Код выпуска сертификата (вводит Глава/Зам при назначении)
@@ -284,6 +301,7 @@ def perms_for(role: str, subrole: str = None) -> dict:
         "can_cert": role in CAN_CERT,     # выпуск/отзыв сертификатов — Глава и Зам
         # Просмотр ВСЕХ данных пользователя — Глава, Зам Главы, Советник
         "can_all_data": role in CAN_ALL_DATA,
+        "can_mailing": role in CAN_MAILING,  # массовая рассылка — Глава и Зам
         "is_curator": is_curator,         # является куратором (подроль или Глава/Зам)
         "can_assign_subrole": PANEL_ROLE_RANK.get(role, 0) >= 5,  # подроли назначают Глава/Зам
         "subrole": subrole,
@@ -2144,6 +2162,102 @@ def handler(event: dict, context) -> dict:
             return _resp(200, {"ok": True})
 
         # ════════════ КОРПОРАТИВНАЯ ПОЧТА ═══════════════════════════════════
+
+        # ── mailing-send — массовая рассылка (только Глава и Зам. Главы) ─────
+        if action == "mailing-send" and method == "POST":
+            if not perms["can_mailing"]:
+                return _resp(403, {"error": "Рассылка доступна только Главе и Зам. Главы"})
+
+            audience = (body.get("audience") or "").strip()       # all | staff | roles
+            roles = body.get("roles") or []                       # список panel_role при audience=roles
+            status = (body.get("status") or "").strip()           # planned | important | danger
+            subject_in = (body.get("subject") or "").strip()[:256]
+            text = (body.get("body") or "").strip()
+
+            if audience not in ("all", "staff", "roles"):
+                return _resp(400, {"error": "Укажите получателей: all, staff или roles"})
+            if audience == "roles" and not roles:
+                return _resp(400, {"error": "Укажите список ролей для рассылки"})
+            if status not in MAILING_SENDERS:
+                return _resp(400, {"error": "Укажите статус рассылки: planned, important или danger"})
+            if not subject_in or not text:
+                return _resp(400, {"error": "Укажите тему и текст сообщения"})
+            if audience == "roles":
+                bad_roles = [r for r in roles if r not in PANEL_ROLE_RANK]
+                if bad_roles:
+                    return _resp(400, {"error": f"Неизвестные роли: {', '.join(bad_roles)}"})
+
+            cur = conn.cursor()
+
+            # Собираем адреса получателей по выбранной аудитории
+            if audience == "all":
+                cur.execute(
+                    f"""SELECT DISTINCT email FROM {SCHEMA}.users
+                        WHERE is_active = TRUE AND email IS NOT NULL AND email != ''"""
+                )
+            elif audience == "staff":
+                cur.execute(
+                    f"""SELECT DISTINCT COALESCE(mb.email_address, po.email, u.email) AS addr
+                        FROM {SCHEMA}.panel_operators po
+                        JOIN {SCHEMA}.users u ON u.login = po.login
+                        LEFT JOIN {SCHEMA}.mailboxes mb ON mb.login = po.login
+                        WHERE po.panel_role IS NOT NULL AND po.panel_role != 'removed'
+                          AND u.is_active = TRUE
+                          AND COALESCE(mb.email_address, po.email, u.email) IS NOT NULL"""
+                )
+            else:  # roles
+                cur.execute(
+                    f"""SELECT DISTINCT COALESCE(mb.email_address, po.email, u.email) AS addr
+                        FROM {SCHEMA}.panel_operators po
+                        JOIN {SCHEMA}.users u ON u.login = po.login
+                        LEFT JOIN {SCHEMA}.mailboxes mb ON mb.login = po.login
+                        WHERE po.panel_role = ANY(%s) AND po.panel_role != 'removed'
+                          AND u.is_active = TRUE
+                          AND COALESCE(mb.email_address, po.email, u.email) IS NOT NULL""",
+                    (roles,)
+                )
+            recipients = sorted({(r[0] or "").strip().lower() for r in cur.fetchall() if r[0]})
+
+            if not recipients:
+                return _resp(400, {"error": "Не найдено ни одного получателя с почтой"})
+
+            # Тема: автоматически ставим ФИО отправителя перед темой письма
+            cur.execute(f"SELECT full_name FROM {SCHEMA}.users WHERE login = %s", (caller["login"],))
+            row = cur.fetchone()
+            sender_name = (row[0] if row else None) or caller["login"]
+            full_subject = f"{sender_name}: {subject_in}"
+
+            # В конце письма — метка отправителя: #управление:ID сотрудника
+            operator_id = caller.get("operator_number")
+            full_body = f"{text}\n\n#управление:{operator_id if operator_id is not None else caller['login']}"
+
+            sender_address = MAILING_SENDERS[status]
+            try:
+                sender_password = mail.ensure_system_mailbox(cur, SCHEMA, sender_address)
+                conn.commit()
+            except Exception as e:
+                conn.rollback()
+                return _resp(503, {"error": f"Не удалось подготовить ящик-отправитель {sender_address}: {e}"})
+
+            try:
+                sent, failed = mail.send_bulk_email(
+                    sender_address, sender_password, "УДС САОУ",
+                    recipients, full_subject, full_body
+                )
+            except Exception as e:
+                return _resp(500, {"error": f"Не удалось выполнить рассылку: {e}"})
+
+            log_action(cur, caller["login"], my_role, "mailing_send", None, {
+                "audience": audience, "roles": roles if audience == "roles" else None,
+                "status": status, "subject": subject_in,
+                "recipients_count": len(recipients), "sent": sent, "failed_count": len(failed),
+            })
+            conn.commit()
+            return _resp(200, {
+                "ok": True, "recipients_count": len(recipients),
+                "sent": sent, "failed": failed,
+                "sender": sender_address, "status_label": MAILING_STATUS_LABELS[status],
+            })
 
         # ── mail-test-isp — диагностика соединения с ISPmanager (Глава/Зам) ──
         if action == "mail-test-isp" and method == "GET":

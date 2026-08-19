@@ -420,7 +420,12 @@ export interface UdsPerms {
   is_curator?: boolean;
   can_assign_subrole?: boolean;
   subrole?: string | null;
+  /** Массовая рассылка писем (Глава и Зам. Главы). */
+  can_mailing?: boolean;
 }
+
+export type MailingAudience = "all" | "staff" | "roles";
+export type MailingStatus = "planned" | "important" | "danger";
 
 /** Раздел данных пользователя: набор записей с произвольными полями. */
 export interface UdsDataSection {
@@ -818,6 +823,12 @@ export const udsApi = {
   mailTestIsp: (login: string, token: string) =>
     udsRequest<{ ok: boolean; endpoint?: string; message?: string; reason?: string }>(
       "mail-test-isp", "GET", login, token
+    ),
+
+  /** Массовая рассылка (только Глава и Зам. Главы). */
+  mailingSend: (login: string, token: string, payload: { audience: MailingAudience; roles?: string[]; status: MailingStatus; subject: string; body: string }) =>
+    udsRequest<{ ok: boolean; recipients_count: number; sent: number; failed: string[]; sender: string; status_label: string }>(
+      "mailing-send", "POST", login, token, payload
     ),
 };
 

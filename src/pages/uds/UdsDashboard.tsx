@@ -101,7 +101,7 @@ export default function UdsDashboard({ session, tab, setTab, logout, onProfileUp
           <UdsUsers login={session.login} token={session.token} perms={perms} />
         )}
         {tab === "mail" && (
-          <UdsMail login={session.login} token={session.token} myAddress={myMailAddress} />
+          <UdsMail login={session.login} token={session.token} myAddress={myMailAddress} canMailing={!!perms.can_mailing} />
         )}
         {tab === "materials" && (
           <UdsMaterials login={session.login} token={session.token} />

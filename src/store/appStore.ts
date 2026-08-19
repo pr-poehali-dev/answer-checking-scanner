@@ -503,6 +503,28 @@ export const appStore = {
     }
   },
 
+  forgotPassword: async (login: string): Promise<
+    { ok: true; login?: string; hint: string } | { ok: false; error: string }
+  > => {
+    try {
+      const res = await authApi.forgotPassword(login);
+      return { ok: true, login: res.login, hint: res.hint };
+    } catch (e) {
+      return { ok: false, error: (e as Error).message || "Не удалось отправить код" };
+    }
+  },
+
+  resetPasswordConfirm: async (login: string, code: string, newPassword: string): Promise<
+    { ok: true } | { ok: false; error: string }
+  > => {
+    try {
+      await authApi.resetPasswordConfirm(login, code, newPassword);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: (e as Error).message || "Не удалось сменить пароль" };
+    }
+  },
+
   refreshSubscription: async (): Promise<void> => {
     if (!state.teacher || state.teacher.role === "admin") return;
     try {

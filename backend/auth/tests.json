@@ -42,6 +42,34 @@
       "expectedStatus": 400
     },
     {
+      "name": "Forgot-password without login returns 400",
+      "method": "POST",
+      "path": "/?action=forgot-password",
+      "body": {},
+      "expectedStatus": 400
+    },
+    {
+      "name": "Forgot-password unknown login returns 200 (no account leak)",
+      "method": "POST",
+      "path": "/?action=forgot-password",
+      "body": { "login": "unknown_login_xyz_999" },
+      "expectedStatus": 200
+    },
+    {
+      "name": "Reset-password-confirm without login/code returns 400",
+      "method": "POST",
+      "path": "/?action=reset-password-confirm",
+      "body": {},
+      "expectedStatus": 400
+    },
+    {
+      "name": "Reset-password-confirm short password returns 400",
+      "method": "POST",
+      "path": "/?action=reset-password-confirm",
+      "body": { "login": "unknown_login_xyz_999", "code": "000000", "new_password": "123" },
+      "expectedStatus": 400
+    },
+    {
       "name": "Confirm-email unknown login returns 400 (no active code)",
       "method": "POST",
       "path": "/?action=confirm-email",

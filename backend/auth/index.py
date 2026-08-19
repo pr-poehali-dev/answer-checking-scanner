@@ -6,6 +6,8 @@ POST /signup — самостоятельная регистрация (имя, 
 POST /confirm-email — подтвердить 6-значный код с почты, выдать рабочий токен
 POST /confirm-email-link — подтвердить по токену из ссылки в письме, выдать рабочий токен
 POST /resend-email-code — повторно отправить код подтверждения email
+POST /forgot-password — запросить код для восстановления забытого пароля (шлётся на почту)
+POST /reset-password-confirm — подтвердить код и задать новый пароль
 POST /register — добавление пользователя админом
 POST /me — получить актуальный статус подписки (по токену)
 POST /activate-trial — активация пробного периода 5 дней (не более раза на IP и на устройство)
@@ -280,6 +282,7 @@ def is_valid_email(email: str) -> bool:
 
 # ── Подтверждение email при регистрации ──────────────────────────────────────
 EMAIL_CONFIRM_TTL_MIN = 15
+PASSWORD_RESET_TTL_MIN = 15
 SMTP_HOST = os.environ.get("UDS_SMTP_HOST", "").strip()
 SMTP_PORT = int(os.environ.get("UDS_SMTP_PORT") or "465")
 # Резервные логин/пароль (старый способ) — используются, только если не
@@ -398,6 +401,48 @@ def verify_email_token(cur, token: str) -> str | None:
     return login
 
 
+# ── Восстановление забытого пароля по коду с почты ───────────────────────────
+
+def issue_password_reset_code(cur, login: str) -> str:
+    """Инвалидирует старые коды сброса пароля и создаёт новый 6-значный код."""
+    cur.execute(
+        f"UPDATE {SCHEMA}.password_reset_codes SET used = TRUE WHERE login = %s AND used = FALSE",
+        (login,)
+    )
+    code = gen_email_code()
+    expires = datetime.utcnow() + timedelta(minutes=PASSWORD_RESET_TTL_MIN)
+    cur.execute(
+        f"""INSERT INTO {SCHEMA}.password_reset_codes (login, code, expires_at)
+            VALUES (%s, %s, %s)""",
+        (login, code, expires)
+    )
+    return code
+
+
+def verify_password_reset_code(cur, login: str, code: str) -> str:
+    """Возвращает 'ok', 'wrong', 'expired' или 'limit'. При успехе код сразу
+    помечается использованным, чтобы его нельзя было применить повторно."""
+    cur.execute(
+        f"""SELECT id, code, expires_at, attempts FROM {SCHEMA}.password_reset_codes
+            WHERE login = %s AND used = FALSE ORDER BY created_at DESC LIMIT 1""",
+        (login,)
+    )
+    row = cur.fetchone()
+    if not row:
+        return "expired"
+    code_id, stored_code, expires_at, attempts = row
+    if datetime.utcnow() > expires_at:
+        cur.execute(f"UPDATE {SCHEMA}.password_reset_codes SET used = TRUE WHERE id = %s", (code_id,))
+        return "expired"
+    if attempts >= 5:
+        return "limit"
+    if (code or "").strip() != stored_code:
+        cur.execute(f"UPDATE {SCHEMA}.password_reset_codes SET attempts = attempts + 1 WHERE id = %s", (code_id,))
+        return "wrong"
+    cur.execute(f"UPDATE {SCHEMA}.password_reset_codes SET used = TRUE WHERE id = %s", (code_id,))
+    return "ok"
+
+
 def _finish_email_confirmation(cur, login: str) -> dict:
     """Отмечает email подтверждённым и выдаёт рабочий токен — общая логика
     для подтверждения по коду (confirm-email) и по ссылке (confirm-email-link)."""
@@ -457,27 +502,16 @@ def _smtp_candidates():
     return candidates
 
 
-def send_confirmation_email(cur, to_email: str, code: str, verify_token: str = "", site_url: str = "") -> None:
-    """Отправляет письмо с кодом и ссылкой подтверждения через тот же ящик
-    bint.kod@saou.ru, которым УДС стабильно шлёт коды подтверждения email
-    (см. _sender_credentials). Перебирает несколько комбинаций host/port —
-    устойчиво к обрыву соединения на общем хосте хостинга. Логирует попытки."""
+def _send_plain_email(cur, to_email: str, subject: str, text_body: str) -> None:
+    """Отправляет обычное текстовое письмо через тот же ящик bint.kod@saou.ru,
+    которым УДС стабильно шлёт коды подтверждения (см. _sender_credentials).
+    Перебирает несколько комбинаций host/port — устойчиво к обрыву соединения
+    на общем хосте хостинга. Логирует попытки. Используется и для писем
+    подтверждения регистрации, и для писем восстановления пароля."""
     smtp_user, smtp_password = _sender_credentials(cur)
     if not SMTP_HOST:
         raise RuntimeError("Отправка email не настроена (UDS_SMTP_HOST)")
 
-    # Ссылку на preview-адрес платформы (…--preview.poehali.dev) в письмо
-    # намеренно не добавляем — почтовики (mail.ru) часто блокируют такие
-    # тестовые/нетиповые ссылки как подозрительные. Подтверждение — только
-    # вводом кода, как в стабильно работающих письмах УДС.
-    subject = "САОУ — подтверждение регистрации"
-    text_body = (
-        f"Здравствуйте!\n\n"
-        f"Ваш код подтверждения регистрации в системе САОУ:\n\n"
-        f"  {code}\n\n"
-        f"Код действует {EMAIL_CONFIRM_TTL_MIN} минут. "
-        f"Если вы не регистрировались — просто проигнорируйте это письмо."
-    )
     msg = MIMEText(text_body, "plain", "utf-8")
     msg["Subject"] = subject
     # formataddr кодирует ТОЛЬКО имя (кириллицу) в base64, а сам email-адрес
@@ -534,6 +568,36 @@ def send_confirmation_email(cur, to_email: str, code: str, verify_token: str = "
     if auth_failed:
         raise RuntimeError("Неверный пароль почты отправителя.")
     raise RuntimeError(f"Не удалось подключиться к почтовому серверу: {last_err or 'соединение закрыто'}")
+
+
+def send_confirmation_email(cur, to_email: str, code: str, verify_token: str = "", site_url: str = "") -> None:
+    """Письмо с кодом подтверждения регистрации. Ссылку на preview-адрес
+    платформы (…--preview.poehali.dev) намеренно не добавляем — почтовики
+    (mail.ru) часто блокируют такие тестовые/нетиповые ссылки как
+    подозрительные. Подтверждение — только вводом кода."""
+    subject = "САОУ — подтверждение регистрации"
+    text_body = (
+        f"Здравствуйте!\n\n"
+        f"Ваш код подтверждения регистрации в системе САОУ:\n\n"
+        f"  {code}\n\n"
+        f"Код действует {EMAIL_CONFIRM_TTL_MIN} минут. "
+        f"Если вы не регистрировались — просто проигнорируйте это письмо."
+    )
+    _send_plain_email(cur, to_email, subject, text_body)
+
+
+def send_password_reset_email(cur, to_email: str, code: str) -> None:
+    """Письмо с кодом для восстановления забытого пароля."""
+    subject = "САОУ — восстановление пароля"
+    text_body = (
+        f"Здравствуйте!\n\n"
+        f"Вы запросили восстановление пароля в системе САОУ. Код для сброса пароля:\n\n"
+        f"  {code}\n\n"
+        f"Код действует {PASSWORD_RESET_TTL_MIN} минут. "
+        f"Если вы не запрашивали смену пароля — просто проигнорируйте это письмо, "
+        f"пароль останется прежним."
+    )
+    _send_plain_email(cur, to_email, subject, text_body)
 
 
 # ── Журнал согласий (доказательная база) ────────────────────────────────────
@@ -735,6 +799,91 @@ def handler(event: dict, context) -> dict:
                 return _resp(500, {"error": f"Не удалось отправить email: {e}"})
             conn.commit()
             return _resp(200, {"ok": True, "hint": f"Код отправлен на {email[:3]}***"})
+        finally:
+            conn.close()
+
+    # ── POST forgot-password — запросить код для восстановления пароля ──────
+    if method == "POST" and route in ("forgot-password", "forgot_password"):
+        login_or_email = (body.get("login") or "").strip()
+        if not login_or_email:
+            return _resp(400, {"error": "Укажите логин или email"})
+
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            # Тот же rate-limit, что и на вход — защита от перебора/спама писем
+            rl_key = f"reset:{login_or_email.lower()}"
+            if _check_rate_limit(cur, rl_key):
+                return _resp(429, {"error": f"Слишком много попыток. Подождите {LOGIN_FAIL_WINDOW_MIN} минут."})
+
+            cur.execute(
+                f"""SELECT login, email, is_active FROM {SCHEMA}.users
+                    WHERE login = %s OR LOWER(email) = LOWER(%s) LIMIT 1""",
+                (login_or_email, login_or_email)
+            )
+            row = cur.fetchone()
+            if not row or not row[1]:
+                _record_attempt(cur, rl_key, False)
+                conn.commit()
+                # Не раскрываем, существует ли аккаунт с таким логином/email
+                return _resp(200, {"ok": True, "hint": "Если такой аккаунт существует, код отправлен на почту"})
+            login, email, is_active = row
+            if not is_active:
+                return _resp(403, {"error": "Аккаунт заблокирован. Обратитесь к администратору."})
+
+            code = issue_password_reset_code(cur, login)
+            try:
+                send_password_reset_email(cur, email, code)
+            except Exception as e:
+                conn.rollback()
+                return _resp(500, {"error": f"Не удалось отправить email: {e}"})
+            _clear_attempts(cur, rl_key)
+            conn.commit()
+            return _resp(200, {
+                "ok": True, "login": login,
+                "hint": f"Код отправлен на {email[:3]}***{email[email.find('@'):] if '@' in email else ''}",
+            })
+        finally:
+            conn.close()
+
+    # ── POST reset-password-confirm — подтвердить код и задать новый пароль ─
+    if method == "POST" and route in ("reset-password-confirm", "reset_password_confirm"):
+        login = (body.get("login") or "").strip()
+        code = (body.get("code") or "").strip()
+        new_password = (body.get("new_password") or "").strip()
+        if not login or not code:
+            return _resp(400, {"error": "Укажите login и код"})
+        if len(new_password) < 8:
+            return _resp(400, {"error": "Пароль должен быть не менее 8 символов"})
+
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            result = verify_password_reset_code(cur, login, code)
+            if result == "expired":
+                conn.commit()
+                return _resp(400, {"error": "Код истёк. Запросите новый."})
+            if result == "limit":
+                conn.commit()
+                return _resp(429, {"error": "Превышено число попыток. Запросите новый код."})
+            if result == "wrong":
+                conn.commit()
+                return _resp(400, {"error": "Неверный код. Попробуйте ещё раз."})
+
+            new_hash = hash_password(new_password)
+            # Обнуляем действующую сессию (auth_token_hash) — после смены пароля
+            # старый токен должен перестать работать из соображений безопасности.
+            cur.execute(
+                f"""UPDATE {SCHEMA}.users SET password_hash = %s, auth_token_hash = NULL
+                    WHERE login = %s RETURNING role""",
+                (new_hash, login)
+            )
+            row = cur.fetchone()
+            if not row:
+                conn.rollback()
+                return _resp(404, {"error": "Пользователь не найден"})
+            conn.commit()
+            return _resp(200, {"success": True, "login": login})
         finally:
             conn.close()
 

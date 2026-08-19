@@ -128,6 +128,18 @@ export const authApi = {
       body: JSON.stringify({ login, site_url: window.location.origin }),
     }),
 
+  forgotPassword: (login: string) =>
+    request<{ ok: boolean; login?: string; hint: string }>("forgot-password", {
+      method: "POST",
+      body: JSON.stringify({ login }),
+    }),
+
+  resetPasswordConfirm: (login: string, code: string, new_password: string) =>
+    request<{ success: boolean; login: string }>("reset-password-confirm", {
+      method: "POST",
+      body: JSON.stringify({ login, code, new_password }),
+    }),
+
   getLkVisibility: () =>
     request<{ hidden: { teacher: string[]; student: string[] } }>("lk-visibility", { method: "GET" }),
 

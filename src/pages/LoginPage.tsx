@@ -33,7 +33,7 @@ function previewLogin(firstName: string, lastName: string): string {
   return base || "—";
 }
 
-type Mode = "login" | "signup" | "confirm";
+type Mode = "login" | "signup" | "confirm" | "forgot" | "reset";
 
 export default function LoginPage({ onLogin, initialMode = "login", onBack }: LoginPageProps) {
   const [mode, setMode] = useState<Mode>(initialMode);
@@ -61,6 +61,14 @@ export default function LoginPage({ onLogin, initialMode = "login", onBack }: Lo
   const [confirmCode, setConfirmCode] = useState("");
   const [confirmHint, setConfirmHint] = useState("");
   const [resending, setResending] = useState(false);
+
+  // forgot / reset password
+  const [forgotLogin, setForgotLogin] = useState("");
+  const [forgotHint, setForgotHint] = useState("");
+  const [resetCode, setResetCode] = useState("");
+  const [resetNewPass, setResetNewPass] = useState("");
+  const [showResetPass, setShowResetPass] = useState(false);
+  const [resetSuccess, setResetSuccess] = useState(false);
 
   const generatedLogin = useMemo(
     () => previewLogin(firstName, lastName),
@@ -133,6 +141,53 @@ export default function LoginPage({ onLogin, initialMode = "login", onBack }: Lo
     else setError(res.error);
   };
 
+  const handleForgotSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+    const res = await appStore.forgotPassword(forgotLogin.trim());
+    setLoading(false);
+    if (res.ok) {
+      setConfirmLogin(res.login || forgotLogin.trim());
+      setForgotHint(res.hint);
+      setResetCode("");
+      setResetNewPass("");
+      setMode("reset");
+    } else {
+      setError(res.error || "Не удалось отправить код");
+    }
+  };
+
+  const handleResetSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    if (resetCode.trim().length < 6) {
+      setError("Введите 6-значный код из письма");
+      return;
+    }
+    if (resetNewPass.length < 8) {
+      setError("Пароль должен быть не менее 8 символов");
+      return;
+    }
+    setLoading(true);
+    const res = await appStore.resetPasswordConfirm(confirmLogin, resetCode.trim(), resetNewPass);
+    setLoading(false);
+    if (res.ok) {
+      setResetSuccess(true);
+    } else {
+      setError(res.error || "Не удалось сменить пароль");
+    }
+  };
+
+  const handleResendResetCode = async () => {
+    setResending(true);
+    setError("");
+    const res = await appStore.forgotPassword(confirmLogin);
+    setResending(false);
+    if (res.ok) setForgotHint(res.hint);
+    else setError(res.error);
+  };
+
   const switchMode = (m: Mode) => {
     setMode(m);
     setError("");
@@ -161,7 +216,7 @@ export default function LoginPage({ onLogin, initialMode = "login", onBack }: Lo
         </div>
 
         {/* Tabs */}
-        {mode !== "confirm" && (
+        {(mode === "login" || mode === "signup") && (
           <div className="grid grid-cols-2 gap-1 p-1 bg-muted rounded-sm mb-3">
             <button
               type="button"
@@ -186,9 +241,22 @@ export default function LoginPage({ onLogin, initialMode = "login", onBack }: Lo
 
         {/* Form */}
         <div className="border border-border rounded-sm bg-white shadow-sm">
-          <div className="px-6 py-4 border-b border-border bg-muted">
-            <p className="text-sm font-semibold text-center">
-              {mode === "login" ? "Вход в систему САОУ" : mode === "signup" ? "Регистрация в системе САОУ" : "Подтверждение email"}
+          <div className="px-6 py-4 border-b border-border bg-muted flex items-center gap-2">
+            {(mode === "forgot" || mode === "reset") && (
+              <button
+                type="button"
+                onClick={() => switchMode("login")}
+                className="text-muted-foreground hover:text-foreground transition-colors flex-shrink-0"
+              >
+                <Icon name="ArrowLeft" size={15} />
+              </button>
+            )}
+            <p className="text-sm font-semibold text-center flex-1">
+              {mode === "login" ? "Вход в систему САОУ"
+                : mode === "signup" ? "Регистрация в системе САОУ"
+                : mode === "confirm" ? "Подтверждение email"
+                : mode === "forgot" ? "Восстановление пароля"
+                : "Новый пароль"}
             </p>
           </div>
 
@@ -243,6 +311,135 @@ export default function LoginPage({ onLogin, initialMode = "login", onBack }: Lo
                 {resending ? "Отправляем..." : "Отправить код ещё раз"}
               </button>
             </form>
+          ) : mode === "forgot" ? (
+            <form onSubmit={handleForgotSubmit} className="p-6 space-y-4">
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Укажите логин или email, указанный при регистрации — мы вышлем код для сброса пароля.
+              </p>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1.5">Логин или email</label>
+                <div className="relative">
+                  <Icon name="User" size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    type="text"
+                    value={forgotLogin}
+                    onChange={e => setForgotLogin(e.target.value)}
+                    placeholder="ivanovi или ivanov@school.ru"
+                    autoComplete="username"
+                    autoFocus
+                    className="w-full pl-9 pr-3 py-2.5 border border-border rounded-sm text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                </div>
+              </div>
+
+              {error && (
+                <div className="flex items-center gap-2 p-3 rounded-sm bg-destructive/5 border border-destructive/20">
+                  <Icon name="AlertCircle" size={14} className="text-destructive flex-shrink-0" />
+                  <p className="text-xs text-destructive">{error}</p>
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={loading || !forgotLogin.trim()}
+                className="w-full flex items-center justify-center gap-2 py-2.5 bg-primary text-primary-foreground text-sm font-semibold rounded-sm hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loading ? (
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : (
+                  <Icon name="Send" size={15} />
+                )}
+                {loading ? "Отправляем..." : "Отправить код"}
+              </button>
+            </form>
+          ) : mode === "reset" ? (
+            resetSuccess ? (
+              <div className="p-6 space-y-4">
+                <div className="flex items-start gap-2.5 p-3 rounded-sm bg-green-50 border border-green-200">
+                  <Icon name="CheckCircle2" size={16} className="text-green-600 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs text-green-800 leading-relaxed">
+                    Пароль успешно изменён. Теперь вы можете войти с новым паролем.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => { setResetSuccess(false); setLogin(confirmLogin); switchMode("login"); }}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 bg-primary text-primary-foreground text-sm font-semibold rounded-sm hover:opacity-90 transition-opacity"
+                >
+                  <Icon name="LogIn" size={15} />
+                  Войти
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={handleResetSubmit} className="p-6 space-y-4">
+                <div className="flex items-start gap-2.5 p-3 rounded-sm bg-primary/5 border border-primary/20">
+                  <Icon name="MailCheck" size={16} className="text-primary flex-shrink-0 mt-0.5" fallback="Mail" />
+                  <p className="text-xs text-muted-foreground leading-relaxed">{forgotHint}</p>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1.5">Код из письма</label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={resetCode}
+                    onChange={e => setResetCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                    placeholder="000000"
+                    autoFocus
+                    className="w-full px-3 py-2.5 border border-border rounded-sm text-center text-lg tracking-[0.4em] font-semibold focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1.5">Новый пароль</label>
+                  <div className="relative">
+                    <Icon name="Lock" size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                    <input
+                      type={showResetPass ? "text" : "password"}
+                      value={resetNewPass}
+                      onChange={e => setResetNewPass(e.target.value)}
+                      placeholder="Не менее 8 символов"
+                      autoComplete="new-password"
+                      className="w-full pl-9 pr-10 py-2.5 border border-border rounded-sm text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowResetPass(v => !v)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      <Icon name={showResetPass ? "EyeOff" : "Eye"} size={14} />
+                    </button>
+                  </div>
+                </div>
+
+                {error && (
+                  <div className="flex items-center gap-2 p-3 rounded-sm bg-destructive/5 border border-destructive/20">
+                    <Icon name="AlertCircle" size={14} className="text-destructive flex-shrink-0" />
+                    <p className="text-xs text-destructive">{error}</p>
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={loading || resetCode.length < 6 || resetNewPass.length < 8}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 bg-primary text-primary-foreground text-sm font-semibold rounded-sm hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {loading ? (
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  ) : (
+                    <Icon name="CheckCircle2" size={15} />
+                  )}
+                  {loading ? "Сохраняем..." : "Сменить пароль"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleResendResetCode}
+                  disabled={resending}
+                  className="w-full text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                >
+                  {resending ? "Отправляем..." : "Отправить код ещё раз"}
+                </button>
+              </form>
+            )
           ) : mode === "login" ? (
             <form onSubmit={handleLoginSubmit} className="p-6 space-y-4">
               <div>
@@ -279,6 +476,13 @@ export default function LoginPage({ onLogin, initialMode = "login", onBack }: Lo
                     <Icon name={showPass ? "EyeOff" : "Eye"} size={14} />
                   </button>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => { setForgotLogin(login); switchMode("forgot"); }}
+                  className="text-[11px] text-muted-foreground hover:text-primary transition-colors mt-1.5"
+                >
+                  Забыли пароль?
+                </button>
               </div>
 
               {error && (

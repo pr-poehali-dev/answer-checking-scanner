@@ -466,20 +466,25 @@ def send_confirmation_email(cur, to_email: str, code: str, verify_token: str = "
     if not SMTP_HOST:
         raise RuntimeError("Отправка email не настроена (UDS_SMTP_HOST)")
 
-    base = (site_url or "").strip().rstrip("/") or SITE_URL
-    link = f"{base}/confirm-email?token={verify_token}" if verify_token else ""
+    # Ссылку на preview-адрес платформы (…--preview.poehali.dev) в письмо
+    # намеренно не добавляем — почтовики (mail.ru) часто блокируют такие
+    # тестовые/нетиповые ссылки как подозрительные. Подтверждение — только
+    # вводом кода, как в стабильно работающих письмах УДС.
     subject = "САОУ — подтверждение регистрации"
     text_body = (
         f"Здравствуйте!\n\n"
         f"Ваш код подтверждения регистрации в системе САОУ:\n\n"
         f"  {code}\n\n"
-        + (f"Либо просто перейдите по ссылке, чтобы подтвердить email:\n{link}\n\n" if link else "")
-        + f"Код и ссылка действуют {EMAIL_CONFIRM_TTL_MIN} минут. "
+        f"Код действует {EMAIL_CONFIRM_TTL_MIN} минут. "
         f"Если вы не регистрировались — просто проигнорируйте это письмо."
     )
     msg = MIMEText(text_body, "plain", "utf-8")
     msg["Subject"] = subject
-    msg["From"] = f"САОУ <{smtp_user}>"
+    # formataddr кодирует ТОЛЬКО имя (кириллицу) в base64, а сам email-адрес
+    # оставляет чистым текстом — иначе email.mime.text заворачивает в base64
+    # весь заголовок целиком, включая сам адрес, и почтовики (напр. mail.ru)
+    # отклоняют такое письмо как нарушающее RFC 5322 (нет валидного From).
+    msg["From"] = email_utils.formataddr(("САОУ", smtp_user))
     msg["To"] = to_email
     msg["Reply-To"] = smtp_user
     # Date и Message-ID обязательны для многих почтовых провайдеров (mail.ru,

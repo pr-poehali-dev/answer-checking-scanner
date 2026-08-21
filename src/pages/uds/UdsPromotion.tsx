@@ -2,6 +2,7 @@ import { useState } from "react";
 import Icon from "@/components/ui/icon";
 
 const AD_IMAGE = "/promotion/vk-ad-saou.jpg";
+const COVER_IMAGE = "/promotion/vk-cover-saou.jpg";
 
 interface PostVariant {
   id: string;
@@ -80,9 +81,10 @@ function CopyButton({ text }: { text: string }) {
 }
 
 const STEPS = [
+  { title: "Оформите сообщество", text: "Скачайте баннер-шапку ниже и загрузите его в настройках сообщества → «Обложка сообщества» — это первое, что видят посетители." },
   { title: "Откройте VK Реклама", text: "Зайдите на vk.com/ads из сообщества или личного кабинета — раздел «Реклама»." },
   { title: "Создайте кампанию", text: "Выберите цель «Продвижение сообщества/сайта» → тип объявления «Универсальная запись» или «Карусель»." },
-  { title: "Загрузите изображение", text: "Скачайте картинку ниже (полное качество, 2160×2160) и прикрепите к объявлению." },
+  { title: "Загрузите изображение", text: "Скачайте квадратную картинку выше (полное качество, 2160×2160) и прикрепите к объявлению." },
   { title: "Вставьте текст", text: "Скопируйте один из готовых текстов поста ниже — можно менять под аудиторию." },
   { title: "Укажите ссылку", text: "В поле ссылки укажите сайт: saou.ru" },
   { title: "Настройте аудиторию", text: "Рекомендуем: учителя и родители школьников, интересы «образование», «школа», города — по вашему региону." },
@@ -122,6 +124,32 @@ export default function UdsPromotion() {
               className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground text-xs font-semibold rounded-sm hover:opacity-90 transition-opacity">
               <Icon name="Download" size={14} />
               Скачать в полном качестве
+            </a>
+          </div>
+        </div>
+      </div>
+
+      {/* Шапка сообщества ВКонтакте */}
+      <div className="border border-border rounded-lg bg-white overflow-hidden">
+        <div className="px-4 py-3 border-b border-border bg-muted flex items-center justify-between">
+          <p className="text-xs font-semibold flex items-center gap-2">
+            <Icon name="PanelTop" size={14} fallback="Image" /> Шапка сообщества ВКонтакте
+          </p>
+          <span className="text-[10px] text-muted-foreground font-mono">1590 × 400 px</span>
+        </div>
+        <div className="p-4 space-y-3">
+          <img src={COVER_IMAGE} alt="Шапка сообщества САОУ ВКонтакте"
+            className="w-full rounded-sm border border-border shadow-sm" />
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <p className="text-xs text-muted-foreground leading-relaxed flex-1">
+              Готовый баннер для обложки сообщества ВКонтакте — точный размер под требования VK,
+              логотип, название и слоган САОУ, ссылка на сайт. Загрузите его в разделе управления
+              сообществом → «Обложка сообщества».
+            </p>
+            <a href={COVER_IMAGE} download="saou-vk-cover.jpg"
+              className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground text-xs font-semibold rounded-sm hover:opacity-90 transition-opacity flex-shrink-0 self-start">
+              <Icon name="Download" size={14} />
+              Скачать баннер
             </a>
           </div>
         </div>

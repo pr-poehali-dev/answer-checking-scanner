@@ -17,6 +17,7 @@ import urllib.request
 import urllib.error
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email import utils as email_utils
 
 MAIL_DOMAIN = "ooo29.ru"
 
@@ -379,8 +380,16 @@ def send_external_email(from_address: str, from_password: str, from_name: str,
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject or "(без темы)"
-    msg["From"] = f"{from_name} <{from_address}>" if from_name else from_address
+    # formataddr кодирует ТОЛЬКО имя (кириллицу) в base64, а сам email-адрес
+    # оставляет чистым текстом — иначе почтовики (mail.ru и т.п.) отклоняют
+    # письмо как нарушающее RFC 5322 (нет валидного адреса в From).
+    msg["From"] = email_utils.formataddr((from_name, from_address)) if from_name else from_address
     msg["To"] = to_address
+    msg["Reply-To"] = from_address
+    # Date и Message-ID обязательны для многих почтовых провайдеров —
+    # без них письмо часто уходит в спам или блокируется молча.
+    msg["Date"] = email_utils.formatdate(localtime=True)
+    msg["Message-ID"] = email_utils.make_msgid(domain=from_address.split("@")[-1] or "saou.ru")
     msg.attach(MIMEText(body, "plain", "utf-8"))
     raw = msg.as_string()
 
@@ -441,7 +450,11 @@ def send_bulk_email(from_address: str, from_password: str, from_name: str,
     if not recipients:
         return 0, []
 
-    msg_tmpl_from = f"{from_name} <{from_address}>" if from_name else from_address
+    # formataddr кодирует ТОЛЬКО имя (кириллицу) в base64, а сам email-адрес
+    # оставляет чистым текстом — иначе почтовики отклоняют письмо как
+    # нарушающее RFC 5322 (нет валидного адреса в From).
+    msg_tmpl_from = email_utils.formataddr((from_name, from_address)) if from_name else from_address
+    from_domain = from_address.split("@")[-1] or "saou.ru"
 
     import socket
     ctx = ssl.create_default_context()
@@ -481,6 +494,9 @@ def send_bulk_email(from_address: str, from_password: str, from_name: str,
                 msg["Subject"] = subject or "(без темы)"
                 msg["From"] = msg_tmpl_from
                 msg["To"] = to_address
+                msg["Reply-To"] = from_address
+                msg["Date"] = email_utils.formatdate(localtime=True)
+                msg["Message-ID"] = email_utils.make_msgid(domain=from_domain)
                 msg.attach(MIMEText(body, "plain", "utf-8"))
                 smtp.sendmail(from_address, [to_address], msg.as_string())
                 sent += 1

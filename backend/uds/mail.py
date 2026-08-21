@@ -1,5 +1,5 @@
 """
-Корпоративная почта УДС (@ooo29.ru).
+Корпоративная почта УДС (@saou.ru).
 
 - Генерация адреса по ФИО (не похож на логин сотрудника)
 - Создание ящика через ISPmanager API (Рег.ру)
@@ -19,7 +19,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email import utils as email_utils
 
-MAIL_DOMAIN = "ooo29.ru"
+MAIL_DOMAIN = "saou.ru"
 
 # Транслитерация для генерации адреса
 _TR = {
@@ -42,7 +42,7 @@ _STYLE_WORDS = ["office", "team", "work", "corp", "mail", "info", "staff", "pro"
 
 
 def generate_email(first_name: str, last_name: str, middle_name: str, cur, schema: str) -> str:
-    """Генерирует уникальный адрес @ooo29.ru по ФИО, отличающийся от логина.
+    """Генерирует уникальный адрес @saou.ru по ФИО, отличающийся от логина.
 
     Схема: <имя>.<фамилия> или <имя>.<фамилия><word><digits>. Всегда через точку —
     так адрес визуально отличается от логина (который у нас склеен: фамилия+буква имени).

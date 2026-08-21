@@ -142,7 +142,7 @@ export default function UdsMail({ login, token, myAddress, canMailing }: Props) 
     finally { setSending(false); }
   };
 
-  const isExternal = peer && !peer.address.toLowerCase().endsWith("@ooo29.ru");
+  const isExternal = peer && !peer.address.toLowerCase().endsWith("@saou.ru");
 
   const openCompose = () => {
     setComposeTo(""); setComposeSubject(""); setComposeBody(""); setComposeError("");

@@ -112,7 +112,7 @@ export default function UdsProfile({ login, token, panelRoleLabel, operatorNumbe
             <p className="text-sm font-mono text-blue-700 break-all">{mail.email_address}</p>
           ) : (
             <>
-              <p className="text-xs text-muted-foreground">У вас пока нет корпоративного ящика @ooo29.ru.</p>
+              <p className="text-xs text-muted-foreground">У вас пока нет корпоративного ящика @saou.ru.</p>
               <button onClick={createMailbox} disabled={mailBusy}
                 className="inline-flex items-center gap-2 px-3 py-2 bg-primary text-primary-foreground text-xs font-semibold rounded-sm hover:opacity-90 disabled:opacity-50">
                 {mailBusy ? <><Icon name="Loader2" size={13} className="animate-spin" /> Создаём…</> : <><Icon name="MailPlus" size={13} fallback="Plus" /> Создать себе почту</>}

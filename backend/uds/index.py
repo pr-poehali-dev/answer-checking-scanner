@@ -425,7 +425,7 @@ def send_email_otp(cur, to_email: str, code: str, purpose: str) -> None:
             f"Если вы не входили в систему — немедленно сообщите Главе Правления."
         )
 
-    # Переиспользуем перебор SMTP-хостов из mail.py (работает и для saou.ru, и для ooo29.ru)
+    # Переиспользуем перебор SMTP-хостов из mail.py (работает для saou.ru)
     mail.send_external_email(smtp_user, smtp_pass, "УДС САОУ", to_email, subject, text_body)
 
 
@@ -1145,7 +1145,7 @@ def handler(event: dict, context) -> dict:
                 (new_login, panel_role, op_num, caller["login"], phone or None, email or None, iis_code,
                  subrole, curator_login)
             )
-            # ── Создаём корпоративный почтовый ящик @ooo29.ru ──────────────────
+            # ── Создаём корпоративный почтовый ящик @saou.ru ──────────────────
             mail_address = None
             mail_status = "pending"
             try:
@@ -2516,7 +2516,7 @@ def handler(event: dict, context) -> dict:
                 return _resp(404, {"error": "У вас нет почтового ящика"})
             my_addr, my_pass_enc, pass_set, my_name = r[0], r[1], r[2], r[3]
 
-            # Внутренний получатель — ТОЛЬКО корпоративный ящик (@ooo29.ru).
+            # Внутренний получатель — ТОЛЬКО корпоративный ящик (@saou.ru).
             # Совпадение с личным email пользователя НЕ делает письмо внутренним —
             # иначе mail.ru/gmail ошибочно считались бы внутренними и не уходили.
             internal = mail.is_internal(to_addr)

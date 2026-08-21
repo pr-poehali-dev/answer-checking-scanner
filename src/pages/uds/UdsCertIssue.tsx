@@ -65,7 +65,7 @@ export default function UdsCertIssue({ login, token, cert, onDone, onLogout }: P
       let msg = raw;
       // Пользователь нажал «Нет» в окне «Подтверждение доступа» КриптоПро
       if (/access denied|отказано|0x80090010|denied|запрещ/i.test(raw)) {
-        msg = "Вы не разрешили сайту ooo29.ru доступ к ключам. В окне КриптоПро «Подтверждение доступа» нажмите «Да» и повторите выпуск.";
+        msg = "Вы не разрешили сайту saou.ru доступ к ключам. В окне КриптоПро «Подтверждение доступа» нажмите «Да» и повторите выпуск.";
       } else if (/cancel|отмен|0x8010006E|0x80100069/i.test(raw)) {
         msg = "Операция отменена в диалоге КриптоПро. Повторите выпуск и подтвердите действие.";
       } else if (/provider|провайдер|0x80090019|keyset/i.test(raw)) {
@@ -196,7 +196,7 @@ export default function UdsCertIssue({ login, token, cert, onDone, onLogout }: P
                   <Icon name="Info" size={13} className="flex-shrink-0 mt-0.5" />
                   <span>
                     После нажатия КриптоПро покажет окно <b>«Подтверждение доступа»</b> —
-                    разрешите сайту <b>ooo29.ru</b> операцию с ключами (нажмите «Да»)
+                    разрешите сайту <b>saou.ru</b> операцию с ключами (нажмите «Да»)
                     и выберите носитель.
                   </span>
                 </p>
@@ -250,7 +250,7 @@ export default function UdsCertIssue({ login, token, cert, onDone, onLogout }: P
               </p>
               <p className="text-[11px] text-amber-200/90 leading-relaxed">
                 КриптоПро спросит, разрешить ли сайту{" "}
-                <b className="text-amber-100">ooo29.ru</b> операцию с ключами и
+                <b className="text-amber-100">saou.ru</b> операцию с ключами и
                 сертификатами. Нажмите <b className="text-amber-100">«Да»</b> —
                 иначе выпуск прервётся. Также выберите носитель (реестр, токен
                 или флеш-накопитель), если КриптоПро его запросит.

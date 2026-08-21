@@ -90,7 +90,7 @@
       "name": "mail-send without auth returns 403",
       "method": "POST",
       "path": "/?action=mail-send",
-      "body": { "to": "x@ooo29.ru", "body": "hi" },
+      "body": { "to": "x@saou.ru", "body": "hi" },
       "expectedStatus": 403
     },
     {

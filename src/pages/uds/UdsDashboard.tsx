@@ -9,6 +9,7 @@ import UdsLkView from "@/pages/uds/UdsLkView";
 import UdsMaintenance from "@/pages/uds/UdsMaintenance";
 import UdsMail from "@/pages/uds/UdsMail";
 import UdsMaterials from "@/pages/uds/UdsMaterials";
+import UdsPromotion from "@/pages/uds/UdsPromotion";
 import MyWards from "@/pages/uds/MyWards";
 import { PANEL_ROLE_LABELS, Session, Tab } from "@/pages/uds/udsSession";
 
@@ -31,6 +32,7 @@ export default function UdsDashboard({ session, tab, setTab, logout, onProfileUp
     { id: "materials", label: "Материалы", icon: "FileCheck", show: canModerate },
     { id: "users", label: "Пользователи", icon: "UserSearch", show: true },
     { id: "mail", label: "Почта", icon: "Mail", show: !!myMailAddress },
+    { id: "promotion", label: "Продвижение", icon: "Megaphone", show: !!perms.can_promotion },
     { id: "support", label: "Тех. поддержка", icon: "Headphones", show: perms.can_support },
     { id: "lkview", label: "Вид ЛК", icon: "LayoutDashboard", show: perms.can_lkview },
     { id: "maintenance", label: "Тех. работы", icon: "Construction", show: perms.can_maintenance },
@@ -106,6 +108,7 @@ export default function UdsDashboard({ session, tab, setTab, logout, onProfileUp
         {tab === "materials" && (
           <UdsMaterials login={session.login} token={session.token} />
         )}
+        {tab === "promotion" && <UdsPromotion />}
         {tab === "audit" && (
           <UdsAuditLog login={session.login} token={session.token} />
         )}

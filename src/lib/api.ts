@@ -422,6 +422,8 @@ export interface UdsPerms {
   subrole?: string | null;
   /** Массовая рассылка писем (Глава и Зам. Главы). */
   can_mailing?: boolean;
+  /** Раздел "Продвижение" — материалы для рекламы (Глава и Зам. Главы). */
+  can_promotion?: boolean;
 }
 
 export type MailingAudience = "all" | "staff" | "roles";

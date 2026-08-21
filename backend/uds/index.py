@@ -77,6 +77,8 @@ CAN_CERT = {"head", "deputy"}
 CAN_ALL_DATA = {"head", "deputy", "advisor"}
 # Кто может делать массовую рассылку писем (Глава и Зам Главы)
 CAN_MAILING = {"head", "deputy"}
+# Кто видит раздел "Продвижение" (материалы для рекламы, Глава и Зам Главы)
+CAN_PROMOTION = {"head", "deputy"}
 
 # Ящики-отправители рассылки — свои для каждого статуса важности
 MAILING_SENDERS = {
@@ -302,6 +304,7 @@ def perms_for(role: str, subrole: str = None) -> dict:
         # Просмотр ВСЕХ данных пользователя — Глава, Зам Главы, Советник
         "can_all_data": role in CAN_ALL_DATA,
         "can_mailing": role in CAN_MAILING,  # массовая рассылка — Глава и Зам
+        "can_promotion": role in CAN_PROMOTION,  # раздел "Продвижение" — Глава и Зам
         "is_curator": is_curator,         # является куратором (подроль или Глава/Зам)
         "can_assign_subrole": PANEL_ROLE_RANK.get(role, 0) >= 5,  # подроли назначают Глава/Зам
         "subrole": subrole,

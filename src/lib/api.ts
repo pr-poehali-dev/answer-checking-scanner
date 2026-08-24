@@ -1150,9 +1150,20 @@ export const projectApi = {
       }
     };
 
+    // Списание происходит на шагах outline/chapter — накапливаем потраченное
+    // и запоминаем последний баланс, чтобы отразить их в финальном результате
+    // (build ИИ не вызывает и баланс не возвращает).
+    let totalSpentRub = 0;
+    let lastBalanceRub: number | undefined;
+    const trackSpend = (data: { spent_rub?: number; balance_rub?: number }) => {
+      if (typeof data.spent_rub === "number") totalSpentRub += data.spent_rub;
+      if (typeof data.balance_rub === "number") lastBalanceRub = data.balance_rub;
+    };
+
     // Шаг 1: план + список литературы
     onProgress?.({ stage: "ИИ составляет план и список литературы…" });
-    const outline = await call("outline", {}) as { chapters: string[]; sections: boolean; references?: string };
+    const outline = await call("outline", {}) as { chapters: string[]; sections: boolean; references?: string; spent_rub?: number; balance_rub?: number };
+    trackSpend(outline);
     const chapters = outline.chapters || [];
     const hasSections = outline.sections;
     const references = outline.references || "";
@@ -1163,12 +1174,14 @@ export const projectApi = {
     if (hasSections && chapters.length) {
       for (let i = 0; i < chapters.length; i++) {
         onProgress?.({ stage: `Пишем раздел: ${chapters[i]}`, current: i + 1, total: chapters.length });
-        const ch = await call("chapter", { chapter: chapters[i], all_chapters: chapters, references }) as { body: string };
+        const ch = await call("chapter", { chapter: chapters[i], all_chapters: chapters, references }) as { body: string; spent_rub?: number; balance_rub?: number };
+        trackSpend(ch);
         bodies.push(ch.body || "");
       }
     } else {
       onProgress?.({ stage: "Пишем текст работы…" });
-      const ch = await call("chapter", {}) as { body: string };
+      const ch = await call("chapter", {}) as { body: string; spent_rub?: number; balance_rub?: number };
+      trackSpend(ch);
       simpleText = ch.body || "";
     }
 
@@ -1177,7 +1190,7 @@ export const projectApi = {
     const built = await call("build", {
       chapters, bodies, simple_text: simpleText,
     }) as unknown as ProjectResponse;
-    return built;
+    return { ...built, spent_rub: totalSpentRub, balance_rub: lastBalanceRub };
   },
 };
 

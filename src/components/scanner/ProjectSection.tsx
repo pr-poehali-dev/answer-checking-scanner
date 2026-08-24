@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { useAppStore } from "@/store/appStore";
+import { useAppStore, appStore } from "@/store/appStore";
 import { projectApi, presentationApi, type ProjectResponse, type ProjectWorkItem } from "@/lib/api";
 import { downloadBase64File, DOCX_MIME, PDF_MIME, WORK_TYPE_LIST, type WorkTypeMeta } from "./projectUtils";
 import { toast } from "sonner";
@@ -56,7 +56,11 @@ export function ProjectSection() {
         login: teacher.login,
       }, (info) => setProgress(info));
       setResult(res);
-      toast.success(`${res.work_label} готова`, { description: `Объём: ~${res.page_estimate} стр. (${res.word_count} слов)` });
+      if (res.balance_rub !== undefined) {
+        appStore.setAiBalance(Math.round(res.balance_rub * 100));
+      }
+      const spentStr = res.spent_rub ? ` · Списано: ${res.spent_rub.toFixed(2)} ₽` : "";
+      toast.success(`${res.work_label} готова`, { description: `Объём: ~${res.page_estimate} стр. (${res.word_count} слов)${spentStr}` });
       loadHistory();
     } catch (e) {
       toast.error("Не удалось создать работу", { description: (e as Error).message });
@@ -78,6 +82,9 @@ export function ProjectSection() {
         teacherSchool: teacher.school,
         login: teacher.login,
       });
+      if (pres.balance_rub !== undefined) {
+        appStore.setAiBalance(Math.round(pres.balance_rub * 100));
+      }
       if (pres.pptx_url) {
         window.open(pres.pptx_url, "_blank");
       } else if (pres.pptx_b64) {

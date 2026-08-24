@@ -1,6 +1,7 @@
 import { useState } from "react";
 import CompanyFooter from "@/components/CompanyFooter";
 import Icon from "@/components/ui/icon";
+import { usePageMeta } from "@/hooks/usePageMeta";
 
 interface TopicItem {
   id: string;
@@ -102,6 +103,10 @@ function SectionBlock({ id, icon, title, children }: { id: string; icon: string;
 }
 
 export default function KnowledgeBasePage() {
+  usePageMeta({
+    title: "База знаний — САОУ",
+    description: "База знаний САОУ: инструкции по проверке работ, генерации тестов и презентаций, подключению Яндекс.Диска, работе с ИИ-помощником и подготовке к итоговой аттестации.",
+  });
   const [menuOpen, setMenuOpen] = useState(false);
 
   const scrollTo = (id: string) => {

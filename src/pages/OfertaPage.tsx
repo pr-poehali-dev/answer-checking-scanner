@@ -1,11 +1,16 @@
 import CompanyFooter, { COMPANY_INFO } from "@/components/CompanyFooter";
 import Icon from "@/components/ui/icon";
 import { LEGAL_DATES } from "@/lib/appVersion";
+import { usePageMeta } from "@/hooks/usePageMeta";
 
 const POSTAL_ADDRESS =
   "165133, Архангельская область, Вельский район, село Долматово, ул. Южная, д. 3";
 
 export default function OfertaPage() {
+  usePageMeta({
+    title: "Договор-оферта — САОУ",
+    description: "Договор публичной оферты на использование системы автоматизации образовательных учреждений «САОУ» и подключение платной подписки.",
+  });
   return (
     <div className="min-h-screen flex flex-col bg-background">
       <header className="border-b border-border bg-white px-6 py-4 flex items-center gap-3">

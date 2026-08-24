@@ -1,10 +1,15 @@
 import CompanyFooter, { COMPANY_INFO } from "@/components/CompanyFooter";
 import Icon from "@/components/ui/icon";
+import { usePageMeta } from "@/hooks/usePageMeta";
 
 const POSTAL_ADDRESS =
   "165133, Архангельская область, Вельский район, село Долматово, ул. Южная, д. 3";
 
 export default function DocsPage() {
+  usePageMeta({
+    title: "Документация — САОУ",
+    description: "Документация на программное обеспечение «САОУ»: описание функциональных характеристик, порядок установки и эксплуатации системы автоматизации образовательных учреждений.",
+  });
   return (
     <div className="min-h-screen flex flex-col bg-background">
       <header className="border-b border-border bg-white px-6 py-4 flex items-center gap-3">

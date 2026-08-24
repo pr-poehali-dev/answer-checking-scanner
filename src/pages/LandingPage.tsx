@@ -5,6 +5,7 @@ import LandingHero from "@/components/landing/LandingHero";
 import LandingAudiences from "@/components/landing/LandingAudiences";
 import LandingContent from "@/components/landing/LandingContent";
 import LandingFooter from "@/components/landing/LandingFooter";
+import { usePageMeta, DEFAULT_TITLE, DEFAULT_DESCRIPTION } from "@/hooks/usePageMeta";
 
 interface LandingPageProps {
   onLogin: () => void;
@@ -14,6 +15,7 @@ interface LandingPageProps {
 }
 
 export default function LandingPage({ onLogin, onRegister, onTrial, onOuLogin }: LandingPageProps) {
+  usePageMeta({ title: DEFAULT_TITLE, description: DEFAULT_DESCRIPTION });
   const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
   const [loadingPlans, setLoadingPlans] = useState(true);
   const [menuOpen, setMenuOpen] = useState(false);

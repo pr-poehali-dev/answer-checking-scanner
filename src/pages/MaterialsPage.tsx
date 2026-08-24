@@ -9,8 +9,13 @@ import UploadMaterialDialog from "@/components/materials/UploadMaterialDialog";
 import MaterialViewDialog from "@/components/materials/MaterialViewDialog";
 import { materialsApi, type MaterialItem } from "@/lib/api";
 import { getMaterialsSession, type MaterialsSession } from "@/lib/materialsSession";
+import { usePageMeta } from "@/hooks/usePageMeta";
 
 export default function MaterialsPage() {
+  usePageMeta({
+    title: "Учебные материалы — САОУ",
+    description: "Библиотека учебных материалов САОУ: конспекты, презентации, рабочие листы и тесты по школьной программе, готовые к скачиванию и использованию на уроке.",
+  });
   const [session] = useState<MaterialsSession | null>(() => getMaterialsSession());
   const [items, setItems] = useState<MaterialItem[]>([]);
   const [subjects, setSubjects] = useState<string[]>([]);

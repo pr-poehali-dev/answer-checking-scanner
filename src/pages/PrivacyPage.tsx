@@ -1,11 +1,16 @@
 import CompanyFooter, { COMPANY_INFO } from "@/components/CompanyFooter";
 import Icon from "@/components/ui/icon";
 import { LEGAL_DATES } from "@/lib/appVersion";
+import { usePageMeta } from "@/hooks/usePageMeta";
 
 const POSTAL_ADDRESS =
   "165133, Архангельская область, Вельский район, село Долматово, ул. Южная, д. 3";
 
 export default function PrivacyPage() {
+  usePageMeta({
+    title: "Политика конфиденциальности — САОУ",
+    description: "Политика конфиденциальности и обработки персональных данных пользователей системы автоматизации образовательных учреждений «САОУ».",
+  });
   return (
     <div className="min-h-screen flex flex-col bg-background">
       <header className="border-b border-border bg-white px-6 py-4 flex items-center gap-3">

@@ -1,6 +1,9 @@
 User-agent: Googlebot
 Allow: /
 
+User-agent: Yandex
+Allow: /
+
 User-agent: Bingbot
 Allow: /
 
@@ -12,3 +15,9 @@ Allow: /
 
 User-agent: *
 Allow: /
+Disallow: /piot-colldent19
+Disallow: /sjou-operator
+Disallow: /yadisk-callback
+Disallow: /confirm-email
+
+Sitemap: https://saou.ru/sitemap.xml

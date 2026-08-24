@@ -150,17 +150,18 @@ function BlankPreview({ config }: { config: BlankConfig }) {
 }
 
 
-export function BlankGenerator({ workId, workTitle, questionsCount: initQ, onClose }: {
+export function BlankGenerator({ workId, workTitle, questionsCount: initQ, optionsCount: initOpts, onClose }: {
   workId?: string;
   workTitle?: string;
   questionsCount?: number;
+  optionsCount?: number;
   onClose?: () => void;
 }) {
   const [config, setConfig] = useState<BlankConfig>({
     workId:         workId     || "000001",
     workTitle:      workTitle  || "Контрольная работа",
     questionsCount: initQ      || 20,
-    optionsCount:   4,
+    optionsCount:   initOpts   || 4,
     perPage:        2,
     subject:        "",
     classLabel:     "",

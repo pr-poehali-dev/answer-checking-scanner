@@ -193,6 +193,7 @@ export interface Work {
   maxScore: number;
   topic?: string; // тема (опционально, заполняется ИИ-генератором)
   generatedByAi?: boolean; // создана ли работа через ИИ
+  optionsCount?: number; // кол-во вариантов ответа на бланке (2-6), по умолчанию 4
 }
 
 export interface StudentResult {
@@ -1147,6 +1148,7 @@ export const appStore = {
             answerKey: w.answerKey || "", maxScore: w.maxScore || 0,
             gradeScale: { grade1: 0, grade2: 0, grade3: 0, grade4: 0, grade5: 0 },
             topic: w.topic || undefined, generatedByAi: !!w.generatedByAi,
+            optionsCount: w.optionsCount || 4,
           };
         });
 
@@ -1293,6 +1295,7 @@ export const appStore = {
       maxScore: w.maxScore,
       topic: w.topic,
       generatedByAi: w.generatedByAi,
+      optionsCount: w.optionsCount,
     }));
     try {
       const { teacherDataApi } = await import("@/lib/api");

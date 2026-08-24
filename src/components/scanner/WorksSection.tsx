@@ -21,6 +21,7 @@ function BlankDownloadModal({ work, onClose }: BlankModalProps) {
           workId={work.id}
           workTitle={`${work.type}: ${work.subject} · ${work.classNum}${work.classLetter}`}
           questionsCount={work.totalQuestions}
+          optionsCount={work.optionsCount}
           onClose={onClose}
         />
       </div>
@@ -47,13 +48,15 @@ function WorkForm({ onSave, onCancel }: WorkFormProps) {
   const [part1Count, setPart1Count] = usePersistedState("works:part1Count", 20);
   const [part2Count, setPart2Count] = usePersistedState("works:part2Count", 5);
   const [answerKey, setAnswerKey] = usePersistedState("works:answerKey", "");
+  const [optionsCount, setOptionsCount] = usePersistedState("works:optionsCount", 4);
   const [scale, setScale] = usePersistedState<GradeScale>("works:scale", { ...DEFAULT_SCALE });
   const id = appStore.generateWorkId();
   const total = part1Count + part2Count;
+  const OPT_LABELS = ["А", "Б", "В", "Г", "Д"];
 
   const clearDraft = () => {
     ["works:type", "works:subject", "works:classNum", "works:classLetter",
-     "works:part1Count", "works:part2Count", "works:answerKey", "works:scale"]
+     "works:part1Count", "works:part2Count", "works:answerKey", "works:scale", "works:optionsCount"]
       .forEach(clearPersistedState);
   };
 
@@ -72,6 +75,7 @@ function WorkForm({ onSave, onCancel }: WorkFormProps) {
       answerKey,
       gradeScale: scale,
       maxScore: total,
+      optionsCount,
     });
   };
 
@@ -142,6 +146,30 @@ function WorkForm({ onSave, onCancel }: WorkFormProps) {
           </div>
         </div>
 
+        {/* Варианты ответа — ДОЛЖНО совпадать с напечатанным бланком, иначе сканер не распознает ответы */}
+        <div>
+          <label className="text-xs text-muted-foreground block mb-1.5">
+            Варианты ответа на бланке
+            <span className="ml-1 text-amber-600">(должно совпадать с распечатанным бланком)</span>
+          </label>
+          <div className="flex gap-1.5">
+            {[2, 3, 4, 5].map(n => (
+              <button
+                key={n}
+                type="button"
+                onClick={() => setOptionsCount(n)}
+                className={`flex-1 py-1.5 rounded-sm border text-xs font-semibold transition-colors ${
+                  optionsCount === n
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "bg-white text-muted-foreground border-border hover:bg-muted"
+                }`}
+              >
+                {OPT_LABELS.slice(0, n).join("/")}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Ключ ответов */}
         <div>
           <label className="text-xs text-muted-foreground block mb-1">Ключ правильных ответов (без пробелов)</label>
@@ -152,7 +180,7 @@ function WorkForm({ onSave, onCancel }: WorkFormProps) {
               };
               setAnswerKey(e.target.value.split("").map(ch => LAT[ch] ?? ch.toUpperCase()).join(""));
             }}
-            rows={2} placeholder="Пример: АБВГД…"
+            rows={2} placeholder={`Пример: ${OPT_LABELS.slice(0, optionsCount).join("")}…`}
             className="w-full text-sm mono border border-border rounded-sm p-3 focus:outline-none focus:ring-1 focus:ring-ring resize-none" />
           <p className="text-xs text-muted-foreground mt-1">Введено {answerKey.length} из {total} символов</p>
         </div>

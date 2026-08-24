@@ -139,6 +139,7 @@ export function TestsForm() {
           maxScore: result.maxScore,
           topic: result.topic,
           generatedByAi: true,
+          optionsCount: 4, // ИИ всегда генерирует part1 с 4 вариантами (А,Б,В,Г)
         };
         appStore.addWork(newWork);
 

@@ -342,6 +342,7 @@ export interface TeacherWorkDto {
   maxScore: number;
   topic?: string;
   generatedByAi?: boolean;
+  optionsCount?: number;
 }
 
 export interface TeacherMaterialDto {
@@ -362,6 +363,7 @@ export interface TeacherDataLoadResult {
     id: string; type: string; subject: string; classLabel: string; date: string;
     totalQuestions: number; part1Count: number; part2Count: number;
     answerKey: string; maxScore: number; topic: string | null; generatedByAi: boolean;
+    optionsCount?: number;
   }[];
   materials: {
     id: string; type: string; title: string; subject: string | null;
@@ -1304,7 +1306,7 @@ function fileToBase64(file: File): Promise<string> {
 }
 
 export const recognizeApi = {
-  recognize: async (file: File, params: { questionsCount?: number; answerKey?: string }) => {
+  recognize: async (file: File, params: { questionsCount?: number; optionsCount?: number; answerKey?: string }) => {
     const image = await fileToBase64(file);
     const res = await fetch(RECOGNIZE_URL, {
       method: "POST",
@@ -1312,6 +1314,7 @@ export const recognizeApi = {
       body: JSON.stringify({
         image,
         questionsCount: params.questionsCount ?? 40,
+        optionsCount: params.optionsCount ?? 4,
         answerKey: params.answerKey ?? "",
       }),
     });

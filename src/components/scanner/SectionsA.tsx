@@ -39,6 +39,7 @@ export function UploadSection() {
     if (work) {
       setAnswerKey(normAnswerKey(work.answerKey));
       setQuestionsCount(work.totalQuestions);
+      setOptionsCount(work.optionsCount || 4);
     }
   };
 
@@ -63,7 +64,8 @@ export function UploadSection() {
         answerKey,
         questionsCount,
         0,
-        (status, progress) => { setOcrStatus(status); setOcrProgress(progress); }
+        (status, progress) => { setOcrStatus(status); setOcrProgress(progress); },
+        optionsCount
       );
       setResult(data);
       setStep("done");

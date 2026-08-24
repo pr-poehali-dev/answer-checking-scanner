@@ -10,7 +10,8 @@ export async function recognizeBlank(
   answerKey: string,
   part1Count: number,
   part2Count: number,
-  onProgress?: OcrProgressCallback
+  onProgress?: OcrProgressCallback,
+  optionsCount?: number
 ): Promise<RecognitionResult> {
   const total = (part1Count || 0) + (part2Count || 0) || 20;
 
@@ -36,6 +37,7 @@ export async function recognizeBlank(
   try {
     resp = await recognizeApi.recognize(file, {
       questionsCount: total,
+      optionsCount: optionsCount || 4,
       answerKey: answerKey || "",
     });
   } catch (e) {

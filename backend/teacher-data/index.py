@@ -72,7 +72,7 @@ def handler(event: dict, context) -> dict:
             cur.execute(
                 f"""SELECT work_id, work_type, subject, class_label, work_date,
                            total_questions, part1_count, part2_count, answer_key,
-                           max_score, topic, generated_by_ai
+                           max_score, topic, generated_by_ai, options_count
                     FROM {SCHEMA}.teacher_works WHERE teacher_login = %s
                     ORDER BY created_at""",
                 (teacher_login,)
@@ -81,7 +81,7 @@ def handler(event: dict, context) -> dict:
                 "id": r[0], "type": r[1], "subject": r[2], "classLabel": r[3],
                 "date": r[4], "totalQuestions": r[5], "part1Count": r[6],
                 "part2Count": r[7], "answerKey": r[8], "maxScore": r[9],
-                "topic": r[10], "generatedByAi": r[11],
+                "topic": r[10], "generatedByAi": r[11], "optionsCount": r[12],
             } for r in cur.fetchall()]
 
             # Материалы
@@ -166,8 +166,8 @@ def handler(event: dict, context) -> dict:
                     f"""INSERT INTO {SCHEMA}.teacher_works
                         (teacher_login, work_id, work_type, subject, class_label, work_date,
                          total_questions, part1_count, part2_count, answer_key, max_score,
-                         topic, generated_by_ai, updated_at)
-                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, now())
+                         topic, generated_by_ai, options_count, updated_at)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, now())
                         ON CONFLICT (teacher_login, work_id) DO UPDATE SET
                             work_type = EXCLUDED.work_type,
                             subject = EXCLUDED.subject,
@@ -180,6 +180,7 @@ def handler(event: dict, context) -> dict:
                             max_score = EXCLUDED.max_score,
                             topic = EXCLUDED.topic,
                             generated_by_ai = EXCLUDED.generated_by_ai,
+                            options_count = EXCLUDED.options_count,
                             updated_at = now()""",
                     (
                         teacher_login, work_id,
@@ -189,6 +190,7 @@ def handler(event: dict, context) -> dict:
                         int(w.get("part2Count") or 0), _s(w.get("answerKey"), 128),
                         int(w.get("maxScore") or 0), _s(w.get("topic"), 512),
                         bool(w.get("generatedByAi")),
+                        max(2, min(int(w.get("optionsCount") or 4), 6)),
                     ),
                 )
                 saved += 1

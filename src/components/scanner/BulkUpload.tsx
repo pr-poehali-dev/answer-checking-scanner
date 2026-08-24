@@ -73,6 +73,7 @@ export function BulkUpload() {
         const normKey = (work.answerKey || "").split("").map(ch => LAT[ch] ?? ch.toUpperCase()).join("");
         const resp = await recognizeApi.recognize(it.file, {
           questionsCount: work.totalQuestions,
+          optionsCount: work.optionsCount || 4,
           answerKey: normKey,
         });
         const correct = resp.analysis.correct;

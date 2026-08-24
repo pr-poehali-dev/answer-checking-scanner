@@ -9,6 +9,15 @@ POST / — { image: base64, questionsCount?: 20, optionsCount?: 4, answerKey?: "
 # v54: auto-detect real answer circles (Hough) and calibrate template X-cols / Y-rows
 # to them — fixes column shift when printed grid differs from template geometry.
 # v54.1: coerce float coords to int in _darkness (slice indices fix).
+# v55: clamp/reject out-of-bounds QR box coords from detectMulti() to prevent
+# masking half the sheet (incl. answer-zone anchors) on bad detections.
+# v56: reject Hough-calibrated row step when it deviates >20% from the
+# anchor-projected template step (dense filled sheets confuse HoughCircles
+# into merging adjacent filled bubbles, inflating the row pitch).
+# v57: apply Hough X-calibration as a per-column OFFSET from the top row of
+# each block instead of an absolute value for every row — preserves the
+# perspective gradient already correct in the anchor-projected template
+# (fixes growing X drift on lower rows of multi-column sheets, up to ~20px).
 import json, base64, math
 import numpy as np
 import cv2
@@ -175,15 +184,33 @@ def _select_corner_anchors(cands, img_w, img_h, x_off=0, y_off=0,
     это устойчиво к бледным/мелким/сдвоенным реперам и к наклону фото.
     Возвращает (tl, tr, bl, br) по их ЦЕНТРАМ.
     """
-    if len(cands) < 4:
+    if len(cands) < 3:
         return None
 
     # Дедупликация: один репер часто детектится несколькими порогами → дубли
     # с почти совпадающими координатами. Схлопываем их, оставляя крупнейший.
     tol = max(int(min(img_w, img_h) * 0.02), 10)
     cands = _dedup_cands(cands, tol)
-    if len(cands) < 4:
+    if len(cands) < 3:
         return None
+
+    # Найден ровно 3 из 4 реперов (частая причина — 4-й репер зоны ответов
+    # стоит близко к QR-зоне ученика и был случайно замаскирован вместе с
+    # ней). Восстанавливаем недостающий угол как в параллелограмме: среди
+    # 3 точек пара с МАКСИМАЛЬНЫМ расстоянием — это диагональ прямоугольника,
+    # третья точка — общая вершина двух смежных сторон; недостающий угол =
+    # (диагональ.a + диагональ.b − общая вершина).
+    if len(cands) == 3:
+        pairs = [(0, 1), (0, 2), (1, 2)]
+        dists = [math.hypot(cands[i][0] - cands[j][0], cands[i][1] - cands[j][1]) for i, j in pairs]
+        di = int(np.argmax(dists))
+        i, j = pairs[di]
+        k = [idx for idx in range(3) if idx not in (i, j)][0]
+        a, b, c_ = cands[i], cands[j], cands[k]
+        nx = a[0] + b[0] - c_[0]
+        ny = a[1] + b[1] - c_[1]
+        avg_side = (a[4] + b[4] + c_[4]) / 3
+        cands = list(cands) + [(int(round(nx)), int(round(ny)), int(avg_side), int(avg_side), avg_side)]
 
     # Приоритет крупным реперам, но НЕ отбрасываем мелкие полностью: бледный на
     # фото угловой репер может выйти мелким — он нужен, чтобы не потерять угол.
@@ -465,6 +492,7 @@ def _detect_qr_boxes(gray):
     Если детектор не нашёл QR — ищем по морфологии плотный кластор тёмных
     квадратов (характерный паттерн QR), чтобы всё равно замаскировать зону."""
     boxes = []
+    h, w = gray.shape
     detector = cv2.QRCodeDetector()
     candidates_img = [gray] + _qr_prep_variants(gray)
     for im in candidates_img:
@@ -476,7 +504,21 @@ def _detect_qr_boxes(gray):
             for quad in pts:
                 xs = [p[0] for p in quad]
                 ys = [p[1] for p in quad]
-                boxes.append((int(min(xs)), int(min(ys)), int(max(xs)), int(max(ys))))
+                x0 = max(0, min(int(min(xs)), w))
+                y0 = max(0, min(int(min(ys)), h))
+                x1 = max(0, min(int(max(xs)), w))
+                y1 = max(0, min(int(max(ys)), h))
+                # OpenCV иногда возвращает мусорные координаты (за пределами
+                # кадра или абсурдных размеров) при неудачной детекции на
+                # предобработанном варианте — такой "QR" замаскировал бы
+                # половину листа вместе с реперами сетки ответов. Отбрасываем
+                # прямоугольники шире/выше половины изображения — настоящий
+                # QR ученика всегда компактный.
+                if x1 <= x0 or y1 <= y0:
+                    continue
+                if (x1 - x0) > w * 0.5 or (y1 - y0) > h * 0.5:
+                    continue
+                boxes.append((x0, y0, x1, y1))
         if boxes:
             return boxes
 
@@ -518,9 +560,16 @@ def _detect_qr_by_density(gray):
     return boxes
 
 
-def _mask_qr_zones(gray, boxes, margin_frac=0.55):
+def _mask_qr_zones(gray, boxes, margin_frac=0.22):
     """Закрашивает белым зоны QR + поля вокруг (где стоят реперы QR),
-    чтобы они не путались с реперами зоны ответов."""
+    чтобы они не путались с реперами зоны ответов.
+
+    margin_frac подобран под геометрию бланка (generate-blank/index.py):
+    реперы QR-зоны стоят на расстоянии ~ (qr_pad + anc_c/2) ≈ 0.18 от
+    стороны QR-квадрата. Больший отступ (использовался 0.55) на компактных
+    макетах бланка задевает СОСЕДНИЙ репер зоны ответов, стоящий всего в
+    ~20px от QR — из-за этого пропадал один из 4 углов и распознавание
+    полностью срывалось (anchorsFound < 4)."""
     if not boxes:
         return gray
     masked = gray.copy()
@@ -653,11 +702,50 @@ def _calibrate_cells_to_circles(gray, cells_by_q, n_q, n_opts,
 
     use_cols = len(col_centers) == total_cols
     use_rows = len(row_centers) == n_rows
+
+    # Sanity-check межстрочного шага: сверяем с шагом ИЗ ПРОЕКЦИИ ПО ЯКОРЯМ
+    # (cells_by_q на входе уже содержит корректную шаблонную проекцию —
+    # якоря сами по себе надёжны). Hough-круги на плотно заполненных бланках
+    # иногда сцепляют соседние закрашенные кружки в один "круг" большего
+    # радиуса, из-за чего медианный шаг между рядами завышается — сетка
+    # «съезжает» вниз с накоплением ошибки к последним вопросам. Если
+    # калиброванный шаг отличается от ожидаемого больше чем на 20% —
+    # калибровке Y не доверяем, оставляем шаблонные Y-координаты.
+    if use_rows and n_rows >= 2:
+        tmpl_row0 = cells_by_q.get(0, [])
+        tmpl_row1 = cells_by_q.get(1, [])
+        if tmpl_row0 and tmpl_row1:
+            expected_step = abs(tmpl_row1[0][2] - tmpl_row0[0][2])
+            got_step = abs(row_centers[1] - row_centers[0]) if len(row_centers) > 1 else 0
+            if expected_step > 0 and got_step > 0:
+                ratio = got_step / expected_step
+                if ratio < 0.9 or ratio > 1.1:
+                    use_rows = False
+                    dbg["rows_rejected"] = f"got_step={got_step:.1f} expected={expected_step:.1f} ratio={ratio:.2f}"
+
     dbg["use_cols"] = use_cols
     dbg["use_rows"] = use_rows
     if not use_cols and not use_rows:
         dbg["fallback"] = f"cols={len(col_centers)}/{total_cols} rows={len(row_centers)}/{n_rows}"
         return cells_by_q, dbg
+
+    # Смещения X по колонкам: калибруем col_centers ТОЛЬКО против верхней
+    # строки каждого блока (ri=0) и применяем разницу как константный сдвиг
+    # ко всем строкам блока. Если применить col_centers как АБСОЛЮТНЫЕ
+    # координаты для каждой строки — теряется перспективный градиент,
+    # который шаблонная проекция по 4 якорям уже корректно учитывает (наклон
+    # фото сдвигает X построчно), и на нижних вопросах колонки «съезжают»
+    # относительно кружков (наблюдалось до ~20px на последней строке).
+    col_offset = {}
+    if use_cols:
+        for ci in range(n_cols):
+            first_qi = ci * n_rows
+            orig0 = sorted(cells_by_q.get(first_qi, []), key=lambda c: c[0])
+            for oi in range(len(orig0)):
+                col_global = ci * n_opts + oi
+                if col_global < len(col_centers):
+                    tmpl_x = orig0[oi][1]
+                    col_offset[(ci, oi)] = col_centers[col_global] - tmpl_x
 
     # Перестраиваем центры клеток
     calibrated = {}
@@ -669,10 +757,8 @@ def _calibrate_cells_to_circles(gray, cells_by_q, n_q, n_opts,
         for oi in range(len(orig)):
             opt_idx, ox, oy = orig[oi]
             nx, ny = ox, oy
-            if use_cols:
-                col_global = ci * n_opts + oi
-                if col_global < len(col_centers):
-                    nx = col_centers[col_global]
+            if use_cols and (ci, oi) in col_offset:
+                nx = ox + col_offset[(ci, oi)]
             if use_rows and ri < len(row_centers):
                 ny = row_centers[ri]
             new_row.append((opt_idx, nx, ny))

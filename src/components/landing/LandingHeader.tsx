@@ -1,4 +1,7 @@
 import Icon from "@/components/ui/icon";
+import VkIcon from "@/components/ui/vk-icon";
+
+const VK_URL = "https://vk.ru/saoy_ooo29";
 
 interface LandingHeaderProps {
   onLogin: () => void;
@@ -38,6 +41,15 @@ export default function LandingHeader({
 
         {/* Кнопки */}
         <div className="flex items-center gap-2">
+          <a
+            href={VK_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Сообщество ВКонтакте"
+            className="hidden sm:inline-flex items-center justify-center w-9 h-9 border border-border rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          >
+            <VkIcon size={16} />
+          </a>
           {onOuLogin && (
             <button
               onClick={onOuLogin}
@@ -89,6 +101,11 @@ export default function LandingHeader({
           <a href="/knowledge-base"
             className="block w-full text-left text-sm py-2 text-muted-foreground hover:text-foreground border-b border-border">
             База знаний
+          </a>
+          <a href={VK_URL} target="_blank" rel="noopener noreferrer"
+            className="flex items-center gap-1.5 w-full text-left text-sm py-2 text-muted-foreground hover:text-foreground border-b border-border">
+            <VkIcon size={14} />
+            Сообщество ВКонтакте
           </a>
           <button onClick={onLogin} className="block w-full text-left text-sm py-2 font-semibold text-primary">
             Войти в систему

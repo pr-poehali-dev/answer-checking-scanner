@@ -1,5 +1,8 @@
 import Icon from "@/components/ui/icon";
+import VkIcon from "@/components/ui/vk-icon";
 import { COMPANY_INFO } from "@/components/CompanyFooter";
+
+const VK_URL = "https://vk.ru/saoy_ooo29";
 
 interface LandingFooterProps {
   onLogin: () => void;
@@ -64,6 +67,11 @@ export default function LandingFooter({ onLogin, onRegister, onScrollTo }: Landi
                 className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
                 <Icon name="Mail" size={11} />
                 {COMPANY_INFO.email}
+              </a>
+              <a href={VK_URL} target="_blank" rel="noopener noreferrer"
+                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
+                <VkIcon size={11} />
+                Сообщество ВКонтакте
               </a>
             </div>
           </div>

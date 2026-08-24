@@ -1,8 +1,10 @@
 import { useState } from "react";
 import Icon from "@/components/ui/icon";
+import VkIcon from "@/components/ui/vk-icon";
 
 const AD_IMAGE = "/promotion/vk-ad-saou.jpg";
 const COVER_IMAGE = "/promotion/vk-cover-saou.jpg";
+const VK_URL = "https://vk.ru/saoy_ooo29";
 
 interface PostVariant {
   id: string;
@@ -33,6 +35,7 @@ const POSTS: PostVariant[] = [
 Первые 5 дней — бесплатно, карта не нужна.
 
 Попробовать: saou.ru
+Сообщество: vk.ru/saoy_ooo29
 #САОУ #учителям #школа #образование`,
   },
   {
@@ -61,6 +64,26 @@ saou.ru`,
 
 saou.ru`,
   },
+  {
+    id: "student-works",
+    title: "Пост для учеников/студентов (курсовая, проект, реферат)",
+    text: `Курсовая, реферат или индивидуальный проект — с ИИ-помощником 🎓
+
+САОУ поможет ученику или студенту подготовить:
+✅ Индивидуальный проект
+✅ Курсовую работу
+✅ Реферат
+✅ Доклад
+✅ Сочинение
+
+Готовый документ по ГОСТ — с планом, списком литературы и оформлением, за считанные минуты.
+
+Первые 5 дней — бесплатно.
+
+Попробовать: saou.ru
+Сообщество: vk.ru/saoy_ooo29
+#САОУ #курсовая #реферат #студентам #школьникам`,
+  },
 ];
 
 function CopyButton({ text }: { text: string }) {
@@ -81,7 +104,7 @@ function CopyButton({ text }: { text: string }) {
 }
 
 const STEPS = [
-  { title: "Оформите сообщество", text: "Скачайте баннер-шапку ниже и загрузите его в настройках сообщества → «Обложка сообщества» — это первое, что видят посетители." },
+  { title: "Сообщество уже создано", text: "Официальная группа САОУ работает по адресу vk.ru/saoy_ooo29 — при необходимости обновите баннер-шапку ниже в настройках сообщества → «Обложка сообщества»." },
   { title: "Откройте VK Реклама", text: "Зайдите на vk.com/ads из сообщества или личного кабинета — раздел «Реклама»." },
   { title: "Создайте кампанию", text: "Выберите цель «Продвижение сообщества/сайта» → тип объявления «Универсальная запись» или «Карусель»." },
   { title: "Загрузите изображение", text: "Скачайте квадратную картинку выше (полное качество, 2160×2160) и прикрепите к объявлению." },
@@ -101,6 +124,26 @@ export default function UdsPromotion() {
         <p className="text-xs text-muted-foreground mt-0.5">
           Готовые материалы для рекламы САОУ ВКонтакте — изображение, тексты постов и пошаговая инструкция.
         </p>
+      </div>
+
+      {/* Официальное сообщество */}
+      <div className="border border-border rounded-lg bg-white overflow-hidden">
+        <div className="p-4 flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-sm bg-[#0077FF]/10 flex items-center justify-center text-[#0077FF] flex-shrink-0">
+              <VkIcon size={18} />
+            </div>
+            <div>
+              <p className="text-xs font-semibold">Официальное сообщество САОУ</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">vk.ru/saoy_ooo29</p>
+            </div>
+          </div>
+          <a href={VK_URL} target="_blank" rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-[#0077FF] text-white text-xs font-semibold rounded-sm hover:opacity-90 transition-opacity">
+            <Icon name="ExternalLink" size={14} />
+            Открыть сообщество
+          </a>
+        </div>
       </div>
 
       {/* Изображение для рекламы */}

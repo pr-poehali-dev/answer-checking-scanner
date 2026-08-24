@@ -95,6 +95,30 @@ export default function TokensModal({ onClose }: TokensModalProps) {
     );
   }
 
+  // На пробном периоде пополнение баланса ИИ недоступно — только покупка подписки
+  if (teacher?.subscriptionStatus === "trial") {
+    return (
+      <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-sm w-full max-w-sm p-6 text-center space-y-4">
+          <div className="w-14 h-14 rounded-full bg-blue-100 flex items-center justify-center mx-auto">
+            <Icon name="Clock" size={28} className="text-blue-600" />
+          </div>
+          <p className="text-lg font-bold text-foreground">Недоступно на пробном периоде</p>
+          <p className="text-sm text-muted-foreground">
+            Пополнение баланса ИИ откроется после оформления подписки — вместе с подпиской вы
+            получите подарочный ИИ-баланс (40–550 ₽ в зависимости от тарифа).
+          </p>
+          <button
+            onClick={onClose}
+            className="w-full py-2.5 bg-primary text-primary-foreground text-sm font-semibold rounded-sm hover:opacity-90"
+          >
+            Понятно
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-sm w-full max-w-md shadow-xl">

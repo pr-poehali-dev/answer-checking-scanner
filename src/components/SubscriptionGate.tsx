@@ -71,9 +71,10 @@ export default function SubscriptionGate() {
       const res = await subscriptionApi.check(pid);
       if (res.subscription_active) {
         await appStore.refreshSubscription();
-        setInfo(res.autorenew_enabled
+        const giftStr = res.ai_gift_rub ? ` Вам начислено ${formatRub(res.ai_gift_rub)} на ИИ-баланс в подарок.` : "";
+        setInfo((res.autorenew_enabled
           ? "Подписка активирована! Автопродление включено — отключить можно в разделе «Подписка»."
-          : "Подписка активирована! Все разделы доступны.");
+          : "Подписка активирована! Все разделы доступны.") + giftStr);
       } else if (res.status === "canceled") {
         setError("Платёж был отменён. Попробуйте оформить подписку ещё раз.");
       } else {
@@ -297,10 +298,17 @@ export default function SubscriptionGate() {
               )}
               <p className="text-sm font-bold mb-1">{plan.name}</p>
               <p className="text-xs text-muted-foreground mb-4">{plan.description}</p>
-              <div className="mb-4">
+              <div className="mb-1">
                 <span className="text-3xl font-bold mono">{formatRub(plan.amount)}</span>
                 <span className="text-xs text-muted-foreground ml-1">/ {plan.months} мес.</span>
               </div>
+              {!!plan.ai_gift_rub && (
+                <div className="inline-flex self-start items-center gap-1.5 px-2 py-1 mb-4 rounded-sm text-[11px] font-semibold"
+                  style={{ background: "hsl(142 70% 95%)", color: "hsl(142 70% 30%)" }}>
+                  <Icon name="Gift" size={12} />
+                  + {formatRub(plan.ai_gift_rub)} на ИИ-баланс в подарок
+                </div>
+              )}
               <button
                 onClick={() => handleBuy(plan)}
                 disabled={busyPlan !== null || !available || !agreedSub}

@@ -24,6 +24,7 @@ CORS = {
 SCHEMA = os.environ.get("MAIN_DB_SCHEMA", "t_p31556921_answer_checking_scan")
 
 # ── Тарифы САОУ ──────────────────────────────────────────────────────────
+# ai_gift_rub — подарок на баланс ИИ при покупке/продлении подписки этого тарифа
 PLANS = [
     {
         "code": "monthly",
@@ -32,6 +33,7 @@ PLANS = [
         "months": 1,
         "description": "Подписка на 1 месяц. Все разделы доступны.",
         "popular": False,
+        "ai_gift_rub": 40,
     },
     {
         "code": "halfyear",
@@ -40,6 +42,7 @@ PLANS = [
         "months": 6,
         "description": "Подписка на 6 месяцев. Экономия 8%.",
         "popular": True,
+        "ai_gift_rub": 250,
     },
     {
         "code": "year",
@@ -48,6 +51,7 @@ PLANS = [
         "months": 12,
         "description": "Подписка на 12 месяцев. Экономия 4%.",
         "popular": False,
+        "ai_gift_rub": 550,
     },
 ]
 
@@ -103,21 +107,26 @@ def yookassa_request(method: str, path: str, body: dict | None = None, idempoten
         raise RuntimeError(f"ЮKassa HTTP {e.code}: {msg}")
 
 
-SUBSCRIPTION_TOKENS_GIFT = 3000
-
-
 def grant_subscription(login: str, plan_code: str, months: int, payment_id: str | None,
                        autorenew: bool = False, payment_method_id: str | None = None,
                        payment_method_title: str | None = None, is_recurrent: bool = False) -> datetime:
-    """Активирует подписку: продлевает или начинает новую. Начисляет 3000 токенов. Возвращает дату окончания.
+    """Активирует подписку: продлевает или начинает новую. Начисляет подарочные ИИ-рубли
+    по тарифу (40 ₽ / 250 ₽ / 550 ₽ за 1/6/12 месяцев). Возвращает дату окончания.
+
+    Если это первая платная подписка после пробного периода (trial_until IS NOT NULL,
+    subscription_started_at IS NULL) — пробный ИИ-баланс безвозвратно сгорает: баланс
+    обнуляется перед начислением подарка за оплаченный тариф.
 
     Если autorenew=True и передан payment_method_id — включает автопродление (сохраняет карту).
     """
+    plan = get_plan(plan_code)
+    gift_kopecks = round((plan["ai_gift_rub"] if plan else 0) * 100)
+
     conn = get_conn()
     try:
         cur = conn.cursor()
         cur.execute(
-            f"SELECT subscription_until FROM {SCHEMA}.users WHERE login = %s",
+            f"SELECT subscription_until, trial_until, subscription_started_at FROM {SCHEMA}.users WHERE login = %s",
             (login,)
         )
         row = cur.fetchone()
@@ -125,20 +134,34 @@ def grant_subscription(login: str, plan_code: str, months: int, payment_id: str 
             raise RuntimeError("Пользователь не найден")
 
         now = datetime.utcnow()
-        current_until = row[0] if isinstance(row[0], datetime) else None
+        current_until, trial_until, sub_started_at = row[0], row[1], row[2]
+        current_until = current_until if isinstance(current_until, datetime) else None
         base = current_until if (current_until and current_until > now) else now
         new_until = base + timedelta(days=30 * months)
 
-        cur.execute(
-            f"""UPDATE {SCHEMA}.users
-                SET subscription_status='active', subscription_plan=%s,
-                    subscription_until=%s,
-                    subscription_started_at = COALESCE(subscription_started_at, NOW()),
-                    ai_tokens_balance = ai_tokens_balance + %s,
-                    ai_tokens_gifted = ai_tokens_gifted + %s
-                WHERE login = %s""",
-            (plan_code, new_until, SUBSCRIPTION_TOKENS_GIFT, SUBSCRIPTION_TOKENS_GIFT, login)
-        )
+        # Первая платная подписка после пробного периода — пробный ИИ-баланс сгорает безвозвратно
+        is_first_paid_after_trial = trial_until is not None and sub_started_at is None
+        if is_first_paid_after_trial:
+            cur.execute(
+                f"""UPDATE {SCHEMA}.users
+                    SET subscription_status='active', subscription_plan=%s,
+                        subscription_until=%s,
+                        subscription_started_at = NOW(),
+                        ai_balance_kopecks = %s,
+                        trial_until = NULL, trial_ai_calls_today = 0, trial_ai_date = NULL
+                    WHERE login = %s""",
+                (plan_code, new_until, gift_kopecks, login)
+            )
+        else:
+            cur.execute(
+                f"""UPDATE {SCHEMA}.users
+                    SET subscription_status='active', subscription_plan=%s,
+                        subscription_until=%s,
+                        subscription_started_at = COALESCE(subscription_started_at, NOW()),
+                        ai_balance_kopecks = ai_balance_kopecks + %s
+                    WHERE login = %s""",
+                (plan_code, new_until, gift_kopecks, login)
+            )
 
         # Автопродление: включаем и сохраняем способ оплаты (с явного согласия пользователя)
         if autorenew and payment_method_id:
@@ -320,11 +343,13 @@ def handler(event: dict, context) -> dict:
                     login, plan_code, months, payment_id,
                     autorenew=autorenew, payment_method_id=pm_id, payment_method_title=pm_title,
                 )
+                plan = get_plan(plan_code)
                 return _resp(200, {
                     "status": "succeeded",
                     "subscription_until": until.isoformat(),
                     "subscription_active": True,
                     "autorenew_enabled": bool(autorenew and pm_id),
+                    "ai_gift_rub": (plan or {}).get("ai_gift_rub", 0),
                 })
             except Exception as e:
                 return _resp(500, {"error": f"Ошибка активации подписки: {e}"})
@@ -394,11 +419,20 @@ def handler(event: dict, context) -> dict:
         conn = get_conn()
         try:
             cur = conn.cursor()
-            cur.execute(f"SELECT email, full_name FROM {SCHEMA}.users WHERE login = %s", (user_login,))
+            cur.execute(
+                f"SELECT email, full_name, subscription_until, trial_until FROM {SCHEMA}.users WHERE login = %s",
+                (user_login,)
+            )
             row = cur.fetchone()
             if not row:
                 return _resp(404, {"error": "Пользователь не найден"})
-            email, full_name = row[0], row[1]
+            email, full_name, sub_until, trial_until = row
+            now = datetime.utcnow()
+            has_paid_sub = isinstance(sub_until, datetime) and sub_until > now
+            on_trial = isinstance(trial_until, datetime) and trial_until > now
+            # На пробном периоде пополнение баланса ИИ недоступно — только покупка подписки
+            if on_trial and not has_paid_sub:
+                return _resp(403, {"error": "Пополнение баланса ИИ недоступно во время пробного периода. Оформите подписку — вы получите подарочный ИИ-баланс."})
         finally:
             conn.close()
 

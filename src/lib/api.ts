@@ -1958,6 +1958,7 @@ export interface SubscriptionPlan {
   months: number;
   description: string;
   popular: boolean;
+  ai_gift_rub?: number;
 }
 
 export interface PaymentRow {
@@ -2021,7 +2022,7 @@ export const subscriptionApi = {
     ),
 
   check: (payment_id: string) =>
-    subRequest<{ status: string; subscription_until?: string; subscription_active: boolean; autorenew_enabled?: boolean }>(
+    subRequest<{ status: string; subscription_until?: string; subscription_active: boolean; autorenew_enabled?: boolean; ai_gift_rub?: number }>(
       "check",
       {
         method: "POST",

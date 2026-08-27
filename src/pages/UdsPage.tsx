@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { udsApi, UdsPerms, UdsCert } from "@/lib/api";
 import { cryptoPlugins, CryptoProMedia } from "@/lib/cryptoPlugins";
 import UdsCertIssue from "@/pages/uds/UdsCertIssue";
@@ -14,8 +15,11 @@ import {
   getCookie,
   removeCookie,
 } from "@/pages/uds/udsSession";
+import { UDS_TAB_TO_PATH, PATH_TO_UDS_TAB, UDS_BASE_PATH } from "@/lib/routes";
 
 export default function UdsPage() {
+  const location = useLocation();
+  const routerNav = useNavigate();
   const [session, setSession] = useState<Session | null>(null);
   const [myCert, setMyCert] = useState<UdsCert | null>(null);
   const [myMail, setMyMail] = useState<{ email_address: string; status: string; password_set: boolean } | null>(null);
@@ -30,7 +34,8 @@ export default function UdsPage() {
   const [error, setError] = useState("");
   const [certList, setCertList] = useState<CryptoProMedia[] | null>(null);
   const [certLoading, setCertLoading] = useState(false);
-  const [tab, setTab] = useState<Tab>("employees");
+  const tab: Tab = PATH_TO_UDS_TAB[location.pathname] || "employees";
+  const setTab = (t: Tab) => routerNav(UDS_TAB_TO_PATH[t] || UDS_BASE_PATH);
   const lastActivityRef = useRef<number>(Date.now());
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 

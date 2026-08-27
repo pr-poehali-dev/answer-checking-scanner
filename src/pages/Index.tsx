@@ -1,7 +1,12 @@
 import { useEffect, useState } from "react";
+import { useLocation, useNavigate as useRouterNavigate } from "react-router-dom";
 import Icon from "@/components/ui/icon";
-import { usePersistedState } from "@/hooks/usePersistedState";
 import { Section, NAV_ITEMS, SECTION_TITLES } from "@/components/scanner/types";
+import {
+  AUTH_MODE_TO_PATH, PATH_TO_AUTH_MODE, type AuthMode,
+  TEACHER_SECTION_TO_PATH, PATH_TO_TEACHER_SECTION, TEACHER_DEFAULT_SECTION, TEACHER_DEFAULT_PATH,
+  PATH_TO_STUDENT_SECTION, PATH_TO_OU_SECTION,
+} from "@/lib/routes";
 import { UploadSection } from "@/components/scanner/SectionsA";
 import { ResultsSection, SettingsSection } from "@/components/scanner/SectionsB";
 import { StudentsSection } from "@/components/scanner/StudentsSection";
@@ -95,14 +100,25 @@ const MOBILE_NAV: { id: Section; label: string; icon: string }[] = [
 ];
 
 export default function Index() {
-  const [active, setActive]         = usePersistedState<Section>("teacher:active-section", "works");
+  const location = useLocation();
+  const routerNav = useRouterNavigate();
+  const path = location.pathname;
+
+  const authMode: AuthMode = PATH_TO_AUTH_MODE[path] || "landing";
+  const active: Section = PATH_TO_TEACHER_SECTION[path] || TEACHER_DEFAULT_SECTION;
+
   const [sidebarOpen, setSidebar]   = useState(false);
-  const [authMode, setAuthMode]     = useState<"landing" | "login" | "signup" | "ou-login" | "ou-register">("landing");
   const [ouUser, setOuUser]         = useState<OUUser | null>(() => loadOUSession());
   const [hasInstitution, setHasInstitution] = useState(false);
   const [showTokensModal, setShowTokensModal] = useState(false);
   const { teacher, yadiskConnected, storageMode, maintenanceSections, hiddenSections } = useAppStore();
   const ActiveSection = SECTION_COMPONENTS[active];
+
+  // Открыт свой раздел кабинета учителя (адресная строка), но пользователь не аутентифицирован
+  // или это не учитель/студент — тогда нормализуем URL на /lk по умолчанию.
+  const isTeacherSectionPath = path in PATH_TO_TEACHER_SECTION;
+  const isStudentSectionPath = path in PATH_TO_STUDENT_SECTION;
+  const isOuSectionPath = path in PATH_TO_OU_SECTION;
 
   useEffect(() => {
     if (!teacher || (teacher.role !== "teacher" && teacher.role !== "student")) return;
@@ -127,32 +143,51 @@ export default function Index() {
   useEffect(() => {
     const handler = (e: Event) => {
       const section = (e as CustomEvent).detail as Section;
-      if (section) { setActive(section); setSidebar(false); }
+      if (section && TEACHER_SECTION_TO_PATH[section]) {
+        routerNav(TEACHER_SECTION_TO_PATH[section]);
+        setSidebar(false);
+      }
     };
     window.addEventListener("navigate-to-section", handler);
     return () => window.removeEventListener("navigate-to-section", handler);
-  }, []);
+  }, [routerNav]);
+
+  // Если учитель залогинен, но открыт нерелевантный адрес (лендинг/вход/OU) — уводим в /lk
+  useEffect(() => {
+    if (!teacher || teacher.role === "student") return;
+    if (!isTeacherSectionPath) routerNav(TEACHER_DEFAULT_PATH, { replace: true });
+  }, [teacher?.login, teacher?.role, isTeacherSectionPath, routerNav]);
 
   // Закрываем сайдбар при смене раздела
-  const navigate = (s: Section) => { setActive(s); setSidebar(false); };
+  const navigate = (s: Section) => { routerNav(TEACHER_SECTION_TO_PATH[s] || TEACHER_DEFAULT_PATH); setSidebar(false); };
 
   // ── ОУ маршруты ─────────────────────────────────────────────────────────
   if (ouUser) {
     return (
       <InstitutionDashboard
         user={ouUser}
-        onLogout={() => { clearOUSession(); setOuUser(null); setAuthMode("landing"); }}
+        onLogout={() => { clearOUSession(); setOuUser(null); routerNav("/"); }}
       />
     );
   }
 
   if (!teacher) {
+    // Прямая ссылка на раздел кабинета учреждения без входа — ведём на вход ОУ
+    if (isOuSectionPath) {
+      return (
+        <InstitutionLoginPage
+          onLogin={(u) => { saveOUSession(u); setOuUser(u); }}
+          onBack={() => routerNav("/")}
+          onRegister={() => routerNav(AUTH_MODE_TO_PATH["ou-register"])}
+        />
+      );
+    }
     if (authMode === "ou-login") {
       return (
         <InstitutionLoginPage
           onLogin={(u) => { saveOUSession(u); setOuUser(u); }}
-          onBack={() => setAuthMode("landing")}
-          onRegister={() => setAuthMode("ou-register")}
+          onBack={() => routerNav("/")}
+          onRegister={() => routerNav(AUTH_MODE_TO_PATH["ou-register"])}
         />
       );
     }
@@ -161,27 +196,37 @@ export default function Index() {
         <InstitutionRegisterPage
           onSuccess={({ login, password, institution_name }) => {
             alert(`Учреждение "${institution_name}" успешно зарегистрировано!\nЛогин: ${login}\nВойдите в систему.`);
-            setAuthMode("ou-login");
+            routerNav(AUTH_MODE_TO_PATH["ou-login"]);
           }}
-          onBack={() => setAuthMode("landing")}
+          onBack={() => routerNav("/")}
         />
       );
     }
     if (authMode === "landing") {
+      // Прямая ссылка на раздел кабинета без входа — ведём на страницу входа
+      if (isTeacherSectionPath || isStudentSectionPath) {
+        return (
+          <LoginPage
+            onLogin={(role) => routerNav(role === "student" ? "/lk-uch" : TEACHER_DEFAULT_PATH)}
+            initialMode="login"
+            onBack={() => routerNav("/")}
+          />
+        );
+      }
       return (
         <LandingPage
-          onLogin={() => setAuthMode("login")}
-          onRegister={() => setAuthMode("signup")}
-          onTrial={() => setAuthMode("signup")}
-          onOuLogin={() => setAuthMode("ou-login")}
+          onLogin={() => routerNav(AUTH_MODE_TO_PATH.login)}
+          onRegister={() => routerNav(AUTH_MODE_TO_PATH.signup)}
+          onTrial={() => routerNav(AUTH_MODE_TO_PATH.signup)}
+          onOuLogin={() => routerNav(AUTH_MODE_TO_PATH["ou-login"])}
         />
       );
     }
     return (
       <LoginPage
-        onLogin={() => { setActive("works"); setAuthMode("landing"); }}
+        onLogin={(role) => routerNav(role === "student" ? "/lk-uch" : TEACHER_DEFAULT_PATH)}
         initialMode={authMode === "signup" ? "signup" : "login"}
-        onBack={() => setAuthMode("landing")}
+        onBack={() => routerNav("/")}
       />
     );
   }

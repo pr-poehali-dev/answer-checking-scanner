@@ -1,14 +1,15 @@
 import { useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import Icon from "@/components/ui/icon";
 import { OoSession, loadSession, clearSession, cabinetCall } from "@/components/sjou/cabinet/api";
+import { SJOU_CABINET_TAB_TO_PATH, PATH_TO_SJOU_CABINET_TAB, type SjouCabinetTab } from "@/lib/routes";
 import ClassesSection from "@/components/sjou/cabinet/ClassesSection";
 import TeachersSection from "@/components/sjou/cabinet/TeachersSection";
 import StudentsSection from "@/components/sjou/cabinet/StudentsSection";
 import ScheduleSection from "@/components/sjou/cabinet/ScheduleSection";
 import JournalSection from "@/components/sjou/cabinet/JournalSection";
 
-type Tab = "overview" | "classes" | "teachers" | "students" | "schedule" | "journal";
+type Tab = SjouCabinetTab;
 
 const NAV: { id: Tab; label: string; icon: string }[] = [
   { id: "overview", label: "Обзор", icon: "LayoutDashboard" },
@@ -28,8 +29,10 @@ interface Overview {
 
 export default function SjouCabinetPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [session] = useState<OoSession | null>(() => loadSession());
-  const [tab, setTab] = useState<Tab>("overview");
+  const tab: Tab = PATH_TO_SJOU_CABINET_TAB[location.pathname] || "overview";
+  const setTab = (t: Tab) => navigate(SJOU_CABINET_TAB_TO_PATH[t]);
   const [overview, setOverview] = useState<Overview | null>(null);
 
   const loadOverview = useCallback(async () => {

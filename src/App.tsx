@@ -25,6 +25,11 @@ import PublicHomePage from "./pages/PublicHomePage";
 import SiteVersionBadge from "./components/SiteVersionBadge";
 import AccessibilityPanel from "./components/AccessibilityPanel";
 import CookieConsent from "./components/CookieConsent";
+import {
+  AUTH_PATHS, TEACHER_PATHS, STUDENT_PATHS, OU_PATHS,
+  SJOU_TEACHER_PATHS, SJOU_CABINET_PATHS, SJOU_STUDENT_PATHS, SJOU_PARENT_PATHS,
+  UDS_PATHS,
+} from "@/lib/routes";
 
 const queryClient = new QueryClient();
 
@@ -39,6 +44,14 @@ const App = () => (
         </a>
         <Routes>
           <Route path="/" element={<Index />} />
+          {/* Вход/регистрация: /areg, /areg-reg, /areg-podtv, /areg-zabyl, /areg-parol */}
+          {AUTH_PATHS.filter(p => p !== "/").map(p => <Route key={p} path={p} element={<Index />} />)}
+          {/* Кабинет учителя: /lk и /lk-<раздел> */}
+          {TEACHER_PATHS.map(p => <Route key={p} path={p} element={<Index />} />)}
+          {/* Кабинет ученика: /lk-uch и /lk-uch-<раздел> */}
+          {STUDENT_PATHS.map(p => <Route key={p} path={p} element={<Index />} />)}
+          {/* Кабинет учреждения: /ou, /ou-uprav, /ou-kollektiv */}
+          {OU_PATHS.map(p => <Route key={p} path={p} element={<Index />} />)}
           <Route path="/yadisk-callback" element={<YadiskCallback />} />
           <Route path="/vk-callback" element={<VkCallback />} />
           <Route path="/confirm-email" element={<ConfirmEmailPage />} />
@@ -50,11 +63,16 @@ const App = () => (
           <Route path="/home" element={<PublicHomePage />} />
           <Route path="/sjou" element={<SjouPage />} />
           <Route path="/sjou-operator" element={<SjouOperatorPage />} />
-          <Route path="/sjou-cabinet" element={<SjouCabinetPage />} />
-          <Route path="/sjou-teacher" element={<SjouTeacherPage />} />
-          <Route path="/sjou-student" element={<SjouStudentPage />} />
-          <Route path="/sjou-parent" element={<SjouParentPage />} />
-          <Route path="/piot-colldent19" element={<UdsPage />} />
+          {/* СЖОУ — кабинет ОО: /sjou-cabinet и /sjou-cabinet-<раздел> */}
+          {SJOU_CABINET_PATHS.map(p => <Route key={p} path={p} element={<SjouCabinetPage />} />)}
+          {/* СЖОУ — кабинет учителя: /sjou-teacher и /sjou-teacher-<раздел> */}
+          {SJOU_TEACHER_PATHS.map(p => <Route key={p} path={p} element={<SjouTeacherPage />} />)}
+          {/* СЖОУ — дневник ученика: /sjou-student и /sjou-student-<раздел> */}
+          {SJOU_STUDENT_PATHS.map(p => <Route key={p} path={p} element={<SjouStudentPage />} />)}
+          {/* СЖОУ — кабинет родителя: /sjou-parent и /sjou-parent-<раздел> */}
+          {SJOU_PARENT_PATHS.map(p => <Route key={p} path={p} element={<SjouParentPage />} />)}
+          {/* УДС: /piot-colldent19 и /piot-colldent19-<раздел> (скрытый базовый путь) */}
+          {UDS_PATHS.map(p => <Route key={p} path={p} element={<UdsPage />} />)}
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>

@@ -1,13 +1,14 @@
 import { useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import Icon from "@/components/ui/icon";
 import CabinetHeader from "@/components/sjou/cabinet/CabinetHeader";
 import {
   OoSession, loadSession, clearSession, authCall,
   ClassItem, HomeworkItem, AnnounceItem, ScheduleRow,
 } from "@/components/sjou/cabinet/api";
+import { SJOU_TEACHER_TAB_TO_PATH, PATH_TO_SJOU_TEACHER_TAB, type SjouTeacherTab } from "@/lib/routes";
 
-type Tab = "journal" | "homework" | "schedule" | "announce";
+type Tab = SjouTeacherTab;
 
 const NAV: { id: Tab; label: string; icon: string }[] = [
   { id: "journal", label: "Журнал", icon: "BookOpenCheck" },
@@ -25,8 +26,10 @@ const input = "px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:ou
 
 export default function SjouTeacherPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [session] = useState<OoSession | null>(() => loadSession());
-  const [tab, setTab] = useState<Tab>("journal");
+  const tab: Tab = PATH_TO_SJOU_TEACHER_TAB[location.pathname] || "journal";
+  const setTab = (t: Tab) => navigate(SJOU_TEACHER_TAB_TO_PATH[t]);
   const [classes, setClasses] = useState<ClassItem[]>([]);
 
   useEffect(() => {

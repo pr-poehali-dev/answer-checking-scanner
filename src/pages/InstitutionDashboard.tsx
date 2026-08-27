@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import Icon from "@/components/ui/icon";
 import { institutionApi, type InstitutionStaff } from "@/lib/api";
 import CompanyFooter from "@/components/CompanyFooter";
 import { type OUUser, type OUSection } from "@/components/institution/OUTypes";
+import { OU_SECTION_TO_PATH, PATH_TO_OU_SECTION, OU_DEFAULT_SECTION, OU_DEFAULT_PATH } from "@/lib/routes";
 import OUSidebar from "@/components/institution/OUSidebar";
 import OUProfileSection from "@/components/institution/OUProfileSection";
 import OUManagementSection from "@/components/institution/OUManagementSection";
@@ -16,7 +18,10 @@ interface Props {
 }
 
 export default function InstitutionDashboard({ user, onLogout }: Props) {
-  const [section, setSection] = useState<OUSection>("profile");
+  const location = useLocation();
+  const routerNav = useNavigate();
+  const section: OUSection = PATH_TO_OU_SECTION[location.pathname] || OU_DEFAULT_SECTION;
+  const setSection = (s: OUSection) => routerNav(OU_SECTION_TO_PATH[s] || OU_DEFAULT_PATH);
   const [sidebarOpen, setSidebar] = useState(false);
   const [staff, setStaff] = useState<InstitutionStaff[]>([]);
   const [collective, setCollective] = useState<{ full_name: string; position: string; position_label: string; subject: string | null }[]>([]);

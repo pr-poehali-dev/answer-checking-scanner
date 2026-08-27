@@ -1,8 +1,10 @@
 import { useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import Icon from "@/components/ui/icon";
 import { appStore } from "@/store/appStore";
 import CompanyFooter from "@/components/CompanyFooter";
 import { buildConsent } from "@/lib/appVersion";
+import { AUTH_MODE_TO_PATH, PATH_TO_AUTH_MODE } from "@/lib/routes";
 import LoginFormPanel from "@/components/login/LoginFormPanel";
 import SignupFormPanel from "@/components/login/SignupFormPanel";
 import ConfirmEmailPanel from "@/components/login/ConfirmEmailPanel";
@@ -40,7 +42,13 @@ function previewLogin(firstName: string, lastName: string): string {
 type Mode = "login" | "signup" | "confirm" | "forgot" | "reset";
 
 export default function LoginPage({ onLogin, initialMode = "login", onBack }: LoginPageProps) {
-  const [mode, setMode] = useState<Mode>(initialMode);
+  const location = useLocation();
+  const routerNav = useNavigate();
+  const urlMode = PATH_TO_AUTH_MODE[location.pathname];
+  const mode: Mode = (urlMode && urlMode !== "landing" && urlMode !== "ou-login" && urlMode !== "ou-register")
+    ? urlMode
+    : initialMode;
+  const setMode = (m: Mode) => routerNav(AUTH_MODE_TO_PATH[m]);
 
   // login
   const [login, setLogin] = useState("");

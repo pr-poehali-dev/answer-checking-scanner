@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate as useRouterNavigate } from "react-router-dom";
 import Icon from "@/components/ui/icon";
-import { usePersistedState } from "@/hooks/usePersistedState";
 import { Section, STUDENT_NAV_ITEMS, SECTION_TITLES } from "@/components/scanner/types";
+import { STUDENT_SECTION_TO_PATH, PATH_TO_STUDENT_SECTION, STUDENT_DEFAULT_SECTION, STUDENT_DEFAULT_PATH } from "@/lib/routes";
 import { StudentSettingsSection } from "@/components/scanner/StudentSettingsSection";
 import { StudentResultsSection } from "@/components/scanner/StudentResultsSection";
 import { TestsSection } from "@/components/scanner/TestsSection";
@@ -36,7 +37,9 @@ const SECTION_COMPONENTS: Partial<Record<Section, React.FC>> = {
 
 export default function StudentCabinet() {
   const { teacher, yadiskConnected, storageMode, hiddenSections } = useAppStore();
-  const [active, setActive] = usePersistedState<Section>("student:active-section", "myResults");
+  const location = useLocation();
+  const routerNav = useRouterNavigate();
+  const active: Section = PATH_TO_STUDENT_SECTION[location.pathname] || STUDENT_DEFAULT_SECTION;
   const [sidebarOpen, setSidebar] = useState(false);
   const [showTokensModal, setShowTokensModal] = useState(false);
 
@@ -52,11 +55,14 @@ export default function StudentCabinet() {
   useEffect(() => {
     const handler = (e: Event) => {
       const section = (e as CustomEvent).detail as Section;
-      if (section) { setActive(section); setSidebar(false); }
+      if (section && STUDENT_SECTION_TO_PATH[section]) {
+        routerNav(STUDENT_SECTION_TO_PATH[section]);
+        setSidebar(false);
+      }
     };
     window.addEventListener("student-navigate", handler);
     return () => window.removeEventListener("student-navigate", handler);
-  }, []);
+  }, [routerNav]);
 
   // Видимые разделы = базовый набор минус скрытые админом
   const navItems = useMemo(() => {
@@ -67,9 +73,9 @@ export default function StudentCabinet() {
   // Если активный раздел скрыт — переключаемся на первый доступный
   useEffect(() => {
     if (navItems.length && !navItems.some(i => i.id === active)) {
-      setActive(navItems[0].id);
+      routerNav(STUDENT_SECTION_TO_PATH[navItems[0].id] || STUDENT_DEFAULT_PATH, { replace: true });
     }
-  }, [navItems, active]);
+  }, [navItems, active, routerNav]);
 
   if (!teacher) return null;
 
@@ -78,7 +84,7 @@ export default function StudentCabinet() {
   if (storageMode === "yadisk" && !yadiskConnected) return <YadiskRequiredGate />;
 
   const ActiveSection = SECTION_COMPONENTS[active] || ChatSection;
-  const navigate = (s: Section) => { setActive(s); setSidebar(false); };
+  const navigate = (s: Section) => { routerNav(STUDENT_SECTION_TO_PATH[s] || STUDENT_DEFAULT_PATH); setSidebar(false); };
   const initials = teacher.name.split(" ").slice(0, 2).map(w => w[0]).join("").toUpperCase();
 
   return (

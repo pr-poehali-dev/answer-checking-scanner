@@ -1,8 +1,9 @@
 import { useState } from "react";
 import Icon from "@/components/ui/icon";
 import { StudentDashboard } from "./api";
+import type { SjouDashboardTab } from "@/lib/routes";
 
-type Tab = "grades" | "schedule" | "homework" | "announce";
+type Tab = SjouDashboardTab;
 
 const NAV: { id: Tab; label: string; icon: string }[] = [
   { id: "grades", label: "Оценки", icon: "Star" },
@@ -16,8 +17,16 @@ const GRADE_COLORS: Record<number, string> = {
   3: "bg-amber-100 text-amber-700", 2: "bg-red-100 text-red-700", 1: "bg-red-200 text-red-800",
 };
 
-export default function StudentDashboardView({ data }: { data: StudentDashboard }) {
-  const [tab, setTab] = useState<Tab>("grades");
+interface Props {
+  data: StudentDashboard;
+  tab?: Tab;
+  onTabChange?: (t: Tab) => void;
+}
+
+export default function StudentDashboardView({ data, tab: controlledTab, onTabChange }: Props) {
+  const [localTab, setLocalTab] = useState<Tab>("grades");
+  const tab = controlledTab ?? localTab;
+  const setTab = onTabChange ?? setLocalTab;
 
   // Группируем оценки по предметам
   const bySubject: Record<string, typeof data.grades> = {};

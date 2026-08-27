@@ -460,6 +460,49 @@ export const appStore = {
     }
   },
 
+  vkLogin: async (params: { code: string; state: string; redirect_uri: string; device_id?: string; role?: "teacher" | "student"; consent?: Record<string, string> }): Promise<
+    { ok: true; role: UserRole } | { ok: false; error: string }
+  > => {
+    try {
+      const user = await authApi.vkLogin(params);
+      const newTeacher: Teacher = {
+        login: user.login,
+        name: user.full_name,
+        firstName: user.first_name,
+        lastName: user.last_name,
+        email: user.email,
+        school: user.school,
+        role: user.role,
+        authToken: user.token,
+        yadiskToken: null,
+        subscriptionStatus: user.subscription_status || "none",
+        subscriptionActive: !!user.subscription_active,
+        subscriptionUntil: user.subscription_until,
+        trialActive: !!user.trial_active,
+        trialExpired: !!user.trial_expired,
+        trialUntil: user.trial_until || null,
+        trialAiCallsToday: user.trial_ai_calls_today || 0,
+        trialAiLimit: user.trial_ai_limit || 5,
+        aiTokensKopecks: (user as unknown as { ai_balance_kopecks?: number }).ai_balance_kopecks || 0,
+      };
+      saveSession(newTeacher);
+      state = { ...state, teacher: newTeacher, storageMode: loadStorageMode(newTeacher.login) };
+      _restoreLocalInto(newTeacher.login);
+      notify();
+      if (user.role === "teacher" || user.role === "student") {
+        state = { ...state, yadiskConnected: false, yadiskUser: null, yadiskSyncing: false, yadiskLastSync: null };
+        notify();
+        appStore.loadFromDb();
+        appStore.restoreYadisk().then((restored) => {
+          if (restored) appStore.loadFromYadisk();
+        });
+      }
+      return { ok: true, role: user.role };
+    } catch (e) {
+      return { ok: false, error: (e as Error).message || "Не удалось войти через ВКонтакте" };
+    }
+  },
+
   signup: async (payload: { first_name: string; last_name: string; email: string; password: string; role?: "teacher" | "student"; study_group?: string; consent?: Record<string, string> }): Promise<
     { ok: true; login: string; email: string } | { ok: false; error: string }
   > => {

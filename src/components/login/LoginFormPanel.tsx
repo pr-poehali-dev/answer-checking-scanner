@@ -1,4 +1,5 @@
 import Icon from "@/components/ui/icon";
+import VkLoginButton from "@/components/login/VkLoginButton";
 
 interface LoginFormPanelProps {
   login: string;
@@ -89,6 +90,14 @@ export default function LoginFormPanel({
         )}
         {loading ? "Вход..." : "Войти"}
       </button>
+
+      <div className="flex items-center gap-3">
+        <div className="flex-1 h-px bg-border" />
+        <span className="text-[11px] text-muted-foreground">или</span>
+        <div className="flex-1 h-px bg-border" />
+      </div>
+
+      <VkLoginButton role="teacher" />
     </form>
   );
 }

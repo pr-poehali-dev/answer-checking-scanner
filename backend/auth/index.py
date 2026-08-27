@@ -3,6 +3,8 @@ API авторизации и управления пользователями 
 POST /login — вход (учитель/админ/tester)
 POST /signup — самостоятельная регистрация (имя, фамилия, email, пароль) — логин генерируется автоматически,
               требуется подтверждение email кодом (см. /confirm-email)
+GET /vk-auth-url — получить ссылку для входа/регистрации через ВКонтакте (VK ID, PKCE)
+POST /vk-login — обменять code от ВКонтакте на вход/автоматическую регистрацию, выдать рабочий токен
 POST /confirm-email — подтвердить 6-значный код с почты, выдать рабочий токен
 POST /confirm-email-link — подтвердить по токену из ссылки в письме, выдать рабочий токен
 POST /resend-email-code — повторно отправить код подтверждения email
@@ -30,6 +32,9 @@ import hashlib
 import hmac
 import secrets
 import base64
+import urllib.request
+import urllib.parse
+import urllib.error
 import psycopg2
 from email.mime.text import MIMEText
 from email import utils as email_utils
@@ -213,6 +218,37 @@ def generate_login(first_name: str, last_name: str, cur) -> str:
             return candidate
         n += 1
         candidate = f"{base}{n}"
+
+
+# ── VK ID OAuth (вход/регистрация через ВКонтакте, PKCE) ─────────────────────
+
+VK_CLIENT_ID = os.environ.get("VK_CLIENT_ID", "").strip()
+VK_CLIENT_SECRET = os.environ.get("VK_CLIENT_SECRET", "").strip()
+
+
+def _vk_request(url: str, data: dict | None = None, method: str = "GET") -> dict:
+    """HTTP-запрос к VK ID API. GET — параметры в query, POST — form-urlencoded в body."""
+    if method == "GET":
+        full_url = f"{url}?{urllib.parse.urlencode(data or {})}"
+        req = urllib.request.Request(full_url, method="GET")
+    else:
+        req = urllib.request.Request(
+            url,
+            data=urllib.parse.urlencode(data or {}).encode(),
+            method="POST",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:
+        err_text = e.read().decode(errors="ignore")
+        try:
+            err_json = json.loads(err_text)
+            msg = err_json.get("error_description") or err_json.get("error") or err_text[:200]
+        except Exception:
+            msg = err_text[:200]
+        raise RuntimeError(f"VK ID HTTP {e.code}: {msg}")
 
 
 # ── Подписка и trial ────────────────────────────────────────────────────────
@@ -727,6 +763,201 @@ def handler(event: dict, context) -> dict:
         except psycopg2.errors.UniqueViolation:
             conn.rollback()
             return _resp(409, {"error": "Логин или email уже заняты"})
+        finally:
+            conn.close()
+
+    # ── GET vk-auth-url — получить ссылку для входа через ВКонтакте (PKCE) ───
+    if method == "GET" and route in ("vk-auth-url", "vk_auth_url"):
+        if not VK_CLIENT_ID:
+            return _resp(500, {"error": "Вход через ВКонтакте не настроен"})
+        redirect_uri = (qs.get("redirect_uri") or "").strip()
+        if not redirect_uri:
+            return _resp(400, {"error": "redirect_uri обязателен"})
+
+        # PKCE: code_verifier храним в БД по одноразовому state, чтобы не доверять клиенту
+        code_verifier = secrets.token_urlsafe(48)
+        code_challenge = base64.urlsafe_b64encode(
+            hashlib.sha256(code_verifier.encode()).digest()
+        ).decode().rstrip("=")
+        state = secrets.token_urlsafe(24)
+
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"""INSERT INTO {SCHEMA}.oauth_states (state, provider, code_verifier, expires_at)
+                    VALUES (%s, 'vk', %s, %s)""",
+                (state, code_verifier, datetime.utcnow() + timedelta(minutes=10))
+            )
+            # Чистим просроченные записи заодно
+            cur.execute(f"DELETE FROM {SCHEMA}.oauth_states WHERE expires_at < NOW()")
+            conn.commit()
+        finally:
+            conn.close()
+
+        params = {
+            "response_type": "code",
+            "client_id": VK_CLIENT_ID,
+            "redirect_uri": redirect_uri,
+            "code_challenge": code_challenge,
+            "code_challenge_method": "S256",
+            "state": state,
+            "scope": "email",
+        }
+        url = "https://id.vk.com/authorize?" + urllib.parse.urlencode(params)
+        return _resp(200, {"url": url, "state": state})
+
+    # ── POST vk-login — обмен кода VK на вход/регистрацию в САОУ ─────────────
+    if method == "POST" and route in ("vk-login", "vk_login"):
+        if not VK_CLIENT_ID or not VK_CLIENT_SECRET:
+            return _resp(500, {"error": "Вход через ВКонтакте не настроен"})
+        code = (body.get("code") or "").strip()
+        device_id = (body.get("device_id") or "").strip()
+        state = (body.get("state") or "").strip()
+        redirect_uri = (body.get("redirect_uri") or "").strip()
+        if not code or not state or not redirect_uri:
+            return _resp(400, {"error": "code, state и redirect_uri обязательны"})
+
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"SELECT code_verifier FROM {SCHEMA}.oauth_states WHERE state = %s AND provider = 'vk' AND expires_at > NOW()",
+                (state,)
+            )
+            row = cur.fetchone()
+            if not row:
+                return _resp(400, {"error": "Сессия входа через ВКонтакте истекла. Попробуйте снова."})
+            code_verifier = row[0]
+            cur.execute(f"DELETE FROM {SCHEMA}.oauth_states WHERE state = %s", (state,))
+            conn.commit()
+
+            # Обмен code на access_token (VK ID OAuth 2.1 + PKCE)
+            try:
+                tokens = _vk_request(
+                    "https://id.vk.com/oauth2/auth",
+                    {
+                        "grant_type": "authorization_code",
+                        "code": code,
+                        "code_verifier": code_verifier,
+                        "client_id": VK_CLIENT_ID,
+                        "device_id": device_id,
+                        "redirect_uri": redirect_uri,
+                        "state": state,
+                    },
+                    method="POST",
+                )
+            except RuntimeError as e:
+                return _resp(400, {"error": f"Не удалось войти через ВКонтакте: {e}"})
+
+            access_token = tokens.get("access_token", "")
+            vk_user_id = str(tokens.get("user_id") or "")
+            vk_email = (tokens.get("email") or "").strip().lower()
+            if not access_token or not vk_user_id:
+                return _resp(400, {"error": "ВКонтакте не вернул данные пользователя"})
+
+            # Получаем имя/фамилию/аватар
+            try:
+                info = _vk_request(
+                    "https://id.vk.com/oauth2/user_info",
+                    {"access_token": access_token, "client_id": VK_CLIENT_ID},
+                    method="POST",
+                )
+                vk_user = info.get("user") or {}
+            except RuntimeError:
+                vk_user = {}
+            first_name = (vk_user.get("first_name") or "Пользователь").strip()
+            last_name = (vk_user.get("last_name") or "ВКонтакте").strip()
+            full_name = f"{last_name} {first_name}".strip()
+
+            now = datetime.utcnow()
+
+            # 1) Уже привязан этот VK-аккаунт — просто логиним
+            cur.execute(
+                f"""SELECT login, full_name, first_name, last_name, email, school, role, is_active,
+                           subscription_status, subscription_until,
+                           trial_until, trial_ai_calls_today, trial_ai_date, ai_balance_kopecks, password_hash
+                    FROM {SCHEMA}.users WHERE vk_id = %s""",
+                (vk_user_id,)
+            )
+            row = cur.fetchone()
+
+            if not row:
+                # 2) VK ещё не привязан, но email совпадает с существующим аккаунтом — привязываем
+                if vk_email:
+                    cur.execute(
+                        f"""SELECT login, full_name, first_name, last_name, email, school, role, is_active,
+                                   subscription_status, subscription_until,
+                                   trial_until, trial_ai_calls_today, trial_ai_date, ai_balance_kopecks, password_hash
+                            FROM {SCHEMA}.users WHERE LOWER(email) = %s AND vk_id IS NULL""",
+                        (vk_email,)
+                    )
+                    row = cur.fetchone()
+                    if row:
+                        cur.execute(f"UPDATE {SCHEMA}.users SET vk_id = %s WHERE login = %s", (vk_user_id, row[0]))
+
+            if not row:
+                # 3) Новый пользователь — регистрируем автоматически (роль: ученик по умолчанию)
+                req_role = (body.get("role") or "student").strip().lower()
+                new_role = "teacher" if req_role == "teacher" else "student"
+                reg_ip = get_client_ip(event, headers)
+                login = generate_login(first_name, last_name, cur)
+                random_pw_hash = hash_password(secrets.token_urlsafe(24))
+                cur.execute(
+                    f"""INSERT INTO {SCHEMA}.users
+                        (login, password_hash, full_name, first_name, last_name, email, school, role,
+                         created_by, subscription_status, email_confirmed, registration_ip, vk_id)
+                        VALUES (%s, %s, %s, %s, %s, %s, 'САОУ', %s, 'vk_oauth', 'none', TRUE, %s, %s)
+                        RETURNING id""",
+                    (login, random_pw_hash, full_name, first_name, last_name, vk_email or None,
+                     new_role, reg_ip or None, vk_user_id)
+                )
+                user_id = cur.fetchone()[0]
+                record_consent(
+                    cur, user_id=user_id, login=login, full_name=full_name,
+                    email=vk_email, phone=None, context="registration_vk",
+                    consent=body.get("consent") or {}, ip=reg_ip,
+                    user_agent=headers.get("user-agent", ""),
+                )
+                conn.commit()
+                cur.execute(
+                    f"""SELECT login, full_name, first_name, last_name, email, school, role, is_active,
+                               subscription_status, subscription_until,
+                               trial_until, trial_ai_calls_today, trial_ai_date, ai_balance_kopecks, password_hash
+                        FROM {SCHEMA}.users WHERE login = %s""",
+                    (login,)
+                )
+                row = cur.fetchone()
+
+            (u_login, u_full_name, u_first, u_last, u_email, u_school, u_role, u_active,
+             sub_status, sub_until, trial_until, trial_ai_calls_today, trial_ai_date,
+             ai_balance_kopecks, stored_ph) = row
+
+            if not u_active:
+                return _resp(403, {"error": "Аккаунт заблокирован. Обратитесь к администратору."})
+
+            sub = get_subscription_payload(sub_status, sub_until, trial_until, trial_ai_calls_today or 0, trial_ai_date)
+            if u_role == "tester":
+                sub["subscription_active"] = True
+                sub["subscription_status"] = "active"
+
+            token_prefix = u_role if u_role in ("teacher", "student", "tester") else "teacher"
+            token = _make_token(token_prefix, u_login, stored_ph)
+            token_hash = hashlib.sha256(token.encode()).hexdigest()
+            cur.execute(
+                f"UPDATE {SCHEMA}.users SET last_seen_at = %s, auth_token_hash = %s WHERE login = %s",
+                (now, token_hash, u_login)
+            )
+            conn.commit()
+
+            return _resp(200, {
+                "role": u_role, "login": u_login,
+                "full_name": u_full_name, "first_name": u_first, "last_name": u_last,
+                "email": u_email, "school": u_school, "token": token,
+                "ai_balance_kopecks": ai_balance_kopecks or 0,
+                "ai_balance_rub": round((ai_balance_kopecks or 0) / 100, 2),
+                **sub,
+            })
         finally:
             conn.close()
 

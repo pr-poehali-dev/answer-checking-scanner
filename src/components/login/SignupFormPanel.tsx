@@ -1,4 +1,5 @@
 import Icon from "@/components/ui/icon";
+import VkLoginButton from "@/components/login/VkLoginButton";
 
 interface SignupFormPanelProps {
   signupRole: "teacher" | "student";
@@ -200,6 +201,14 @@ export default function SignupFormPanel({
         )}
         {loading ? "Создаём аккаунт..." : "Зарегистрироваться"}
       </button>
+
+      <div className="flex items-center gap-3">
+        <div className="flex-1 h-px bg-border" />
+        <span className="text-[11px] text-muted-foreground">или</span>
+        <div className="flex-1 h-px bg-border" />
+      </div>
+
+      <VkLoginButton role={signupRole} label="Зарегистрироваться через ВКонтакте" />
     </form>
   );
 }

@@ -28,6 +28,19 @@
       "expectedStatus": 400
     },
     {
+      "name": "vk-auth-url without redirect_uri returns 400",
+      "method": "GET",
+      "path": "/?action=vk-auth-url",
+      "expectedStatus": 400
+    },
+    {
+      "name": "vk-login without code returns 400",
+      "method": "POST",
+      "path": "/?action=vk-login",
+      "body": {},
+      "expectedStatus": 400
+    },
+    {
       "name": "Confirm-email without login/code returns 400",
       "method": "POST",
       "path": "/?action=confirm-email",

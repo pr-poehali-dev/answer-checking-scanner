@@ -140,6 +140,17 @@ export const authApi = {
       body: JSON.stringify({ login, code, new_password }),
     }),
 
+  vkAuthUrl: (redirect_uri: string) =>
+    request<{ url: string; state: string }>(`vk-auth-url&redirect_uri=${encodeURIComponent(redirect_uri)}`, {
+      method: "GET",
+    }),
+
+  vkLogin: (params: { code: string; state: string; redirect_uri: string; device_id?: string; role?: "teacher" | "student"; consent?: Record<string, string> }) =>
+    request<AuthUser>("vk-login", {
+      method: "POST",
+      body: JSON.stringify(params),
+    }),
+
   getLkVisibility: () =>
     request<{ hidden: { teacher: string[]; student: string[] } }>("lk-visibility", { method: "GET" }),
 

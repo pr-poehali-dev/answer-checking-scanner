@@ -563,6 +563,8 @@ export interface UdsEmployee {
   curator_login?: string | null;
   curator_name?: string | null;
   can_manage?: boolean;
+  /** Общая роль аккаунта (teacher/tester/student/admin) — определяет, идут ли его платежи через тестовый ЮKassa. */
+  user_role?: string | null;
 }
 
 // ── Корпоративная почта УДС ──
@@ -722,6 +724,10 @@ export const udsApi = {
 
   setRole: (login: string, token: string, targetLogin: string, panelRole: string) =>
     udsRequest<{ ok: boolean }>("set-role", "POST", login, token, { target_login: targetLogin, panel_role: panelRole }),
+
+  /** Переключить общую роль аккаунта teacher ⇄ tester (тестер платит через закрытый тестовый ЮKassa). Только Глава/Зам. */
+  setUserAccountRole: (login: string, token: string, targetLogin: string, role: "teacher" | "tester") =>
+    udsRequest<{ ok: boolean; login: string; role: string }>("set-user-role", "POST", login, token, { target_login: targetLogin, role }),
 
   block: (login: string, token: string, targetLogin: string, blocked: boolean) =>
     udsRequest<{ ok: boolean }>("block", "POST", login, token, { target_login: targetLogin, blocked }),

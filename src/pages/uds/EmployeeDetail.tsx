@@ -14,6 +14,7 @@ const ACTION_LABELS: Record<string, string> = {
   transfer_declined: "Передача отклонена",
   transfer_direct: "Передан куратору",
   reset_user_password: "Смена пароля",
+  set_user_role: "Изменение роли аккаунта",
   block: "Блокировка",
   unblock: "Разблокировка",
   assign_cert: "Назначен выпуск сертификата",
@@ -58,6 +59,14 @@ export default function EmployeeDetail({ data, login, token, perms, myRole, isAd
   const [newPass, setNewPass] = useState("");
   // Передача подопечного
   const [transferTo, setTransferTo] = useState("");
+  // Переключение роли аккаунта (teacher ⇄ tester)
+  const [userRole, setUserRole] = useState(emp.user_role ?? null);
+  const [roleBusy, setRoleBusy] = useState(false);
+  const [roleConfirm, setRoleConfirm] = useState(false);
+
+  // Синхронизируем локальную роль с пропом при открытии другой карточки
+  // или после перезагрузки данных родителем (onChanged → openDetail).
+  useEffect(() => { setUserRole(emp.user_role ?? null); }, [emp.login, emp.user_role]);
 
   useEffect(() => {
     if (isHeadOrDeputy || perms.is_curator) {
@@ -87,7 +96,7 @@ export default function EmployeeDetail({ data, login, token, perms, myRole, isAd
     setDeleting(true); setErr(""); setMsg("");
     try {
       await udsApi.deleteEmployee(login, token, emp.login);
-      onDeleted ? onDeleted() : onChanged?.();
+      if (onDeleted) onDeleted(); else onChanged?.();
       onClose();
     } catch (e) {
       setErr((e as Error).message);
@@ -118,6 +127,26 @@ export default function EmployeeDetail({ data, login, token, perms, myRole, isAd
 
   // Кто может передавать: Глава/Зам (любого) или куратор своего подопечного
   const canTransfer = isHeadOrDeputy || (perms.is_curator && emp.curator_login === login);
+
+  const toggleTesterRole = async () => {
+    const nextRole = userRole === "tester" ? "teacher" : "tester";
+    setRoleBusy(true); setErr(""); setMsg("");
+    try {
+      const r = await udsApi.setUserAccountRole(login, token, emp.login, nextRole);
+      setUserRole(r.role);
+      setRoleConfirm(false);
+      setMsg(nextRole === "tester"
+        ? "Роль изменена на «Тестер» — платежи теперь идут через тестовый ЮKassa"
+        : "Роль возвращена на «Учитель» — платежи снова идут через боевой ЮKassa");
+      onChanged?.();
+    } catch (e) { setErr((e as Error).message); }
+    finally { setRoleBusy(false); }
+  };
+
+  // Переключатель роли аккаунта: только Глава/Зам, и только для teacher/tester (не для student/admin)
+  const canToggleTesterRole = isHeadOrDeputy
+    && emp.login !== "admin" && emp.login !== login
+    && (userRole === "teacher" || userRole === "tester");
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
@@ -204,6 +233,40 @@ export default function EmployeeDetail({ data, login, token, perms, myRole, isAd
                     className="px-3 py-1.5 bg-primary text-primary-foreground text-xs font-semibold rounded hover:opacity-90 disabled:opacity-50">ОК</button>
                   <button onClick={() => { setShowPass(false); setNewPass(""); }}
                     className="px-2 py-1.5 border border-border text-xs rounded hover:bg-muted">Отмена</button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Тестовый режим оплаты (роль tester) — только Глава/Зам Главы */}
+          {canToggleTesterRole && (
+            <div className={`rounded-lg border p-3 space-y-2 ${userRole === "tester" ? "border-amber-300 bg-amber-50" : "border-border"}`}>
+              <p className="text-xs font-semibold flex items-center gap-1.5">
+                <Icon name="FlaskConical" size={13} fallback="AlertTriangle" /> Тестовый режим оплаты
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                {userRole === "tester"
+                  ? "Роль «Тестер»: все платежи (подписка, баланс, привязка карты) идут через закрытый тестовый магазин ЮKassa — реальные деньги не списываются."
+                  : "Переключит роль аккаунта на «Тестер»: все платежи начнут проходить через закрытый тестовый магазин ЮKassa вместо боевого."}
+              </p>
+              {!roleConfirm ? (
+                <button onClick={() => setRoleConfirm(true)}
+                  className={`text-xs px-3 py-1.5 border rounded hover:bg-muted ${
+                    userRole === "tester" ? "border-amber-400 text-amber-700" : "border-border"
+                  }`}>
+                  {userRole === "tester" ? "Вернуть роль «Учитель»" : "Сделать тестером"}
+                </button>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <button onClick={toggleTesterRole} disabled={roleBusy}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-xs font-semibold rounded hover:opacity-90 disabled:opacity-50">
+                    {roleBusy ? <Icon name="Loader2" size={13} className="animate-spin" /> : <Icon name="Check" size={13} />}
+                    {userRole === "tester" ? "Да, вернуть «Учитель»" : "Да, сделать тестером"}
+                  </button>
+                  <button onClick={() => setRoleConfirm(false)} disabled={roleBusy}
+                    className="px-3 py-1.5 border border-border text-xs rounded hover:bg-muted disabled:opacity-50">
+                    Отмена
+                  </button>
                 </div>
               )}
             </div>

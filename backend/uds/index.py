@@ -12,6 +12,7 @@
   POST ?action=send-sms-code    — отправить 4-значный код входа (email/SMS МФА)
   POST ?action=verify-sms-code  — проверить 4-значный код и получить токен сессии
   POST ?action=set-role        — изменить панельную роль {target_login, panel_role}
+  POST ?action=set-user-role   — переключить общую роль teacher/tester {target_login, role} (Глава/Зам)
   POST ?action=block           — заблокировать/разблокировать {target_login, blocked}
   GET  ?action=audit-log&target_login=  — логи действий (по сотруднику или все)
   GET  ?action=users           — пользователи (поиск ?q=, привязка)
@@ -1042,7 +1043,7 @@ def handler(event: dict, context) -> dict:
                 f"""SELECT po.login, po.panel_role, po.operator_number, po.assigned_by, po.assigned_at,
                            po.uds_registered, po.phone, po.email, po.iis_code,
                            u.full_name, u.is_active, u.last_seen_at, u.created_at,
-                           po.subrole, po.curator_login, cu.full_name
+                           po.subrole, po.curator_login, cu.full_name, u.role
                     FROM {SCHEMA}.panel_operators po
                     LEFT JOIN {SCHEMA}.users u ON u.login = po.login
                     LEFT JOIN {SCHEMA}.users cu ON cu.login = po.curator_login
@@ -1079,6 +1080,7 @@ def handler(event: dict, context) -> dict:
                     "subrole": r[13], "subrole_label": SUBROLE_LABELS.get(r[13]) if r[13] else None,
                     "curator_login": r[14], "curator_name": r[15],
                     "can_manage": can_manage,
+                    "user_role": r[16],
                 },
                 "logs": logs,
             })
@@ -1967,6 +1969,37 @@ def handler(event: dict, context) -> dict:
             log_action(cur, caller["login"], my_role, "reset_user_password", tl, None)
             conn.commit()
             return _resp(200, {"ok": True})
+
+        # ── set-user-role — переключить общую роль аккаунта (teacher ⇄ tester) ─
+        # Роль "tester" направляет ВСЕ платежи пользователя (подписка, баланс,
+        # привязка карты) в закрытый тестовый магазин ЮKassa — реальные деньги
+        # не списываются. Доступно только Главе и Зам. Главы Правления.
+        if action == "set-user-role" and method == "POST":
+            if my_role not in FULL_ACCESS_ROLES and not caller.get("is_admin"):
+                return _resp(403, {"error": "Переключать роль может только Глава или Зам. Главы Правления"})
+            tl = (body.get("target_login") or "").strip()
+            new_role = (body.get("role") or "").strip()
+            if not tl:
+                return _resp(400, {"error": "Укажите пользователя"})
+            if new_role not in ("teacher", "tester"):
+                return _resp(400, {"error": "Роль должна быть teacher или tester"})
+            if tl == "admin":
+                return _resp(400, {"error": "Нельзя изменить роль администратора"})
+            cur = conn.cursor()
+            cur.execute(f"SELECT role FROM {SCHEMA}.users WHERE login = %s", (tl,))
+            row = cur.fetchone()
+            if not row:
+                return _resp(404, {"error": "Пользователь не найден"})
+            # Роли, отличные от teacher/tester (student/admin), этим переключателем не трогаем
+            if row[0] not in ("teacher", "tester"):
+                return _resp(400, {"error": f"У пользователя роль «{row[0]}» — переключатель работает только для teacher/tester"})
+            cur.execute(
+                f"UPDATE {SCHEMA}.users SET role = %s WHERE login = %s RETURNING id",
+                (new_role, tl)
+            )
+            log_action(cur, caller["login"], my_role, "set_user_role", tl, {"role": new_role})
+            conn.commit()
+            return _resp(200, {"ok": True, "login": tl, "role": new_role})
 
         # ── lk-visibility — видимость разделов ЛК (разработчик+) ─────────────
         if action == "lk-visibility" and method == "GET":

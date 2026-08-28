@@ -53,6 +53,19 @@ RU_OPTS = ["А", "Б", "В", "Г", "Д", "Е"]
 
 
 # ── Загрузка ──────────────────────────────────────────────────────────────────
+def _orig_size(image_b64: str):
+    """Размер (w, h) ИСХОДНОГО изображения — до уменьшения в _load().
+    Нужен, чтобы пересчитать координаты Vision OCR (они от оригинала)."""
+    try:
+        arr = np.frombuffer(base64.b64decode(image_b64), dtype=np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if img is None:
+            return None, None
+        return img.shape[1], img.shape[0]
+    except Exception:
+        return None, None
+
+
 def _load(image_b64: str):
     img_bytes = base64.b64decode(image_b64)
     arr = np.frombuffer(img_bytes, dtype=np.uint8)
@@ -1522,11 +1535,27 @@ def _recognize_vision(image_b64: str, questions_count: int, options_count: int) 
     Код ученика читаем из QR-кода — он не текст и OCR его не распознаёт.
     """
     img, gray = _load(image_b64)
+    # Для замера закрашенности берём ЧИСТОЕ серое без CLAHE: усиление контраста
+    # вытягивает тени до уровня чернил и пустая клетка выглядит закрашенной.
+    gray_raw = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
     ocr_raw = yandex_vision.recognize_text(image_b64)
     words = yandex_vision.extract_words(ocr_raw)
 
-    res = vision_recognize.recognize_from_ocr(gray, words, questions_count, options_count)
+    # ВАЖНО: Vision OCR отдаёт координаты для ОРИГИНАЛЬНОГО изображения, а
+    # _load() уменьшает его до 1800px по длинной стороне. Без пересчёта
+    # координаты «уезжают» и анализ клеток читает пустое место.
+    orig_w, orig_h = _orig_size(image_b64)
+    if orig_w and orig_h:
+        sx = gray.shape[1] / float(orig_w)
+        sy = gray.shape[0] / float(orig_h)
+        if abs(sx - 1.0) > 0.01 or abs(sy - 1.0) > 0.01:
+            for wd in words:
+                wd["x0"] *= sx; wd["x1"] *= sx
+                wd["y0"] *= sy; wd["y1"] *= sy
+                wd["cx"] *= sx; wd["cy"] *= sy
+
+    res = vision_recognize.recognize_from_ocr(gray_raw, words, questions_count, options_count)
 
     # QR-код с кодом ученика — отдельная зона, читаем проверенным способом
     code, dbg_code = _read_qr_code(img, gray)
@@ -1543,7 +1572,9 @@ def _recognize_vision(image_b64: str, questions_count: int, options_count: int) 
         "dbg_rows_dist": ["vision_ocr",
                           f"words={len(words)}",
                           f"rows={res['rows_found']}",
-                          f"cols={res['cols_found']}"],
+                          f"cols={res['cols_found']}",
+                          f"scale={round(gray.shape[1] / float(orig_w or 1), 3)}",
+                          res.get("dbg", {})],
         "dbg_code": dbg_code,
     }
 

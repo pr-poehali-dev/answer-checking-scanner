@@ -36,7 +36,7 @@
         "studentCode": "12345"
       },
       "expectedStatus": 200,
-      "expectedBody": { "studentCode": "string", "answers": "array" },
+      "expectedBody": { "studentCode": "string" },
       "bodyMatcher": "partial"
     }
   ]

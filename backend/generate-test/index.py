@@ -14,6 +14,7 @@ import os
 import io
 import re
 import time
+import random
 import base64
 import urllib.request
 import urllib.error
@@ -198,9 +199,11 @@ def _generate_part1(work_type: str, subject: str, class_num: int, topic: str, de
         f"Описание: {description or '—'}\n"
         f"Тип работы: {work_type}\n\n"
         f"Составь РОВНО {count} тестовых вопросов с 4 вариантами ответа.\n"
-        "Верни JSON строго в формате:\n"
+        "Верни JSON строго в формате (пример с разными буквами ответа, чтобы показать формат):\n"
         '{"questions": [\n'
-        '  {"question": "Текст вопроса", "options": ["Вариант А", "Вариант Б", "Вариант В", "Вариант Г"], "answer": "А"},\n'
+        '  {"question": "Текст вопроса 1", "options": ["Вариант А", "Вариант Б", "Вариант В", "Вариант Г"], "answer": "В"},\n'
+        '  {"question": "Текст вопроса 2", "options": ["Вариант А", "Вариант Б", "Вариант В", "Вариант Г"], "answer": "А"},\n'
+        '  {"question": "Текст вопроса 3", "options": ["Вариант А", "Вариант Б", "Вариант В", "Вариант Г"], "answer": "Г"},\n'
         '  ...\n'
         ']}\n'
         f"Требования:\n"
@@ -208,6 +211,9 @@ def _generate_part1(work_type: str, subject: str, class_num: int, topic: str, de
         f"- В каждом вопросе РОВНО 4 элемента в options\n"
         f"- answer — одна буква (А, Б, В или Г), указывающая правильный вариант\n"
         f"- Только 1 правильный ответ в каждом вопросе\n"
+        f"- КРИТИЧЕСКИ ВАЖНО: правильный ответ должен быть РАВНОМЕРНО распределён между буквами А, Б, В, Г "
+        f"по всем вопросам — НЕ ставь один и тот же вариант ответа во всех вопросах подряд\n"
+        f"- Порядок вариантов внутри options должен быть случайным (не всегда правильный вариант первым)\n"
         f"- Вопросы разнообразные, проверяющие понимание темы"
     )
     max_tok = min(180 * count + 500, 3200)
@@ -248,11 +254,26 @@ def _generate_part1(work_type: str, subject: str, class_num: int, topic: str, de
         if not text or len(opts) < 2 or ans not in LETTERS:
             continue
         opts = [str(o).strip() for o in opts][:4]
+        # Индекс правильного варианта ДО обрезки/добивания списка — чтобы не потерять
+        # его и не откатываться на дефолтную "А", если исходных вариантов было мало.
+        ans_idx = LETTERS.index(ans)
+        if ans_idx >= len(opts):
+            # ИИ указал ответ за пределами реально пришедших вариантов — пропускаем вопрос,
+            # чтобы не подставлять случайный неверный ключ.
+            continue
         while len(opts) < 4:
             opts.append("—")
-        if LETTERS.index(ans) >= len(opts):
-            ans = "А"
-        result.append({"question": text, "options": opts, "answer": ans})
+
+        # Перемешиваем порядок вариантов по индексам (устойчиво к повторяющимся текстам
+        # вроде "—") и пересчитываем букву правильного ответа. Это защищает от типичной
+        # "болезни" LLM ставить правильный ответ всегда на одну и ту же позицию.
+        order = list(range(len(opts)))
+        random.shuffle(order)
+        shuffled_opts = [opts[i] for i in order]
+        new_ans_idx = order.index(ans_idx)
+        ans = LETTERS[new_ans_idx]
+
+        result.append({"question": text, "options": shuffled_opts, "answer": ans})
 
     return result, _tok
 

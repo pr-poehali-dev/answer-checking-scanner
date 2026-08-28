@@ -1,6 +1,7 @@
 import { useState } from "react";
 import Icon from "@/components/ui/icon";
 import { recognizeApi } from "@/lib/api";
+import { matchStudentByCode } from "./matchStudent";
 import { appStore, useAppStore, Work, GradeScale } from "@/store/appStore";
 
 interface BulkItem {
@@ -83,7 +84,8 @@ export function BulkUpload() {
         }
         const correct = resp.analysis.correct;
         const grade = calcGrade(correct, work.gradeScale);
-        const student = students.find(s => s.code === resp.studentCode);
+        // Код может быть прочитан не полностью — ищем ученика с подстраховкой
+        const { student } = matchStudentByCode(students, resp.studentCode);
 
         appStore.addResult({
           workId: work.id,

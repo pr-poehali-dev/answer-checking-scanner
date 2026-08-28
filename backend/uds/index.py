@@ -80,6 +80,10 @@ CAN_ALL_DATA = {"head", "deputy", "advisor"}
 CAN_MAILING = {"head", "deputy"}
 # Кто видит раздел "Продвижение" (материалы для рекламы, Глава и Зам Главы)
 CAN_PROMOTION = {"head", "deputy"}
+# Кому ЗАКРЫТ раздел "Пользователи": Оператор ТП и Тестер не работают с базой
+# клиентов напрямую — данные пользователя они видят только в обращении,
+# которое взяли в работу (вкладка "Тех. поддержка" → кнопка "Все данные").
+NO_USERS_SECTION = {"operator", "tester_role"}
 
 # Ящики-отправители рассылки — свои для каждого статуса важности
 MAILING_SENDERS = {
@@ -306,6 +310,8 @@ def perms_for(role: str, subrole: str = None) -> dict:
         "can_all_data": role in CAN_ALL_DATA,
         "can_mailing": role in CAN_MAILING,  # массовая рассылка — Глава и Зам
         "can_promotion": role in CAN_PROMOTION,  # раздел "Продвижение" — Глава и Зам
+        # Раздел "Пользователи" закрыт для Оператора ТП и Тестера
+        "can_users": role not in NO_USERS_SECTION,
         "is_curator": is_curator,         # является куратором (подроль или Глава/Зам)
         "can_assign_subrole": PANEL_ROLE_RANK.get(role, 0) >= 5,  # подроли назначают Глава/Зам
         "subrole": subrole,
@@ -1559,6 +1565,8 @@ def handler(event: dict, context) -> dict:
 
         # ── users — список/поиск пользователей ───────────────────────────────
         if action == "users" and method == "GET":
+            if not perms["can_users"]:
+                return _resp(403, {"error": "Раздел «Пользователи» недоступен. Данные клиента открываются в обращении, которое вы взяли в работу."})
             q = (qs.get("q") or "").strip().lower()
             cur = conn.cursor()
             base = f"""SELECT u.login, u.full_name, u.email, u.phone, u.role, u.is_active,
@@ -1602,7 +1610,8 @@ def handler(event: dict, context) -> dict:
                            u.subscription_started_at, u.trial_until,
                            u.ai_balance_kopecks, u.last_seen_at, u.created_at, u.created_by,
                            u.institution_id, u.institution_position, u.subject,
-                           po.panel_role, sc.bind_code, sc.full_name, sc.teacher_login
+                           po.panel_role, sc.bind_code, sc.full_name, sc.teacher_login,
+                           u.personal_account
                     FROM {SCHEMA}.users u
                     LEFT JOIN {SCHEMA}.panel_operators po ON po.login = u.login AND po.panel_role != 'removed'
                     LEFT JOIN {SCHEMA}.student_codes sc ON sc.bound_login = u.login
@@ -1625,6 +1634,8 @@ def handler(event: dict, context) -> dict:
                 "panel_role": r[22],
                 "bound": r[23] is not None, "bind_code": r[23],
                 "bound_name": r[24], "teacher_login": r[25],
+                # Лицевой счёт — постоянный номер клиента, показываем всем ролям
+                "personal_account": r[26],
             }
             # История платежей (подписки/токены)
             cur.execute(

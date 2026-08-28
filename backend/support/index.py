@@ -238,12 +238,38 @@ def next_operator_number(conn) -> int:
 
 
 def serialize_ticket(row) -> dict:
-    (tid, login, section, subject, status, op_login, op_num, created_at, updated_at) = row
-    return {
+    # Хвостовые поля необязательны — старые запросы отдают 9 колонок,
+    # новые дополнительно ФИО автора и оператора.
+    (tid, login, section, subject, status, op_login, op_num, created_at, updated_at) = row[:9]
+    extra = row[9:]
+    d = {
         "id": tid, "login": login, "section": section, "subject": subject,
         "status": status, "operator_login": op_login, "operator_number": op_num,
         "created_at": str(created_at), "updated_at": str(updated_at),
     }
+    if len(extra) >= 1:
+        d["user_name"] = extra[0]
+    if len(extra) >= 2:
+        d["operator_name"] = extra[1]
+    return d
+
+
+def log_ticket_action(cur, ticket_id, actor_login, actor_role, action,
+                      details=None, target_login=None):
+    """Записывает действие сотрудника по обращению.
+
+    Нужно для кнопки «ЛОГИ»: руководство видит, что оператор смотрел и что
+    выдавал клиенту. Ошибка записи журнала не должна ломать само действие.
+    """
+    try:
+        cur.execute(
+            f"""INSERT INTO {SCHEMA}.support_ticket_logs
+                (ticket_id, actor_login, actor_role, action, details, target_login)
+                VALUES (%s, %s, %s, %s, %s, %s)""",
+            (ticket_id, actor_login, actor_role, action, details, target_login)
+        )
+    except Exception:
+        pass
 
 
 def serialize_message(row) -> dict:
@@ -427,19 +453,18 @@ def handler(event: dict, context) -> dict:
         if action == "all-tickets" and method == "GET":
             status_filter = qs.get("status") or "open"
             cur = conn.cursor()
+            base = f"""SELECT t.id, t.login, t.section, t.subject, t.status,
+                              t.operator_login, t.operator_number,
+                              t.created_at, t.updated_at,
+                              u.full_name, ou.full_name
+                       FROM {SCHEMA}.support_tickets t
+                       LEFT JOIN {SCHEMA}.users u  ON u.login  = t.login
+                       LEFT JOIN {SCHEMA}.users ou ON ou.login = t.operator_login"""
             if status_filter == "all":
-                cur.execute(
-                    f"""SELECT id, login, section, subject, status, operator_login, operator_number,
-                               created_at, updated_at FROM {SCHEMA}.support_tickets
-                        ORDER BY status ASC, updated_at DESC LIMIT 200"""
-                )
+                cur.execute(base + " ORDER BY t.status ASC, t.updated_at DESC LIMIT 200")
             else:
-                cur.execute(
-                    f"""SELECT id, login, section, subject, status, operator_login, operator_number,
-                               created_at, updated_at FROM {SCHEMA}.support_tickets
-                        WHERE status = %s ORDER BY updated_at DESC LIMIT 200""",
-                    (status_filter,)
-                )
+                cur.execute(base + " WHERE t.status = %s ORDER BY t.updated_at DESC LIMIT 200",
+                            (status_filter,))
             tickets = [serialize_ticket(r) for r in cur.fetchall()]
             return _resp(200, {"tickets": tickets})
 
@@ -449,20 +474,34 @@ def handler(event: dict, context) -> dict:
             if not ticket_id:
                 return _resp(400, {"error": "Укажите ticket_id"})
             cur = conn.cursor()
-            cur.execute(f"SELECT status FROM {SCHEMA}.support_tickets WHERE id = %s", (ticket_id,))
-            row = cur.fetchone()
-            if not row:
-                return _resp(404, {"error": "Тикет не найден"})
-            if row[0] != "open":
-                return _resp(400, {"error": "Тикет уже взят или закрыт"})
-
             op_num = caller.get("operator_number") or 0
+            # Атомарный захват: обращение достаётся тому, чей UPDATE прошёл
+            # первым. Второй оператор получит 0 изменённых строк и откажется —
+            # без этого два оператора могли взять один тикет одновременно.
             cur.execute(
                 f"""UPDATE {SCHEMA}.support_tickets
-                    SET status = 'taken', operator_login = %s, operator_number = %s, updated_at = NOW()
-                    WHERE id = %s""",
+                    SET status = 'taken', operator_login = %s, operator_number = %s,
+                        taken_at = NOW(), updated_at = NOW()
+                    WHERE id = %s AND status = 'open'""",
                 (caller["login"], op_num, ticket_id)
             )
+            if cur.rowcount == 0:
+                cur.execute(
+                    f"""SELECT t.status, t.operator_login, t.operator_number, u.full_name
+                        FROM {SCHEMA}.support_tickets t
+                        LEFT JOIN {SCHEMA}.users u ON u.login = t.operator_login
+                        WHERE t.id = %s""", (ticket_id,)
+                )
+                row = cur.fetchone()
+                conn.rollback()
+                if not row:
+                    return _resp(404, {"error": "Обращение не найдено"})
+                st, op_login, op_no, op_name = row
+                if st == "closed":
+                    return _resp(409, {"error": "Обращение уже закрыто"})
+                who = op_name or op_login or "другой сотрудник"
+                return _resp(409, {"error": f"Обращение уже в работе: {who} (оператор №{op_no or '—'})"})
+
             # Системное сообщение пользователю
             op_label = PANEL_ROLE_LABELS.get(caller.get("panel_role") or "operator", "Оператор")
             sys_msg = f"Ваше обращение принято. Оператор №{op_num} ({op_label}) подключился к чату."
@@ -471,6 +510,8 @@ def handler(event: dict, context) -> dict:
                     VALUES (%s, %s, 'system', %s)""",
                 (ticket_id, caller["login"], sys_msg)
             )
+            log_ticket_action(cur, ticket_id, caller["login"], caller.get("panel_role"),
+                              "take", f"Взял обращение в работу (оператор №{op_num})")
             conn.commit()
             return _resp(200, {"ok": True, "operator_number": op_num})
 
@@ -489,6 +530,8 @@ def handler(event: dict, context) -> dict:
                     VALUES (%s, %s, 'system', 'Обращение закрыто оператором.')""",
                 (ticket_id, caller["login"])
             )
+            log_ticket_action(cur, ticket_id, caller["login"], caller.get("panel_role"),
+                              "close", "Закрыл обращение")
             conn.commit()
             return _resp(200, {"ok": True})
 
@@ -513,8 +556,197 @@ def handler(event: dict, context) -> dict:
             cur.execute(
                 f"UPDATE {SCHEMA}.support_tickets SET updated_at = NOW() WHERE id = %s", (ticket_id,)
             )
+            log_ticket_action(cur, ticket_id, caller["login"], caller.get("panel_role"),
+                              "message", f"Ответ клиенту: {msg_body[:300]}")
             conn.commit()
             return _resp(200, {"ok": True})
+
+        # ── GET staff — сотрудники, которым можно передать обращение ─────────
+        if action == "staff" and method == "GET":
+            cur = conn.cursor()
+            cur.execute(
+                f"""SELECT po.login, po.panel_role, po.operator_number, u.full_name
+                    FROM {SCHEMA}.panel_operators po
+                    LEFT JOIN {SCHEMA}.users u ON u.login = po.login
+                    WHERE po.panel_role != 'removed' AND po.login != %s
+                    ORDER BY po.operator_number""",
+                (caller["login"],)
+            )
+            staff = [{
+                "login": r[0], "panel_role": r[1],
+                "panel_role_label": PANEL_ROLE_LABELS.get(r[1], r[1]),
+                "operator_number": r[2], "full_name": r[3],
+            } for r in cur.fetchall()]
+            return _resp(200, {"staff": staff})
+
+        # ── POST transfer-ticket — передать обращение другому сотруднику ─────
+        if action == "transfer-ticket" and method == "POST":
+            ticket_id = body.get("ticket_id")
+            to_login = (body.get("to_login") or "").strip()
+            if not ticket_id or not to_login:
+                return _resp(400, {"error": "Укажите обращение и сотрудника"})
+
+            cur = conn.cursor()
+            cur.execute(
+                f"SELECT status, operator_login FROM {SCHEMA}.support_tickets WHERE id = %s",
+                (ticket_id,)
+            )
+            row = cur.fetchone()
+            if not row:
+                return _resp(404, {"error": "Обращение не найдено"})
+            status_now, cur_op = row
+            if status_now == "closed":
+                return _resp(400, {"error": "Обращение закрыто"})
+            # Передать может тот, кто ведёт обращение, либо руководство
+            if cur_op and cur_op != caller["login"] and caller_rank < PANEL_ROLE_RANK.get("advisor", 2):
+                return _resp(403, {"error": "Передать может только сотрудник, ведущий обращение"})
+
+            cur.execute(
+                f"""SELECT po.panel_role, po.operator_number, u.full_name
+                    FROM {SCHEMA}.panel_operators po
+                    LEFT JOIN {SCHEMA}.users u ON u.login = po.login
+                    WHERE po.login = %s AND po.panel_role != 'removed'""",
+                (to_login,)
+            )
+            target = cur.fetchone()
+            if not target:
+                return _resp(404, {"error": "Сотрудник не найден"})
+            t_role, t_num, t_name = target
+
+            cur.execute(
+                f"""UPDATE {SCHEMA}.support_tickets
+                    SET operator_login = %s, operator_number = %s, status = 'taken',
+                        transferred_from = %s, taken_at = NOW(), updated_at = NOW()
+                    WHERE id = %s""",
+                (to_login, t_num or 0, caller["login"], ticket_id)
+            )
+            who = t_name or to_login
+            role_lbl = PANEL_ROLE_LABELS.get(t_role, t_role)
+            cur.execute(
+                f"""INSERT INTO {SCHEMA}.support_messages (ticket_id, sender_login, sender_role, body)
+                    VALUES (%s, %s, 'system', %s)""",
+                (ticket_id, caller["login"],
+                 f"Обращение передано другому сотруднику: {role_lbl} №{t_num or '—'}.")
+            )
+            log_ticket_action(cur, ticket_id, caller["login"], caller.get("panel_role"),
+                              "transfer", f"Передал обращение сотруднику {who} ({role_lbl})")
+            conn.commit()
+            return _resp(200, {"ok": True, "operator_login": to_login, "operator_number": t_num})
+
+        # ── GET ticket-user — данные клиента по обращению ────────────────────
+        # Оператор ТП не имеет доступа к разделу «Пользователи», но по взятому
+        # обращению обязан видеть данные клиента, чтобы ему помочь.
+        if action == "ticket-user" and method == "GET":
+            try:
+                ticket_id = int(qs.get("ticket_id") or 0)
+            except (TypeError, ValueError):
+                ticket_id = 0
+            if not ticket_id:
+                return _resp(400, {"error": "Укажите ticket_id"})
+
+            cur = conn.cursor()
+            cur.execute(
+                f"SELECT login, operator_login, status FROM {SCHEMA}.support_tickets WHERE id = %s",
+                (ticket_id,)
+            )
+            row = cur.fetchone()
+            if not row:
+                return _resp(404, {"error": "Обращение не найдено"})
+            target_login, op_login, st = row
+            # Данные клиента доступны ведущему обращение либо руководству
+            if op_login != caller["login"] and caller_rank < PANEL_ROLE_RANK.get("advisor", 2):
+                return _resp(403, {"error": "Сначала возьмите обращение в работу"})
+
+            cur.execute(
+                f"""SELECT u.login, u.full_name, u.email, u.phone, u.role, u.is_active,
+                           u.school, u.study_group, u.subject,
+                           u.subscription_status, u.subscription_until, u.subscription_plan,
+                           u.trial_until, u.ai_balance_kopecks,
+                           u.created_at, u.last_seen_at, po.panel_role,
+                           u.personal_account
+                    FROM {SCHEMA}.users u
+                    LEFT JOIN {SCHEMA}.panel_operators po
+                           ON po.login = u.login AND po.panel_role != 'removed'
+                    WHERE u.login = %s""",
+                (target_login,)
+            )
+            u = cur.fetchone()
+            if not u:
+                return _resp(404, {"error": "Пользователь не найден"})
+            user = {
+                "login": u[0], "full_name": u[1], "email": u[2], "phone": u[3],
+                "role": u[4], "is_active": bool(u[5]), "school": u[6],
+                "study_group": u[7], "subject": u[8],
+                "subscription_status": u[9],
+                "subscription_until": str(u[10]) if u[10] else None,
+                "subscription_plan": u[11],
+                "trial_until": str(u[12]) if u[12] else None,
+                "ai_balance_rub": round((u[13] or 0) / 100, 2),
+                "created_at": str(u[14]) if u[14] else None,
+                "last_seen_at": str(u[15]) if u[15] else None,
+                "panel_role": u[16],
+                # Лицевой счёт — постоянный номер клиента для платежей и обращений
+                "personal_account": u[17],
+            }
+
+            cur.execute(
+                f"""SELECT plan, amount, months, provider, status, source, granted_by,
+                           created_at, paid_at
+                    FROM {SCHEMA}.payments WHERE user_login = %s
+                    ORDER BY created_at DESC LIMIT 100""", (target_login,)
+            )
+            payments = [{
+                "plan": p[0], "amount_rub": float(p[1] or 0), "months": p[2],
+                "provider": p[3], "status": p[4], "source": p[5], "granted_by": p[6],
+                "created_at": str(p[7]) if p[7] else None,
+                "paid_at": str(p[8]) if p[8] else None,
+            } for p in cur.fetchall()]
+
+            cur.execute(
+                f"""SELECT action, tokens, amount_kopecks, balance_kopecks_after, created_at
+                    FROM {SCHEMA}.ai_token_logs WHERE login = %s
+                    ORDER BY created_at DESC LIMIT 100""", (target_login,)
+            )
+            charges = [{
+                "action": c[0], "tokens": c[1],
+                "amount_rub": round((c[2] or 0) / 100, 2),
+                "balance_rub_after": round((c[3] or 0) / 100, 2),
+                "created_at": str(c[4]) if c[4] else None,
+            } for c in cur.fetchall()]
+
+            log_ticket_action(cur, ticket_id, caller["login"], caller.get("panel_role"),
+                              "view-user", "Открыл данные клиента", target_login)
+            conn.commit()
+            return _resp(200, {"user": user, "payments": payments, "charges": charges})
+
+        # ── GET ticket-logs — журнал действий по обращению ───────────────────
+        # Доступно Советнику, Заму и Главе: смотрят, что делал оператор.
+        if action == "ticket-logs" and method == "GET":
+            if caller_rank < PANEL_ROLE_RANK.get("advisor", 2):
+                return _resp(403, {"error": "Просмотр логов доступен Советнику, Зам. Главы и Главе"})
+            try:
+                ticket_id = int(qs.get("ticket_id") or 0)
+            except (TypeError, ValueError):
+                ticket_id = 0
+            if not ticket_id:
+                return _resp(400, {"error": "Укажите ticket_id"})
+            cur = conn.cursor()
+            cur.execute(
+                f"""SELECT l.id, l.actor_login, l.actor_role, l.action, l.details,
+                           l.target_login, l.created_at, u.full_name
+                    FROM {SCHEMA}.support_ticket_logs l
+                    LEFT JOIN {SCHEMA}.users u ON u.login = l.actor_login
+                    WHERE l.ticket_id = %s ORDER BY l.created_at ASC LIMIT 500""",
+                (ticket_id,)
+            )
+            logs = [{
+                "id": r[0], "actor_login": r[1], "actor_role": r[2],
+                "actor_role_label": PANEL_ROLE_LABELS.get(r[2], r[2] or ""),
+                "action": r[3], "details": r[4], "target_login": r[5],
+                "created_at": str(r[6]) if r[6] else None,
+                "actor_name": r[7],
+            } for r in cur.fetchall()]
+            return _resp(200, {"logs": logs})
 
         # Admin и Глава Правления не зависят от иерархии — полные права
         is_head_caller = is_admin_caller or caller_rank >= PANEL_ROLE_RANK.get("head", 6)

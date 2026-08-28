@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import Icon from "@/components/ui/icon";
-import { WORK_TYPES, SUBJECTS } from "./types";
+import { SUBJECTS } from "./types";
 import { blankApi } from "@/lib/api";
 import { useAppStore } from "@/store/appStore";
 
@@ -9,7 +9,6 @@ export interface BlankConfig {
   workTitle: string;
   questionsCount: number;
   optionsCount: number;   // 2–6
-  perPage: 1 | 2 | 4;
   subject: string;
   classLabel: string;
   date: string;
@@ -22,49 +21,26 @@ function BlankPreview({ config }: { config: BlankConfig }) {
   const { questionsCount, optionsCount } = config;
   const opts = OPTION_LABELS.slice(0, optionsCount);
 
-  const nCols  = questionsCount <= 15 ? 1 : questionsCount <= 40 ? 2 : 3;
-  const nRows  = Math.ceil(questionsCount / nCols);
+  // Раскладка колонок — как в генераторе PDF
+  const nCols = questionsCount <= 8 ? 1 : questionsCount <= 24 ? 2 : 3;
+  const nRows = Math.ceil(questionsCount / nCols);
 
-  // Размеры — в SVG-пикселях (масштаб ≈ 2.5px/мм)
-  const PAD    = 10;
-  const HDR_H  = 28;   // шапка
-  const META_H = 30;   // поля ученика
-  const HDR_G  = 14;   // заголовок А Б В Г
-  const NUM_W  = 20;
-  const CELL_W = Math.min(22, Math.floor(180 / optionsCount));
-  const COL_W  = NUM_W + CELL_W * optionsCount + 4;
-  const R      = Math.min(CELL_W * 0.38, 7);
-  const ROW_H  = R * 2 + 5;
+  // Размеры в SVG-пикселях (≈2.6 px на мм печатного бланка)
+  const PAD = 9;
+  const CELL = 18;        // клетка под рукописный символ
+  const NUM_W = 16;
+  const PAIR_W = NUM_W + CELL + 4;
+  const ROW_H = CELL + 6;
+  const CODE_CELLS = 5;
+  const CODE_STEP = CELL + 3;
+  const HEAD_H = 82;      // шапка: заголовок, ФИО, код, подсказка
 
-  // Идентификация ученика: QR-код с реперами
-  const QR_SIZE = 40;       // сторона QR в превью
-  const QR_PAD  = 4;        // отступ репера от QR
-  const QR_ACS  = 5;        // размер репера зоны QR
-  const CODE_H  = QR_SIZE + 2 * (QR_PAD + QR_ACS) + 6;
+  const gridW = nCols * PAIR_W;
+  const codeW = CODE_CELLS * CODE_STEP;
+  const svgW = Math.max(gridW, codeW) + 2 * PAD;
+  const svgH = HEAD_H + nRows * ROW_H + PAD;
 
-  const FOOT_H = 16;
-  const CODE_GAP = 14;   // зазор между ответами и зоной QR
-  const svgW   = PAD * 2 + COL_W * nCols;
-  const svgH   = HDR_H + META_H + HDR_G + nRows * ROW_H + CODE_GAP + CODE_H + FOOT_H + 6;
-
-  const gridTop = HDR_H + META_H + HDR_G;
-  const gridBottom = gridTop + nRows * ROW_H;
-  const codeTop = gridBottom + CODE_GAP;
-
-  // Зона QR
-  const qrCx = PAD + QR_ACS + QR_PAD + QR_SIZE / 2;
-  const qrCy = codeTop + QR_ACS + QR_PAD + QR_SIZE / 2;
-
-  // Реперы (чёрные квадраты) — как на печатном бланке
-  const AS = 6;          // размер репера ответов
-  const axL = PAD * 0.5;
-  const axR = svgW - PAD * 0.5;
-  const ayT = gridTop + 1;
-  const ayB = gridBottom - 1;
-
-  const Anchor = ({ x, y, s }: { x: number; y: number; s: number }) => (
-    <rect x={x - s / 2} y={y - s / 2} width={s} height={s} fill="#111" />
-  );
+  const codeY = 52;
 
   return (
     <svg viewBox={`0 0 ${svgW} ${svgH}`}
@@ -73,78 +49,47 @@ function BlankPreview({ config }: { config: BlankConfig }) {
     >
       <rect x={0} y={0} width={svgW} height={svgH} fill="white" />
 
-      {/* Шапка — только текст, без тёмной плашки */}
-      <text x={svgW/2} y={HDR_H*0.6} textAnchor="middle" fill="#1e3a5f" fontSize={9} fontWeight="bold">БЛАНК ОТВЕТОВ</text>
-      <text x={svgW - PAD} y={HDR_H*0.6} textAnchor="end" fill="#8898aa" fontSize={6.5}>№ {config.workId}</text>
-      <line x1={PAD} y1={HDR_H-2} x2={svgW-PAD} y2={HDR_H-2} stroke="#c8d6e5" strokeWidth={0.5}/>
+      {/* Заголовок */}
+      <text x={PAD} y={13} fill="#1e3a5f" fontSize={9} fontWeight="bold">БЛАНК ОТВЕТОВ</text>
+      <text x={svgW - PAD} y={13} textAnchor="end" fill="#8898aa" fontSize={6}>№{config.workId}</text>
+      <line x1={PAD} y1={17} x2={svgW - PAD} y2={17} stroke="#9fb3c8" strokeWidth={0.6} />
 
-      {/* Поля ученика — только линии */}
-      <text x={PAD} y={HDR_H + 13} fill="#1a1a2e" fontSize={7} fontWeight="bold">ФИО:</text>
-      <line x1={PAD+22} y1={HDR_H+13} x2={svgW*0.61} y2={HDR_H+13} stroke="#c8d6e5" strokeWidth={0.6}/>
-      <text x={svgW*0.63} y={HDR_H+13} fill="#1a1a2e" fontSize={7} fontWeight="bold">Класс:</text>
-      <line x1={svgW*0.63+28} y1={HDR_H+13} x2={svgW-PAD} y2={HDR_H+13} stroke="#c8d6e5" strokeWidth={0.6}/>
-      <text x={PAD} y={HDR_H+26} fill="#1a1a2e" fontSize={7} fontWeight="bold">Предмет:</text>
-      <line x1={PAD+40} y1={HDR_H+26} x2={svgW*0.52} y2={HDR_H+26} stroke="#c8d6e5" strokeWidth={0.6}/>
-      <text x={svgW*0.54} y={HDR_H+26} fill="#1a1a2e" fontSize={7} fontWeight="bold">Дата:</text>
-      <line x1={svgW*0.54+24} y1={HDR_H+26} x2={svgW-PAD} y2={HDR_H+26} stroke="#c8d6e5" strokeWidth={0.6}/>
-      <line x1={PAD} y1={HDR_H+META_H} x2={svgW-PAD} y2={HDR_H+META_H} stroke="#c8d6e5" strokeWidth={0.5}/>
+      {/* ФИО */}
+      <text x={PAD} y={29} fill="#1a1a2e" fontSize={7} fontWeight="bold">ФИО:</text>
+      <line x1={PAD + 24} y1={30} x2={svgW - PAD} y2={30} stroke="#9fb3c8" strokeWidth={0.6} />
 
-      {/* Заголовки А Б В Г */}
-      {Array.from({length: nCols}).map((_, ci) =>
-        opts.map((lbl, oi) => (
-          <text key={`h${ci}${oi}`}
-            x={PAD + ci*COL_W + NUM_W + oi*CELL_W + CELL_W/2}
-            y={HDR_H + META_H + HDR_G - 3}
-            textAnchor="middle" fill="#1e3a5f" fontSize={7} fontWeight="bold"
-          >{lbl}</text>
-        ))
+      {/* Подпись предмета/класса */}
+      {(config.subject || config.classLabel) && (
+        <text x={PAD} y={41} fill="#8898aa" fontSize={6}>
+          {[config.subject, config.classLabel].filter(Boolean).join(" · ")}
+        </text>
       )}
 
-      {/* Вопросы — кружки, без зебры и вертикальных линий */}
-      {Array.from({length: questionsCount}).map((_, qi) => {
+      {/* Код ученика — 5 клеток */}
+      <text x={PAD} y={codeY - 3} fill="#1e3a5f" fontSize={5.6} fontWeight="bold">КОД УЧЕНИКА</text>
+      {Array.from({ length: CODE_CELLS }).map((_, i) => (
+        <rect key={`c${i}`} x={PAD + i * CODE_STEP} y={codeY} width={CELL} height={CELL}
+          fill="white" stroke="#9fb3c8" strokeWidth={0.9} />
+      ))}
+      <text x={PAD} y={codeY + CELL + 9} fill="#8898aa" fontSize={5.4}>
+        Впишите букву: {opts.join(" ")} · лишние вопросы — Z
+      </text>
+
+      {/* Пары «номер вопроса → клетка для буквы» */}
+      {Array.from({ length: questionsCount }).map((_, qi) => {
         const ci = Math.floor(qi / nRows);
         const ri = qi % nRows;
-        const rx = PAD + ci * COL_W;
-        const ry = gridTop + ri * ROW_H;
-        const my = ry + ROW_H / 2;
+        const px = PAD + ci * PAIR_W;
+        const py = HEAD_H + ri * ROW_H;
         return (
           <g key={qi}>
-            <text x={rx+NUM_W-2} y={my+2.5} textAnchor="end" fill="#1a1a2e" fontSize={7} fontWeight="bold">{qi+1}.</text>
-            {opts.map((lbl, oi) => {
-              const cx = rx + NUM_W + oi*CELL_W + CELL_W/2;
-              return (
-                <g key={oi}>
-                  <circle cx={cx} cy={my} r={R} fill="white" stroke="#1e3a5f" strokeWidth={0.6}/>
-                  <text x={cx} y={my+R*0.4} textAnchor="middle" fill="#8898aa" fontSize={R*1.3} fontWeight="bold">{lbl}</text>
-                </g>
-              );
-            })}
+            <text x={px + NUM_W - 3} y={py + CELL * 0.68} textAnchor="end"
+              fill="#1a1a2e" fontSize={7} fontWeight="bold">{qi + 1}.</text>
+            <rect x={px + NUM_W} y={py} width={CELL} height={CELL}
+              fill="white" stroke="#9fb3c8" strokeWidth={0.8} />
           </g>
         );
       })}
-
-      {/* Реперы зоны ответов */}
-      <Anchor x={axL} y={ayT} s={AS}/>
-      <Anchor x={axR} y={ayT} s={AS}/>
-      <Anchor x={axL} y={ayB} s={AS}/>
-      <Anchor x={axR} y={ayB} s={AS}/>
-
-      {/* Зона идентификации: QR-код ученика (заглушка превью) */}
-      <rect x={qrCx - QR_SIZE/2} y={qrCy - QR_SIZE/2} width={QR_SIZE} height={QR_SIZE} fill="white" stroke="#1e3a5f" strokeWidth={0.6}/>
-      <text x={qrCx} y={qrCy + 2} textAnchor="middle" fill="#8898aa" fontSize={6}>QR ученика</text>
-      <text x={qrCx + QR_SIZE/2 + QR_ACS + 8} y={qrCy - 2} fill="#1a1a2e" fontSize={6.5} fontWeight="bold">ИДЕНТИФИКАЦИЯ УЧЕНИКА</text>
-      <text x={qrCx + QR_SIZE/2 + QR_ACS + 8} y={qrCy + 8} fill="#8898aa" fontSize={5}>QR определяет ученика автоматически</text>
-
-      {/* 4 репера вокруг QR */}
-      <Anchor x={qrCx - QR_SIZE/2 - QR_PAD - QR_ACS/2} y={qrCy - QR_SIZE/2 - QR_PAD - QR_ACS/2} s={QR_ACS}/>
-      <Anchor x={qrCx + QR_SIZE/2 + QR_PAD + QR_ACS/2} y={qrCy - QR_SIZE/2 - QR_PAD - QR_ACS/2} s={QR_ACS}/>
-      <Anchor x={qrCx - QR_SIZE/2 - QR_PAD - QR_ACS/2} y={qrCy + QR_SIZE/2 + QR_PAD + QR_ACS/2} s={QR_ACS}/>
-      <Anchor x={qrCx + QR_SIZE/2 + QR_PAD + QR_ACS/2} y={qrCy + QR_SIZE/2 + QR_PAD + QR_ACS/2} s={QR_ACS}/>
-
-      {/* Нижняя строка */}
-      <text x={PAD} y={svgH-4} fill="#8898aa" fontSize={5.5}>
-        Вопросов: {questionsCount}  |  Варианты: {opts.join(", ")}  |  Заполнять чёрной ручкой
-      </text>
     </svg>
   );
 }
@@ -162,7 +107,6 @@ export function BlankGenerator({ workId, workTitle, questionsCount: initQ, optio
     workTitle:      workTitle  || "Контрольная работа",
     questionsCount: initQ      || 20,
     optionsCount:   initOpts   || 4,
-    perPage:        2,
     subject:        "",
     classLabel:     "",
     date:           "",
@@ -208,6 +152,24 @@ export function BlankGenerator({ workId, workTitle, questionsCount: initQ, optio
   const upd = (k: keyof BlankConfig, v: unknown) =>
     setConfig(c => ({ ...c, [k]: v }));
 
+  // Сколько бланков влезает на лист A4 — повторяет расчёт генератора PDF
+  const perSheet = useMemo(() => {
+    const nQ = config.questionsCount;
+    const nCols = nQ <= 8 ? 1 : nQ <= 24 ? 2 : 3;
+    const nRows = Math.ceil(nQ / nCols);
+    const MM = 1;
+    const CELL = 7.0, GAP_C = 1.6, NUM_W = 6.2, PAD_B = 3.5;
+    const PAIR_W = NUM_W + CELL + GAP_C;
+    const ROW_H = CELL + 2.4;
+    const HEAD_H = 31.5;
+    const bw = Math.max(nCols * PAIR_W, 5 * (CELL + 1.2)) + 2 * PAD_B;
+    const bh = HEAD_H + nRows * ROW_H + PAD_B;
+    const pw = 210 * MM, ph = 297 * MM, margin = 8, gap = 4;
+    const cols = Math.max(1, Math.floor((pw - 2 * margin + gap) / (bw + gap)));
+    const rows = Math.max(1, Math.floor((ph - 2 * margin + gap) / (bh + gap)));
+    return cols * rows;
+  }, [config.questionsCount]);
+
   const handleDownload = async () => {
     setLoading(true);
     setError(null);
@@ -223,7 +185,6 @@ export function BlankGenerator({ workId, workTitle, questionsCount: initQ, optio
         workTitle:      config.workTitle,
         questionsCount: config.questionsCount,
         optionsCount:   config.optionsCount,
-        perPage:        config.perPage,
         subject:        config.subject,
         classLabel:     config.classLabel,
         date:           config.date,
@@ -344,24 +305,17 @@ export function BlankGenerator({ workId, workTitle, questionsCount: initQ, optio
             </div>
           </section>
 
-          {/* Печать */}
+          {/* Печать — раскладка считается автоматически */}
           <section>
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Печать</p>
-            <div className="grid grid-cols-3 gap-1.5">
-              {([1, 2, 4] as const).map(n => (
-                <button
-                  key={n}
-                  onClick={() => upd("perPage", n)}
-                  className={`py-2.5 rounded-lg border text-xs font-medium transition-colors flex flex-col items-center gap-1 ${
-                    config.perPage === n
-                      ? "bg-blue-600 text-white border-blue-600"
-                      : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"
-                  }`}
-                >
-                  <Icon name={n === 1 ? "Square" : n === 2 ? "RectangleVertical" : "Grid2x2"} size={16} />
-                  {n === 1 ? "1 на A4" : n === 2 ? "2 на A4" : "4 на A4"}
-                </button>
-              ))}
+            <div className="flex items-start gap-2 p-3 rounded-lg bg-blue-50 border border-blue-100">
+              <Icon name="Info" size={14} className="text-blue-500 flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-blue-900">
+                Бланки компактные — на лист A4 помещается{" "}
+                <span className="font-semibold">{perSheet}</span>{" "}
+                {perSheet === 1 ? "бланк" : perSheet < 5 ? "бланка" : "бланков"}.
+                Между ними печатаются линии отреза.
+              </p>
             </div>
           </section>
 

@@ -53,6 +53,16 @@ RU_OPTS = ["А", "Б", "В", "Г", "Д", "Е"]
 
 
 # ── Загрузка ──────────────────────────────────────────────────────────────────
+def _is_valid_image(image_b64: str) -> bool:
+    """Проверяет, что переданное действительно является изображением.
+    Битый файл отсекаем ДО обращения к платному ИИ-сервису."""
+    try:
+        arr = np.frombuffer(base64.b64decode(image_b64, validate=True), dtype=np.uint8)
+        return cv2.imdecode(arr, cv2.IMREAD_COLOR) is not None
+    except Exception:
+        return False
+
+
 def _orig_size(image_b64: str):
     """Размер (w, h) ИСХОДНОГО изображения — до уменьшения в _load().
     Нужен, чтобы пересчитать координаты Vision OCR (они от оригинала)."""
@@ -1526,56 +1536,70 @@ def _analyze(answers: list, answer_key: str) -> dict:
 
 
 # ── Распознавание через Yandex Vision OCR ─────────────────────────────────────
-def _recognize_vision(image_b64: str, questions_count: int, options_count: int) -> dict:
-    """Распознаёт бланк через Yandex Vision OCR.
+def _recognize_vision(image_b64: str, questions_count: int, options_count: int,
+                      ocr_model: str = "handwritten") -> dict:
+    """Распознаёт бланк через Yandex Vision OCR (рукописный формат).
 
-    Vision OCR даёт координаты напечатанного текста (номера вопросов и буквы
-    вариантов) — по ним строится сетка клеток, а закрашенная клетка
-    определяется по заполненности пикселей (сам OCR «крестики» не читает).
-    Код ученика читаем из QR-кода — он не текст и OCR его не распознаёт.
+    Ученик вписывает буквы ответов от руки, поэтому используется модель
+    handwritten — она читает и рукописный, и печатный текст. Ответы и код
+    ученика собираются целиком из распознанного текста: реперов, QR-кода и
+    анализа закрашенности на новом бланке нет.
     """
-    img, gray = _load(image_b64)
-    # Для замера закрашенности берём ЧИСТОЕ серое без CLAHE: усиление контраста
-    # вытягивает тени до уровня чернил и пустая клетка выглядит закрашенной.
-    gray_raw = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    # Сначала убеждаемся, что это вообще картинка: битый файл не должен
+    # уходить в платный ИИ-сервис и списывать деньги учителя.
+    if not _is_valid_image(image_b64):
+        raise ValueError("Не удалось декодировать изображение")
 
-    ocr_raw = yandex_vision.recognize_text(image_b64)
-    words = yandex_vision.extract_words(ocr_raw)
+    def run(model: str) -> dict:
+        raw = yandex_vision.recognize_text(image_b64, model=model)
+        return vision_recognize.recognize_from_ocr(
+            None,
+            yandex_vision.extract_words(raw),
+            questions_count, options_count,
+            chars=yandex_vision.extract_chars(raw),
+            lines=yandex_vision.extract_lines(raw),
+        )
 
-    # ВАЖНО: Vision OCR отдаёт координаты для ОРИГИНАЛЬНОГО изображения, а
-    # _load() уменьшает его до 1800px по длинной стороне. Без пересчёта
-    # координаты «уезжают» и анализ клеток читает пустое место.
-    orig_w, orig_h = _orig_size(image_b64)
-    if orig_w and orig_h:
-        sx = gray.shape[1] / float(orig_w)
-        sy = gray.shape[0] / float(orig_h)
-        if abs(sx - 1.0) > 0.01 or abs(sy - 1.0) > 0.01:
-            for wd in words:
-                wd["x0"] *= sx; wd["x1"] *= sx
-                wd["y0"] *= sy; wd["y1"] *= sy
-                wd["cx"] *= sx; wd["cy"] *= sy
+    # Разные модели «видят» рукописные буквы по-разному: одна уверенно читает
+    # А и Д, другая — Б, В и Г. Поэтому распознаём двумя и объединяем: то, что
+    # не увидела первая, дочитывает вторая. Это заметно поднимает точность.
+    res = run(ocr_model)
+    answers = list(res["answers"])
+    confidences = list(res["confidences"])
+    code = res.get("code") or ""
+    used_models = [ocr_model]
 
-    res = vision_recognize.recognize_from_ocr(gray_raw, words, questions_count, options_count)
-
-    # QR-код с кодом ученика — отдельная зона, читаем проверенным способом
-    code, dbg_code = _read_qr_code(img, gray)
+    if answers.count("") > 0:
+        second = "table" if ocr_model != "table" else "handwritten"
+        try:
+            res2 = run(second)
+            used_models.append(second)
+            for i, ch in enumerate(res2["answers"]):
+                if ch and not answers[i]:
+                    answers[i] = ch
+                    confidences[i] = res2["confidences"][i] * 0.9
+            # Код ученика берём тот, что полнее
+            code2 = res2.get("code") or ""
+            if len(code2) > len(code):
+                code = code2
+        except Exception:
+            pass
 
     return {
-        "answers": res["answers"],
-        "confidences": res["confidences"],
+        "answers": answers,
+        "confidences": confidences,
         "code": code or "?????",
         "code_confs": [0.0] * 5,
-        "squares_found": res["cols_found"],
+        "squares_found": res["rows_found"],
         "answer_rows": res["rows_found"],
-        "code_rows": len(code or ""),
+        "code_rows": len(code),
         "dbg_fills": [],
-        "dbg_rows_dist": ["vision_ocr",
-                          f"words={len(words)}",
+        "dbg_rows_dist": ["vision_ocr", "+".join(used_models),
                           f"rows={res['rows_found']}",
-                          f"cols={res['cols_found']}",
-                          f"scale={round(gray.shape[1] / float(orig_w or 1), 3)}",
                           res.get("dbg", {})],
-        "dbg_code": dbg_code,
+        "dbg_code": {"source": "ocr", "value": code},
+        # Сколько раз обратились к платному сервису — по этому числу списываем
+        "ocr_calls": len(used_models),
     }
 
 
@@ -1609,6 +1633,7 @@ def handler(event: dict, context) -> dict:
         questions_count, options_count = 20, 4
 
     answer_key = str(body.get("answerKey") or body.get("answer_key") or "").strip()
+    ocr_model = str(body.get("ocrModel") or "handwritten").strip() or "handwritten"
     headers_lc = {k.lower(): v for k, v in (event.get("headers") or {}).items()}
     login = (headers_lc.get("x-user-login") or body.get("login") or "").strip()
 
@@ -1632,16 +1657,26 @@ def handler(event: dict, context) -> dict:
         return {"statusCode": 200, "headers": {**CORS, "Content-Type": "application/json"},
                 "body": json.dumps(resp, ensure_ascii=False)}
 
+    # Битый файл отсекаем раньше всего: ни проверки баланса, ни обращения к
+    # платному ИИ — учитель не должен платить за испорченное изображение.
+    if not _is_valid_image(image_b64):
+        return {"statusCode": 400, "headers": {**CORS, "Content-Type": "application/json"},
+                "body": json.dumps({"error": "Не удалось прочитать изображение. Загрузите фото бланка."},
+                                   ensure_ascii=False)}
+
     # Распознавание — платная ИИ-операция (Yandex Vision OCR). Проверяем
     # подписку и баланс ДО обращения к сервису: нет средств — не сканируем.
     est_tokens = yandex_vision.PAGE_TOKENS_EQUIV
-    allowed, pc_status, pc_err = precheck_ai(login, est_tokens=est_tokens)
+    # Резервируем стоимость двух обращений: бланк может обрабатываться двумя
+    # моделями, чтобы дочитать все рукописные буквы.
+    allowed, pc_status, pc_err = precheck_ai(login, est_tokens=est_tokens * 2)
     if not allowed:
         return {"statusCode": pc_status, "headers": {**CORS, "Content-Type": "application/json"},
                 "body": json.dumps({"error": pc_err}, ensure_ascii=False)}
 
     try:
-        result = _recognize_vision(image_b64, questions_count, options_count)
+        result = _recognize_vision(image_b64, questions_count, options_count,
+                                   ocr_model=ocr_model)
     except yandex_vision.VisionError as e:
         return {"statusCode": 503, "headers": {**CORS, "Content-Type": "application/json"},
                 "body": json.dumps({"error": f"Сервис распознавания недоступен: {e}"},
@@ -1653,9 +1688,11 @@ def handler(event: dict, context) -> dict:
                 "body": json.dumps({"error": f"Ошибка распознавания: {e}"},
                                    ensure_ascii=False)}
 
-    # Списываем фактическое потребление (страница Vision OCR + наценка 40%,
-    # которую добавляет auth/spend-tokens — как у всех ИИ-функций проекта).
-    spent_rub, balance_rub = spend_ai_tokens(login, est_tokens)
+    # Списываем ФАКТИЧЕСКОЕ потребление: чтобы прочитать все рукописные буквы,
+    # бланк может обрабатываться двумя моделями — платим за каждое обращение.
+    # Наценку +40% добавляет auth/spend-tokens, как у всех ИИ-функций проекта.
+    calls = int(result.get("ocr_calls") or 1)
+    spent_rub, balance_rub = spend_ai_tokens(login, est_tokens * calls)
 
     analysis = _analyze(result["answers"], answer_key)
 

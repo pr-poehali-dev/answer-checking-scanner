@@ -1,6 +1,9 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import Icon from "@/components/ui/icon";
 import { supportApi, type SupportTicket, type SupportMessage } from "@/lib/api";
+import TicketUserPanel from "@/pages/uds/support/TicketUserPanel";
+import TicketLogsPanel from "@/pages/uds/support/TicketLogsPanel";
+import TransferDialog from "@/pages/uds/support/TransferDialog";
 
 const SECTION_LABEL: Record<string, string> = {
   upload: "Загрузка бланков", works: "Работы", results: "Результаты",
@@ -17,7 +20,12 @@ const STATUS: Record<string, { label: string; color: string }> = {
 
 interface Props { login: string; token: string; panelRole: string; }
 
-export default function UdsSupport({ login, token }: Props) {
+export default function UdsSupport({ login, token, panelRole }: Props) {
+  // Журнал действий по обращению смотрят Советник, Зам. Главы и Глава
+  const canViewLogs = ["advisor", "deputy", "head"].includes(panelRole) || login === "admin";
+  const [showUser, setShowUser] = useState(false);
+  const [showLogs, setShowLogs] = useState(false);
+  const [showTransfer, setShowTransfer] = useState(false);
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
   const [filter, setFilter] = useState<"open" | "all">("open");
   const [active, setActive] = useState<SupportTicket | null>(null);
@@ -69,6 +77,14 @@ export default function UdsSupport({ login, token }: Props) {
   }, [active?.id, login, token]);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages.length]);
+
+  // Обращение ведёт текущий сотрудник — только он отвечает клиенту и видит
+  // его данные. Руководство (Советник и выше) тоже имеет доступ.
+  const isMine = !!active && (
+    active.operator_login === login ||
+    ["advisor", "deputy", "head"].includes(panelRole) ||
+    login === "admin"
+  );
 
   const take = async () => {
     if (!active) return;
@@ -158,28 +174,68 @@ export default function UdsSupport({ login, token }: Props) {
             </div>
           ) : (
             <>
-              <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold truncate">{active.subject}</p>
-                  <p className="text-[11px] text-muted-foreground">
-                    {active.login} · {SECTION_LABEL[active.section] || active.section}
-                    {active.operator_number ? ` · оператор №${active.operator_number}` : ""}
-                  </p>
+              <div className="px-4 py-3 border-b border-border space-y-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold truncate">{active.subject}</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      {active.user_name || active.login} · {active.login} · {SECTION_LABEL[active.section] || active.section}
+                    </p>
+                    {active.operator_login && (
+                      <p className="text-[11px] text-muted-foreground">
+                        Ведёт: {active.operator_name || active.operator_login}
+                        {active.operator_number ? ` · оператор №${active.operator_number}` : ""}
+                        {active.operator_login === login && <span className="text-blue-600 font-medium"> — вы</span>}
+                      </p>
+                    )}
+                  </div>
+                  {/* Данные клиента доступны тому, кто ведёт обращение */}
+                  {isMine && (
+                    <button onClick={() => setShowUser(true)}
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 bg-primary text-primary-foreground text-[11px] font-bold rounded hover:opacity-90 uppercase tracking-wide flex-shrink-0">
+                      <Icon name="Database" size={13} />
+                      Все данные
+                    </button>
+                  )}
                 </div>
-                <div className="flex gap-1.5 flex-shrink-0">
+
+                <div className="flex gap-1.5 flex-wrap">
                   {active.status === "open" && (
                     <button onClick={take} disabled={busy}
                       className="px-2.5 py-1.5 bg-primary text-primary-foreground text-[11px] font-semibold rounded hover:opacity-90 disabled:opacity-50">
                       Взять
                     </button>
                   )}
-                  {active.status !== "closed" && (
+                  {active.status !== "closed" && isMine && (
+                    <button onClick={() => setShowTransfer(true)} disabled={busy}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-border text-[11px] rounded hover:bg-muted disabled:opacity-50">
+                      <Icon name="ArrowRightLeft" size={12} />
+                      Перевести
+                    </button>
+                  )}
+                  {active.status !== "closed" && isMine && (
                     <button onClick={close} disabled={busy}
                       className="px-2.5 py-1.5 border border-border text-[11px] rounded hover:bg-muted disabled:opacity-50">
                       Закрыть
                     </button>
                   )}
+                  {canViewLogs && (
+                    <button onClick={() => setShowLogs(true)}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-border text-[11px] font-bold rounded hover:bg-muted uppercase tracking-wide">
+                      <Icon name="ScrollText" size={12} />
+                      Логи
+                    </button>
+                  )}
                 </div>
+
+                {active.status === "taken" && !isMine && (
+                  <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded bg-muted">
+                    <Icon name="Lock" size={12} className="text-muted-foreground flex-shrink-0" />
+                    <p className="text-[11px] text-muted-foreground">
+                      Обращение ведёт другой сотрудник — вы можете только читать переписку
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div className="flex-1 overflow-y-auto styled-scrollbar p-4 space-y-2.5 max-h-[55vh]">
@@ -205,7 +261,7 @@ export default function UdsSupport({ login, token }: Props) {
                 <div ref={bottomRef} />
               </div>
 
-              {active.status !== "closed" && (
+              {active.status !== "closed" && isMine && (
                 <div className="border-t border-border p-3 flex gap-2">
                   <input
                     value={msgInput}
@@ -220,10 +276,31 @@ export default function UdsSupport({ login, token }: Props) {
                   </button>
                 </div>
               )}
+              {active.status === "open" && (
+                <div className="border-t border-border p-3 text-center">
+                  <p className="text-xs text-muted-foreground">
+                    Возьмите обращение в работу, чтобы ответить клиенту
+                  </p>
+                </div>
+              )}
             </>
           )}
         </div>
       </div>
+
+      {active && showUser && (
+        <TicketUserPanel login={login} token={token} ticketId={active.id}
+          onClose={() => setShowUser(false)} />
+      )}
+      {active && showLogs && (
+        <TicketLogsPanel login={login} token={token} ticketId={active.id}
+          onClose={() => setShowLogs(false)} />
+      )}
+      {active && showTransfer && (
+        <TransferDialog login={login} token={token} ticketId={active.id}
+          onClose={() => setShowTransfer(false)}
+          onTransferred={async () => { await loadTickets(); if (active) await openChat(active); }} />
+      )}
     </div>
   );
 }

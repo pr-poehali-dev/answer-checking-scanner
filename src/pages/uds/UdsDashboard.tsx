@@ -26,11 +26,15 @@ export default function UdsDashboard({ session, tab, setTab, logout, onProfileUp
   const { perms } = session;
   const canModerate = ["advisor", "deputy", "head"].includes(session.panel_role) || session.login === "admin";
   const canConsents = ["deputy", "head"].includes(session.panel_role) || session.login === "admin";
-  const TABS: { id: Tab; label: string; icon: string; show: boolean; badge?: number }[] = [
+  // Оператор ТП и Тестер не работают с базой пользователей напрямую: данные
+  // клиента они видят только в контексте обращения, которое взяли в работу.
+  // Право приходит с сервера (там же и запрещается) — фронт лишь прячет вкладку.
+  const canUsers = perms.can_users !== false || session.login === "admin";
+  const ALL_TABS: { id: Tab; label: string; icon: string; show: boolean; badge?: number }[] = [
     { id: "employees", label: "Сотрудники", icon: "Users", show: true },
     { id: "wards", label: "Мои подопечные", icon: "UserCheck", show: !!perms.is_curator, badge: session.pending_transfers },
     { id: "materials", label: "Материалы", icon: "FileCheck", show: canModerate },
-    { id: "users", label: "Пользователи", icon: "UserSearch", show: true },
+    { id: "users", label: "Пользователи", icon: "UserSearch", show: canUsers },
     { id: "mail", label: "Почта", icon: "Mail", show: !!myMailAddress },
     { id: "promotion", label: "Продвижение", icon: "Megaphone", show: !!perms.can_promotion },
     { id: "support", label: "Тех. поддержка", icon: "Headphones", show: perms.can_support },
@@ -39,7 +43,8 @@ export default function UdsDashboard({ session, tab, setTab, logout, onProfileUp
     { id: "audit", label: "Логи действий", icon: "ScrollText", show: true },
     { id: "consents", label: "Согласия", icon: "ShieldCheck", show: canConsents },
     { id: "profile", label: "Мой профиль", icon: "UserCog", show: true },
-  ].filter(t => t.show);
+  ];
+  const TABS = ALL_TABS.filter(t => t.show);
 
   return (
     <div className="min-h-screen bg-background">
@@ -99,9 +104,18 @@ export default function UdsDashboard({ session, tab, setTab, logout, onProfileUp
         {tab === "wards" && (
           <MyWards login={session.login} token={session.token} perms={perms} myRole={session.panel_role} isAdmin={!!session.is_admin} />
         )}
-        {tab === "users" && (
+        {tab === "users" && (canUsers ? (
           <UdsUsers login={session.login} token={session.token} perms={perms} />
-        )}
+        ) : (
+          <div className="border border-border rounded-lg bg-white p-10 text-center">
+            <Icon name="Lock" size={26} className="text-muted-foreground/40 mx-auto mb-3" />
+            <p className="text-sm font-semibold">Раздел недоступен</p>
+            <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
+              Данные пользователя открываются в обращении, которое вы взяли в работу —
+              вкладка «Тех. поддержка», кнопка «Все данные».
+            </p>
+          </div>
+        ))}
         {tab === "mail" && (
           <UdsMail login={session.login} token={session.token} myAddress={myMailAddress} canMailing={!!perms.can_mailing} />
         )}

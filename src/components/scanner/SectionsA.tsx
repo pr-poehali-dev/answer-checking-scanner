@@ -5,6 +5,7 @@ import { RecognitionResults } from "./RecognitionResults";
 import { BulkUpload } from "./BulkUpload";
 import { FlowStep, RecognitionResult } from "./upload-types";
 import { recognizeBlank } from "./ocrEngine";
+import { matchStudentByCode } from "./matchStudent";
 import { appStore, useAppStore } from "@/store/appStore";
 
 const OPT_LABELS = ["\u0410", "\u0411", "\u0412", "\u0413", "\u0414", "\u0415"];
@@ -78,7 +79,8 @@ export function UploadSection() {
 
       if (selectedWorkId) {
         const work = works.find(w => w.id === selectedWorkId);
-        const student = students.find(s => s.code === data.student_code);
+        // Код может быть прочитан не полностью — ищем ученика с подстраховкой
+        const { student } = matchStudentByCode(students, data.student_code);
         let grade = "1";
         if (work) {
           const sc = data.analysis.correct;

@@ -437,6 +437,8 @@ export interface UdsPerms {
   can_mailing?: boolean;
   /** Раздел "Продвижение" — материалы для рекламы (Глава и Зам. Главы). */
   can_promotion?: boolean;
+  /** Раздел "Пользователи" — закрыт для Оператора ТП и Тестера. */
+  can_users?: boolean;
 }
 
 export type MailingAudience = "all" | "staff" | "roles";
@@ -506,6 +508,8 @@ export interface UdsUserDetail {
   bind_code: string | null;
   bound_name: string | null;
   teacher_login: string | null;
+  /** Лицевой счёт — постоянный номер клиента (9 цифр). */
+  personal_account?: string | null;
 }
 
 export interface UdsPayment {
@@ -1218,7 +1222,7 @@ export const projectApi = {
 };
 
 export interface BlankStudent {
-  code: string;       // 5-значный код (зашивается в QR)
+  code: string;       // 5-значный код (впечатывается в клетки бланка)
   name: string;       // ФИО (печатается готовым)
   classLabel?: string;
 }
@@ -1226,13 +1230,12 @@ export interface BlankStudent {
 export interface BlankParams {
   workId: string;
   workTitle: string;
-  perPage: 1 | 2 | 4;
   questionsCount?: number;
   optionsCount?: number;
   subject?: string;
   classLabel?: string;
   date?: string;
-  students?: BlankStudent[];   // персональные бланки с QR
+  students?: BlankStudent[];   // именные бланки с впечатанным кодом
   /** @deprecated use questionsCount */
   part1Count?: number;
   /** @deprecated use questionsCount */
@@ -1245,6 +1248,10 @@ export interface BlankResponse {
   questionsCount: number;
   optionsCount: number;
   options: string[];
+  /** Сколько бланков помещается на один лист A4. */
+  perSheet?: number;
+  /** Сколько листов в готовом файле. */
+  sheets?: number;
 }
 
 export const blankApi = {
@@ -1252,7 +1259,6 @@ export const blankApi = {
     const body = {
       workId:         params.workId,
       workTitle:      params.workTitle,
-      perPage:        params.perPage,
       questionsCount: params.questionsCount ?? params.part1Count ?? 20,
       optionsCount:   params.optionsCount   ?? 4,
       subject:        params.subject        ?? "",
@@ -1319,9 +1325,10 @@ function fileToBase64(file: File): Promise<string> {
       const r = reader.result as string;
       const img = new Image();
       img.onload = () => {
-        // 1400px — оптимум для GigaChat: буква в клетке ~35px, читается отлично
-        // Итоговый размер base64 ~300-600KB — надёжно проходит за таймаут
-        const MAX_SIDE = 1400;
+        // 2200px — рукописную букву в клетке распознавание читает тем лучше,
+        // чем она крупнее в пикселях. Дальше увеличивать смысла мало: растёт
+        // вес файла и время загрузки, а точность уже не прибавляется.
+        const MAX_SIDE = 2200;
         let { width, height } = img;
         if (width > MAX_SIDE || height > MAX_SIDE) {
           const scale = MAX_SIDE / Math.max(width, height);
@@ -1335,7 +1342,7 @@ function fileToBase64(file: File): Promise<string> {
         ctx.fillStyle = "#ffffff";
         ctx.fillRect(0, 0, width, height);
         ctx.drawImage(img, 0, 0, width, height);
-        const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
         const idx = dataUrl.indexOf(",");
         resolve(idx >= 0 ? dataUrl.slice(idx + 1) : dataUrl);
       };
@@ -2158,6 +2165,32 @@ export interface SupportTicket {
   operator_number: number | null;
   created_at: string;
   updated_at: string;
+  /** ФИО автора обращения. */
+  user_name?: string | null;
+  /** ФИО сотрудника, ведущего обращение. */
+  operator_name?: string | null;
+}
+
+/** Сотрудник, которому можно передать обращение. */
+export interface SupportStaff {
+  login: string;
+  panel_role: string;
+  panel_role_label: string;
+  operator_number: number | null;
+  full_name: string | null;
+}
+
+/** Запись журнала действий по обращению. */
+export interface SupportTicketLog {
+  id: number;
+  actor_login: string;
+  actor_role: string | null;
+  actor_role_label: string;
+  actor_name: string | null;
+  action: string;
+  details: string | null;
+  target_login: string | null;
+  created_at: string | null;
 }
 
 export interface SupportMessage {
@@ -2237,6 +2270,28 @@ export const supportApi = {
   opSendMessage: (login: string, token: string, ticket_id: number, body: string) =>
     supReq<{ ok: boolean }>("op-send-message", {
       method: "POST", login, token, body: { ticket_id, body },
+    }),
+
+  /** Сотрудники, которым можно передать обращение. */
+  staff: (login: string, token: string) =>
+    supReq<{ staff: SupportStaff[] }>("staff", { login, token }),
+
+  /** Передать обращение другому сотруднику. */
+  transferTicket: (login: string, token: string, ticket_id: number, to_login: string) =>
+    supReq<{ ok: boolean; operator_login: string; operator_number: number | null }>("transfer-ticket", {
+      method: "POST", login, token, body: { ticket_id, to_login },
+    }),
+
+  /** Данные клиента по обращению (для тех, кто ведёт обращение). */
+  ticketUser: (login: string, token: string, ticket_id: number) =>
+    supReq<{ user: UdsUserDetail; payments: UdsPayment[]; charges: UdsCharge[] }>("ticket-user", {
+      login, token, qs: { ticket_id: String(ticket_id) },
+    }),
+
+  /** Журнал действий по обращению (Советник, Зам. Главы, Глава). */
+  ticketLogs: (login: string, token: string, ticket_id: number) =>
+    supReq<{ logs: SupportTicketLog[] }>("ticket-logs", {
+      login, token, qs: { ticket_id: String(ticket_id) },
     }),
 
   operators: (login: string, token: string) =>

@@ -171,6 +171,7 @@ function UserDetail({ login, token, perms, targetLogin, onClose, onChanged }: {
           <div className="p-10 text-center"><Icon name="Loader2" size={20} className="animate-spin text-muted-foreground mx-auto" /></div>
         ) : tab === "info" ? (
           <div className="p-5 grid grid-cols-2 gap-3 text-xs">
+            <Info label="Лицевой счёт" value={user.personal_account || "—"} />
             <Info label="Эл. почта" value={user.email || "—"} />
             <Info label="Телефон" value={user.phone || "—"} />
             <Info label="Школа" value={user.school || "—"} />

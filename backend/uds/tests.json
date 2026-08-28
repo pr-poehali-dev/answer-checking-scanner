@@ -10,56 +10,77 @@
       "name": "send-email-code missing email returns 400",
       "method": "POST",
       "path": "/?action=send-email-code",
-      "body": { "email": "" },
+      "body": {
+        "email": ""
+      },
       "expectedStatus": 400
     },
     {
       "name": "verify-email-code missing fields returns 400",
       "method": "POST",
       "path": "/?action=verify-email-code",
-      "body": { "login": "", "code": "" },
+      "body": {
+        "login": "",
+        "code": ""
+      },
       "expectedStatus": 400
     },
     {
       "name": "send-sms-code missing login returns 400",
       "method": "POST",
       "path": "/?action=send-sms-code",
-      "body": { "login": "", "password": "" },
+      "body": {
+        "login": "",
+        "password": ""
+      },
       "expectedStatus": 400
     },
     {
       "name": "send-sms-code wrong creds returns 401",
       "method": "POST",
       "path": "/?action=send-sms-code",
-      "body": { "login": "nobody_xyz", "password": "wrong", "iis_code": "ABC12" },
+      "body": {
+        "login": "nobody_xyz",
+        "password": "wrong",
+        "iis_code": "ABC12"
+      },
       "expectedStatus": 401
     },
     {
       "name": "verify-sms-code missing fields returns 400",
       "method": "POST",
       "path": "/?action=verify-sms-code",
-      "body": { "login": "", "code": "" },
+      "body": {
+        "login": "",
+        "code": ""
+      },
       "expectedStatus": 400
     },
     {
       "name": "verify-iis empty returns 400",
       "method": "POST",
       "path": "/?action=verify-iis",
-      "body": { "iis_code": "" },
+      "body": {
+        "iis_code": ""
+      },
       "expectedStatus": 400
     },
     {
       "name": "verify-iis unknown returns 403",
       "method": "POST",
       "path": "/?action=verify-iis",
-      "body": { "iis_code": "ZZ999" },
+      "body": {
+        "iis_code": "ZZ999"
+      },
       "expectedStatus": 403
     },
     {
       "name": "uds-login missing fields returns 400",
       "method": "POST",
       "path": "/?action=uds-login",
-      "body": { "login": "" },
+      "body": {
+        "login": ""
+      },
       "expectedStatus": 400
     },
     {
@@ -90,28 +111,39 @@
       "name": "mail-send without auth returns 403",
       "method": "POST",
       "path": "/?action=mail-send",
-      "body": { "to": "x@saou.ru", "body": "hi" },
+      "body": {
+        "to": "x@saou.ru",
+        "body": "hi"
+      },
       "expectedStatus": 403
     },
     {
       "name": "set-mail-password without auth returns 403",
       "method": "POST",
       "path": "/?action=set-mail-password",
-      "body": { "password": "12345678" },
+      "body": {
+        "password": "12345678"
+      },
       "expectedStatus": 403
     },
     {
       "name": "set-subrole without auth returns 403",
       "method": "POST",
       "path": "/?action=set-subrole",
-      "body": { "target_login": "x", "subrole": "curator" },
+      "body": {
+        "target_login": "x",
+        "subrole": "curator"
+      },
       "expectedStatus": 403
     },
     {
       "name": "set-curator without auth returns 403",
       "method": "POST",
       "path": "/?action=set-curator",
-      "body": { "target_login": "x", "curator_login": "y" },
+      "body": {
+        "target_login": "x",
+        "curator_login": "y"
+      },
       "expectedStatus": 403
     },
     {
@@ -124,7 +156,10 @@
       "name": "transfer-respond without auth returns 403",
       "method": "POST",
       "path": "/?action=transfer-respond",
-      "body": { "transfer_id": 1, "accept": true },
+      "body": {
+        "transfer_id": 1,
+        "accept": true
+      },
       "expectedStatus": 403
     },
     {
@@ -138,8 +173,24 @@
       "name": "mailing-send without auth returns 403",
       "method": "POST",
       "path": "/?action=mailing-send",
-      "body": { "audience": "all", "status": "planned", "subject": "Тест", "body": "Текст" },
+      "body": {
+        "audience": "all",
+        "status": "planned",
+        "subject": "Тест",
+        "body": "Текст"
+      },
       "expectedStatus": 403
+    },
+    {
+      "name": "ensure-receipt-mailbox without auth returns 403",
+      "method": "POST",
+      "path": "/?action=ensure-receipt-mailbox",
+      "body": {},
+      "expectedStatus": 403,
+      "expectedBody": {
+        "error": "string"
+      },
+      "bodyMatcher": "partial"
     }
   ]
 }

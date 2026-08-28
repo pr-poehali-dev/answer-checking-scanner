@@ -840,6 +840,12 @@ export const udsApi = {
       "mail-test-isp", "GET", login, token
     ),
 
+  /** Подготовить системный ящик, с которого уходят чеки об оплате. */
+  ensureReceiptMailbox: (login: string, token: string, address = "check@saou.ru") =>
+    udsRequest<{ ok: boolean; address: string; message?: string; reason?: string }>(
+      "ensure-receipt-mailbox", "POST", login, token, { address }
+    ),
+
   /** Массовая рассылка (только Глава и Зам. Главы). */
   mailingSend: (login: string, token: string, payload: { audience: MailingAudience; roles?: string[]; status: MailingStatus; subject: string; body: string }) =>
     udsRequest<{ ok: boolean; recipients_count: number; sent: number; failed: string[]; sender: string; status_label: string }>(

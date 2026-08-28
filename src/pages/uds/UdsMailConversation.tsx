@@ -34,12 +34,16 @@ interface Props {
   onSend: () => void;
   sending: boolean;
   error: string;
+  onEnsureReceiptBox?: () => void;
+  receiptBoxBusy?: boolean;
+  receiptBoxCheck?: { ok: boolean; text: string } | null;
 }
 
 export default function UdsMailConversation({
   peer, myAddress, testIsp, ispBusy, ispCheck, onBack,
   loadingThread, messages, bottomRef, isExternal,
   subject, setSubject, draft, setDraft, onSend, sending, error,
+  onEnsureReceiptBox, receiptBoxBusy, receiptBoxCheck,
 }: Props) {
   return (
     <div className={`flex-1 flex flex-col ${peer ? "flex" : "hidden sm:flex"}`}>
@@ -59,6 +63,22 @@ export default function UdsMailConversation({
                 <Icon name={ispCheck.ok ? "CheckCircle2" : "AlertCircle"} size={12} className="inline mr-1" />
                 {ispCheck.text}
               </p>
+            )}
+
+            {onEnsureReceiptBox && (
+              <>
+                <button onClick={onEnsureReceiptBox} disabled={receiptBoxBusy}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-border text-xs rounded-sm hover:bg-muted disabled:opacity-50">
+                  {receiptBoxBusy ? <Icon name="Loader2" size={12} className="animate-spin" /> : <Icon name="Receipt" size={12} fallback="Mail" />}
+                  Подготовить ящик чеков (check@saou.ru)
+                </button>
+                {receiptBoxCheck && (
+                  <p className={`text-xs max-w-xs ${receiptBoxCheck.ok ? "text-green-600" : "text-destructive"}`}>
+                    <Icon name={receiptBoxCheck.ok ? "CheckCircle2" : "AlertCircle"} size={12} className="inline mr-1" />
+                    {receiptBoxCheck.text}
+                  </p>
+                )}
+              </>
             )}
           </div>
         </div>

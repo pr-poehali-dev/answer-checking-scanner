@@ -18,6 +18,7 @@ import urllib.request
 import urllib.error
 import psycopg2
 from datetime import datetime, timedelta
+from receipt_mail import send_payment_receipt
 
 CORS = {
     "Access-Control-Allow-Origin": "*",
@@ -261,6 +262,29 @@ def grant_subscription(login: str, plan_code: str, months: int, payment_id: str 
                 (new_until, is_recurrent, payment_id)
             )
         conn.commit()
+
+        # Электронный чек на почту пользователя. Оплата уже зачислена, поэтому
+        # проблемы с почтой не должны ломать ответ — только пишем в лог.
+        try:
+            cur.execute(
+                f"SELECT email, full_name, personal_account FROM {SCHEMA}.users WHERE login = %s",
+                (login,)
+            )
+            u = cur.fetchone()
+            if u and u[0]:
+                send_payment_receipt(
+                    cur, SCHEMA,
+                    to_email=u[0], full_name=u[1] or "", personal_account=u[2],
+                    kind="subscription",
+                    plan_name=(plan or {}).get("name") or f"Подписка САОУ ({months} мес.)",
+                    amount_rub=float((plan or {}).get("amount") or 0),
+                    payment_id=payment_id or "",
+                    subscription_until=new_until,
+                    is_recurrent=is_recurrent,
+                )
+        except Exception as e:
+            print(f"[RECEIPT] subscription receipt failed for {login}: {e}")
+
         return new_until
     finally:
         conn.close()
@@ -613,6 +637,31 @@ def handler(event: dict, context) -> dict:
                 if pm.get("saved"):
                     save_card(cur, login, pm)
                 conn.commit()
+
+                # Чек шлём только при первом подтверждении платежа (updated > 0),
+                # чтобы повторные проверки статуса не слали письмо заново.
+                if updated > 0:
+                    try:
+                        cur.execute(
+                            f"SELECT email, full_name, personal_account FROM {SCHEMA}.users WHERE login = %s",
+                            (login,)
+                        )
+                        u = cur.fetchone()
+                        if u and u[0]:
+                            bind_card = meta.get("bind_card") == "1"
+                            send_payment_receipt(
+                                cur, SCHEMA,
+                                to_email=u[0], full_name=u[1] or "", personal_account=u[2],
+                                kind="balance",
+                                plan_name=("Привязка карты (зачислено на баланс ИИ)"
+                                           if bind_card else "Пополнение баланса ИИ"),
+                                amount_rub=amount_rub,
+                                payment_id=payment_id,
+                                balance_rub=round(new_kop / 100, 2),
+                            )
+                    except Exception as e:
+                        print(f"[RECEIPT] balance receipt failed for {login}: {e}")
+
                 return _resp(200, {
                     "status": "succeeded",
                     "amount_rub": amount_rub,

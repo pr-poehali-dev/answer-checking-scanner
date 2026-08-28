@@ -2295,6 +2295,26 @@ def handler(event: dict, context) -> dict:
             except Exception as e:
                 return _resp(200, {"ok": False, "reason": str(e)[:500]})
 
+        # ── ensure-receipt-mailbox — подготовить ящик чеков check@saou.ru ────
+        # Сохраняет (или переустанавливает) пароль ящика в system_mailboxes,
+        # чтобы функция подписки могла слать с него электронные чеки.
+        if action == "ensure-receipt-mailbox" and method == "POST":
+            if my_rank < 5:
+                return _resp(403, {"error": "Доступно Главе и Зам. Главы"})
+            address = (body.get("address") or "check@saou.ru").strip().lower()
+            cur = conn.cursor()
+            try:
+                mail.ensure_system_mailbox(cur, SCHEMA, address)
+                conn.commit()
+                log_action(cur, caller["login"], caller.get("panel_role"),
+                           "ensure_receipt_mailbox", None, {"address": address})
+                conn.commit()
+                return _resp(200, {"ok": True, "address": address,
+                                   "message": f"Ящик {address} готов к отправке чеков"})
+            except Exception as e:
+                conn.rollback()
+                return _resp(200, {"ok": False, "address": address, "reason": str(e)[:500]})
+
         # ── create-my-mailbox — создать себе ящик (для Главы/Зама без ящика) ─
         if action == "create-my-mailbox" and method == "POST":
             cur = conn.cursor()

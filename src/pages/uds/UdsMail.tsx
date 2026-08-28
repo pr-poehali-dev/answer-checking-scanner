@@ -27,6 +27,8 @@ export default function UdsMail({ login, token, myAddress, canMailing }: Props) 
   const [error, setError] = useState("");
   const [ispCheck, setIspCheck] = useState<{ ok: boolean; text: string } | null>(null);
   const [ispBusy, setIspBusy] = useState(false);
+  const [receiptBoxCheck, setReceiptBoxCheck] = useState<{ ok: boolean; text: string } | null>(null);
+  const [receiptBoxBusy, setReceiptBoxBusy] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Модалка «Написать» — новое письмо на произвольный адрес
@@ -57,6 +59,19 @@ export default function UdsMail({ login, token, myAddress, canMailing }: Props) 
       setIspCheck({ ok: false, text: (e as Error).message });
     } finally {
       setIspBusy(false);
+    }
+  };
+
+  // Подготовка ящика check@saou.ru — с него уходят чеки об оплате
+  const ensureReceiptBox = async () => {
+    setReceiptBoxBusy(true); setReceiptBoxCheck(null);
+    try {
+      const r = await udsApi.ensureReceiptMailbox(login, token);
+      setReceiptBoxCheck({ ok: r.ok, text: r.ok ? (r.message || "Ящик чеков готов") : (r.reason || "Ошибка") });
+    } catch (e) {
+      setReceiptBoxCheck({ ok: false, text: (e as Error).message });
+    } finally {
+      setReceiptBoxBusy(false);
     }
   };
 
@@ -217,6 +232,9 @@ export default function UdsMail({ login, token, myAddress, canMailing }: Props) 
         onSend={send}
         sending={sending}
         error={error}
+        onEnsureReceiptBox={ensureReceiptBox}
+        receiptBoxBusy={receiptBoxBusy}
+        receiptBoxCheck={receiptBoxCheck}
       />
 
       {composeOpen && (

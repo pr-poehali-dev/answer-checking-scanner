@@ -4,6 +4,10 @@ GET  /plans — список тарифов
 POST /create — создать платёж в ЮKassa, вернуть confirmation_url
 POST /check — проверить статус платежа (вызывается фронтом после возврата с оплаты)
 GET  /history — история платежей пользователя
+GET  /cards — привязанные карты + лицевой счёт
+POST /add-card — привязать новую карту (платёж 10 ₽ с зачислением на баланс)
+POST /delete-card — отвязать одну карту (удаляется навсегда)
+POST /delete-all-cards — отвязать все карты сразу
 Header: X-User-Login — логин пользователя
 """
 import os
@@ -75,6 +79,61 @@ def get_plan(code: str):
     return None
 
 
+# ── Привязанные карты ────────────────────────────────────────────────────────
+# Полные данные карты у нас НЕ хранятся: ЮKassa отдаёт только тип платёжной
+# системы и последние 4 цифры — этого достаточно, чтобы пользователь узнал
+# свою карту в списке. Списания идут по токену payment_method_id.
+
+CARD_TYPE_LABELS = {
+    "MasterCard": "MasterCard",
+    "Maestro": "Maestro",
+    "MIR": "Мир",
+    "Mir": "Мир",
+    "VISA": "Visa",
+    "Visa": "Visa",
+    "UnionPay": "UnionPay",
+    "JCB": "JCB",
+    "AmericanExpress": "American Express",
+    "DinersClub": "Diners Club",
+    "DiscoverCard": "Discover",
+}
+
+
+def card_type_label(raw: str | None) -> str:
+    """Человекочитаемое название платёжной системы («Мир», «Visa»…)."""
+    if not raw:
+        return "Карта"
+    return CARD_TYPE_LABELS.get(raw, CARD_TYPE_LABELS.get(str(raw).title(), str(raw)))
+
+
+def save_card(cur, login: str, payment_method: dict) -> None:
+    """Сохраняет привязанную карту пользователя (токен + тип + последние 4 цифры).
+
+    Вызывается после успешной оплаты, если пользователь согласился запомнить карту.
+    Повторная оплата той же картой не плодит дубли — обновляем существующую запись.
+    """
+    pm_id = (payment_method or {}).get("id")
+    if not pm_id:
+        return
+    card = (payment_method or {}).get("card") or {}
+    card_type = card_type_label(card.get("card_type"))
+    last4 = (card.get("last4") or "").strip()[:4] or None
+    title = (payment_method or {}).get("title") or (f"{card_type} •••• {last4}" if last4 else card_type)
+
+    cur.execute(
+        f"""INSERT INTO {SCHEMA}.saved_cards
+            (user_login, payment_method_id, card_type, card_last4, card_title,
+             is_default, autorenew_enabled, last_used_at)
+            VALUES (%s, %s, %s, %s, %s, TRUE, FALSE, NOW())
+            ON CONFLICT (payment_method_id) DO UPDATE
+            SET card_type = EXCLUDED.card_type,
+                card_last4 = EXCLUDED.card_last4,
+                card_title = EXCLUDED.card_title,
+                last_used_at = NOW()""",
+        (login, pm_id, card_type, last4, title[:128])
+    )
+
+
 def yookassa_request(method: str, path: str, body: dict | None = None, idempotence: str | None = None) -> dict:
     """REST-запрос к ЮKassa API (api.yookassa.ru/v3)."""
     shop_id = os.environ.get("YOOKASSA_SHOP_ID", "").strip()
@@ -109,7 +168,8 @@ def yookassa_request(method: str, path: str, body: dict | None = None, idempoten
 
 def grant_subscription(login: str, plan_code: str, months: int, payment_id: str | None,
                        autorenew: bool = False, payment_method_id: str | None = None,
-                       payment_method_title: str | None = None, is_recurrent: bool = False) -> datetime:
+                       payment_method_title: str | None = None, is_recurrent: bool = False,
+                       payment_method: dict | None = None) -> datetime:
     """Активирует подписку: продлевает или начинает новую. Начисляет подарочные ИИ-рубли
     по тарифу (40 ₽ / 250 ₽ / 550 ₽ за 1/6/12 месяцев). Возвращает дату окончания.
 
@@ -182,6 +242,16 @@ def grant_subscription(login: str, plan_code: str, months: int, payment_id: str 
                     WHERE login = %s""",
                 (login,)
             )
+
+        # Карта, которую пользователь разрешил запомнить — в список привязанных
+        if payment_method and payment_method.get("saved"):
+            save_card(cur, login, payment_method)
+            if autorenew and payment_method_id:
+                cur.execute(
+                    f"""UPDATE {SCHEMA}.saved_cards SET autorenew_enabled = TRUE
+                        WHERE payment_method_id = %s""",
+                    (payment_method_id,)
+                )
 
         if payment_id:
             cur.execute(
@@ -342,6 +412,7 @@ def handler(event: dict, context) -> dict:
                 until = grant_subscription(
                     login, plan_code, months, payment_id,
                     autorenew=autorenew, payment_method_id=pm_id, payment_method_title=pm_title,
+                    payment_method=pm,
                 )
                 plan = get_plan(plan_code)
                 return _resp(200, {
@@ -444,6 +515,9 @@ def handler(event: dict, context) -> dict:
                 "description": f"САОУ · Пополнение баланса ИИ · {full_name}",
                 "metadata": {"login": user_login, "plan": "balance", "amount_rub": str(amount_rub)},
             }
+            # Пользователь отметил «Запомнить данные карты» — просим ЮKassa сохранить токен
+            if bool(body.get("save_card")):
+                payment_body["save_payment_method"] = True
             if email:
                 payment_body["receipt"] = {
                     "customer": {"email": email},
@@ -534,6 +608,10 @@ def handler(event: dict, context) -> dict:
                     cur.execute(f"SELECT ai_balance_kopecks FROM {SCHEMA}.users WHERE login = %s", (login,))
                     row = cur.fetchone()
                     new_kop = row[0] if row else 0
+                # Если пользователь разрешил запомнить карту — добавляем её в список привязанных
+                pm = result.get("payment_method") or {}
+                if pm.get("saved"):
+                    save_card(cur, login, pm)
                 conn.commit()
                 return _resp(200, {
                     "status": "succeeded",
@@ -589,10 +667,198 @@ def handler(event: dict, context) -> dict:
                     WHERE login = %s""",
                 (user_login,)
             )
+            cur.execute(
+                f"UPDATE {SCHEMA}.saved_cards SET autorenew_enabled = FALSE WHERE user_login = %s",
+                (user_login,)
+            )
             conn.commit()
             return _resp(200, {"ok": True, "autorenew_enabled": False})
         finally:
             conn.close()
+
+    # ── GET cards — привязанные карты пользователя ─────────────────────────────
+    if route == "cards":
+        if not user_login:
+            return _resp(400, {"error": "Не указан пользователь"})
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"""SELECT id, card_type, card_last4, card_title, is_default,
+                           autorenew_enabled, created_at, last_used_at
+                    FROM {SCHEMA}.saved_cards
+                    WHERE user_login = %s
+                    ORDER BY created_at DESC""",
+                (user_login,)
+            )
+            cards = [
+                {
+                    "id": r[0],
+                    "card_type": r[1] or "Карта",
+                    "card_last4": r[2],
+                    "card_title": r[3],
+                    "is_default": bool(r[4]),
+                    "autorenew_enabled": bool(r[5]),
+                    "created_at": str(r[6]) if r[6] else None,
+                    "last_used_at": str(r[7]) if r[7] else None,
+                }
+                for r in cur.fetchall()
+            ]
+            cur.execute(
+                f"SELECT personal_account FROM {SCHEMA}.users WHERE login = %s",
+                (user_login,)
+            )
+            r = cur.fetchone()
+            return _resp(200, {
+                "cards": cards,
+                "personal_account": r[0] if r else None,
+            })
+        finally:
+            conn.close()
+
+    # ── POST delete-card — отвязать одну карту (навсегда) ──────────────────────
+    # Требование ЮMoney: пользователь может удалить привязку в любой момент сам,
+    # без обращений в поддержку. Токен карты удаляется из нашей базы полностью.
+    if method == "POST" and route in ("delete-card", "delete_card"):
+        if not user_login:
+            return _resp(400, {"error": "Не указан пользователь"})
+        try:
+            card_id = int(body.get("card_id") or 0)
+        except (TypeError, ValueError):
+            card_id = 0
+        if not card_id:
+            return _resp(400, {"error": "Укажите карту"})
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"""DELETE FROM {SCHEMA}.saved_cards
+                    WHERE id = %s AND user_login = %s
+                    RETURNING payment_method_id""",
+                (card_id, user_login)
+            )
+            row = cur.fetchone()
+            if not row:
+                return _resp(404, {"error": "Карта не найдена"})
+            pm_id = row[0]
+            # Если это была карта автоплатежа — автопродление выключается навсегда
+            cur.execute(
+                f"""UPDATE {SCHEMA}.users
+                    SET autorenew_enabled = false, autorenew_plan = NULL,
+                        payment_method_id = NULL, payment_method_title = NULL,
+                        autorenew_consent_at = NULL, autorenew_last_error = NULL
+                    WHERE login = %s AND payment_method_id = %s""",
+                (user_login, pm_id)
+            )
+            cur.execute(
+                f"SELECT COUNT(*) FROM {SCHEMA}.saved_cards WHERE user_login = %s",
+                (user_login,)
+            )
+            left = cur.fetchone()[0]
+            conn.commit()
+            return _resp(200, {"ok": True, "deleted": 1, "cards_left": left})
+        finally:
+            conn.close()
+
+    # ── POST delete-all-cards — отвязать все карты сразу ───────────────────────
+    if method == "POST" and route in ("delete-all-cards", "delete_all_cards"):
+        if not user_login:
+            return _resp(400, {"error": "Не указан пользователь"})
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"DELETE FROM {SCHEMA}.saved_cards WHERE user_login = %s",
+                (user_login,)
+            )
+            deleted = cur.rowcount
+            cur.execute(
+                f"""UPDATE {SCHEMA}.users
+                    SET autorenew_enabled = false, autorenew_plan = NULL,
+                        payment_method_id = NULL, payment_method_title = NULL,
+                        autorenew_consent_at = NULL, autorenew_last_error = NULL
+                    WHERE login = %s""",
+                (user_login,)
+            )
+            conn.commit()
+            return _resp(200, {"ok": True, "deleted": deleted, "cards_left": 0})
+        finally:
+            conn.close()
+
+    # ── POST add-card — привязать новую карту для автоплатежа ─────────────────
+    # ЮKassa не умеет «просто сохранить карту»: привязка возможна только через
+    # реальный платёж. Списываем минимальную сумму (10 ₽), которая сразу
+    # зачисляется на баланс ИИ пользователя — деньги не пропадают.
+    if method == "POST" and route in ("add-card", "add_card"):
+        if not user_login or user_login == "admin":
+            return _resp(400, {"error": "Неизвестный пользователь"})
+        return_url = (body.get("return_url") or "").strip() or "https://saou.ru"
+        amount_rub = 10.00
+
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"SELECT email, full_name FROM {SCHEMA}.users WHERE login = %s",
+                (user_login,)
+            )
+            row = cur.fetchone()
+            if not row:
+                return _resp(404, {"error": "Пользователь не найден"})
+            email, full_name = row
+        finally:
+            conn.close()
+
+        try:
+            payment_body = {
+                "amount": {"value": f"{amount_rub:.2f}", "currency": "RUB"},
+                "capture": True,
+                "save_payment_method": True,
+                "confirmation": {"type": "redirect", "return_url": return_url},
+                "description": f"САОУ · Привязка карты · {full_name}",
+                "metadata": {"login": user_login, "plan": "balance",
+                             "amount_rub": str(amount_rub), "bind_card": "1"},
+            }
+            if email:
+                payment_body["receipt"] = {
+                    "customer": {"email": email},
+                    "items": [{
+                        "description": "Пополнение баланса ИИ",
+                        "quantity": "1.00",
+                        "amount": {"value": f"{amount_rub:.2f}", "currency": "RUB"},
+                        "vat_code": 1,
+                        "payment_subject": "service",
+                        "payment_mode": "full_payment",
+                    }],
+                }
+            result = yookassa_request("POST", "/payments", payment_body,
+                                      idempotence=str(uuid.uuid4()))
+        except Exception as e:
+            return _resp(503, {"error": f"Не удалось создать платёж: {e}"})
+
+        payment_id = result.get("id")
+        confirmation = (result.get("confirmation") or {}).get("confirmation_url")
+        status = result.get("status", "pending")
+
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"""INSERT INTO {SCHEMA}.payments
+                    (user_login, plan, amount, months, provider, provider_payment_id, status, source)
+                    VALUES (%s, 'balance', %s, 0, 'yookassa', %s, %s, 'user')""",
+                (user_login, amount_rub, payment_id, status)
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        return _resp(200, {
+            "payment_id": payment_id,
+            "confirmation_url": confirmation,
+            "status": status,
+            "amount_rub": amount_rub,
+        })
 
     # ── POST charge-recurring — безакцептные автосписания (вызывается по cron) ──
     if method == "POST" and route in ("charge-recurring", "charge_recurring"):

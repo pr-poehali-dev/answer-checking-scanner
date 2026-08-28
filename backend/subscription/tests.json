@@ -81,6 +81,41 @@
       "expectedStatus": 403,
       "expectedBody": {"error": "string"},
       "bodyMatcher": "partial"
+    },
+    {
+      "name": "GET cards без логина",
+      "method": "GET",
+      "path": "/?action=cards",
+      "expectedStatus": 400,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "POST delete-card без логина",
+      "method": "POST",
+      "path": "/?action=delete-card",
+      "body": {"card_id": 1},
+      "expectedStatus": 400,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "POST delete-all-cards без логина",
+      "method": "POST",
+      "path": "/?action=delete-all-cards",
+      "body": {},
+      "expectedStatus": 400,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "POST add-card без логина",
+      "method": "POST",
+      "path": "/?action=add-card",
+      "body": {},
+      "expectedStatus": 400,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
     }
   ]
 }

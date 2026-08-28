@@ -1773,6 +1773,25 @@ def handler(event: dict, context) -> dict:
                     ORDER BY created_at DESC LIMIT 300""", (tl,),
                 ["action", "tokens", "amount_kopecks", "balance_kopecks_after", "created_at"])
 
+            # Привязанные карты (только тип и последние 4 цифры — полных данных карты у нас нет)
+            saved_cards = _rows(
+                f"""SELECT card_type, card_last4, card_title, is_default,
+                           autorenew_enabled, created_at, last_used_at
+                    FROM {SCHEMA}.saved_cards WHERE user_login = %s
+                    ORDER BY created_at DESC""", (tl,),
+                ["card_type", "card_last4", "card_title", "is_default",
+                 "autorenew_enabled", "created_at", "last_used_at"])
+
+            # Лицевой счёт и состояние автоплатежа
+            account = _rows(
+                f"""SELECT personal_account, ai_balance_kopecks, subscription_status,
+                           subscription_until, autorenew_enabled, autorenew_plan,
+                           payment_method_title, autorenew_consent_at, autorenew_last_charge_at
+                    FROM {SCHEMA}.users WHERE login = %s""", (tl,),
+                ["personal_account", "ai_balance_kopecks", "subscription_status",
+                 "subscription_until", "autorenew_enabled", "autorenew_plan",
+                 "payment_method_title", "autorenew_consent_at", "autorenew_last_charge_at"])
+
             # Согласия
             consents = _rows(
                 f"""SELECT context, documents, app_version, privacy_revision,
@@ -1810,6 +1829,7 @@ def handler(event: dict, context) -> dict:
             conn.commit()
 
             sections = [
+                {"key": "account", "label": "Лицевой счёт и автоплатёж", "items": account},
                 {"key": "works", "label": "Работы (проверочные/контрольные)", "items": works},
                 {"key": "materials", "label": "Материалы (конспекты, презентации, тесты, листы, экзамены)", "items": materials},
                 {"key": "students", "label": "Ученики и коды привязки", "items": students},
@@ -1817,6 +1837,7 @@ def handler(event: dict, context) -> dict:
                 {"key": "my_results", "label": "Свои результаты (как ученика)", "items": my_results},
                 {"key": "activity", "label": "Журнал действий", "items": activity},
                 {"key": "payments", "label": "Платежи", "items": payments},
+                {"key": "saved_cards", "label": "Привязанные карты (тип и последние 4 цифры)", "items": saved_cards},
                 {"key": "ai_logs", "label": "Списания ИИ", "items": ai_logs},
                 {"key": "consents", "label": "Согласия", "items": consents},
                 {"key": "tickets", "label": "Обращения в поддержку", "items": tickets},

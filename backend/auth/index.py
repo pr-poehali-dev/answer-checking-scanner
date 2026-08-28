@@ -202,6 +202,20 @@ def translit(s: str) -> str:
     return re.sub(r'[^a-z0-9]', '', res)
 
 
+def generate_personal_account(cur) -> str:
+    """Лицевой счёт: 9 случайных цифр (первая не ноль). Номера намеренно не идут
+    по порядку и не похожи друг на друга — по счёту нельзя понять, сколько
+    пользователей в системе и когда человек зарегистрировался."""
+    while True:
+        candidate = str(random.randint(100000000, 999999999))
+        cur.execute(
+            f"SELECT 1 FROM {SCHEMA}.users WHERE personal_account = %s",
+            (candidate,)
+        )
+        if not cur.fetchone():
+            return candidate
+
+
 def generate_login(first_name: str, last_name: str, cur) -> str:
     """Генерируем логин по схеме: фамилия + первая буква имени; при коллизии — числовой суффикс."""
     f = translit(last_name)
@@ -731,13 +745,15 @@ def handler(event: dict, context) -> dict:
             login = generate_login(first_name, last_name, cur)
             pw_hash = hash_password(password)          # pbkdf2 + соль
             reg_ip = get_client_ip(event, headers)
+            personal_account = generate_personal_account(cur)
             cur.execute(
                 f"""INSERT INTO {SCHEMA}.users
                     (login, password_hash, full_name, first_name, last_name, email, school, role,
-                     created_by, subscription_status, study_group, email_confirmed, registration_ip)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'self', 'none', %s, FALSE, %s) RETURNING id""",
+                     created_by, subscription_status, study_group, email_confirmed, registration_ip,
+                     personal_account)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'self', 'none', %s, FALSE, %s, %s) RETURNING id""",
                 (login, pw_hash, full_name, first_name, last_name, email, school, role,
-                 study_group or None, reg_ip or None)
+                 study_group or None, reg_ip or None, personal_account)
             )
             user_id = cur.fetchone()[0]
             # Фиксируем согласие с офертой и политикой (доказательная база)
@@ -876,7 +892,8 @@ def handler(event: dict, context) -> dict:
             cur.execute(
                 f"""SELECT login, full_name, first_name, last_name, email, school, role, is_active,
                            subscription_status, subscription_until,
-                           trial_until, trial_ai_calls_today, trial_ai_date, ai_balance_kopecks, password_hash
+                           trial_until, trial_ai_calls_today, trial_ai_date, ai_balance_kopecks, password_hash,
+                               personal_account
                     FROM {SCHEMA}.users WHERE vk_id = %s""",
                 (vk_user_id,)
             )
@@ -888,7 +905,8 @@ def handler(event: dict, context) -> dict:
                     cur.execute(
                         f"""SELECT login, full_name, first_name, last_name, email, school, role, is_active,
                                    subscription_status, subscription_until,
-                                   trial_until, trial_ai_calls_today, trial_ai_date, ai_balance_kopecks, password_hash
+                                   trial_until, trial_ai_calls_today, trial_ai_date, ai_balance_kopecks, password_hash,
+                               personal_account
                             FROM {SCHEMA}.users WHERE LOWER(email) = %s AND vk_id IS NULL""",
                         (vk_email,)
                     )
@@ -903,14 +921,16 @@ def handler(event: dict, context) -> dict:
                 reg_ip = get_client_ip(event, headers)
                 login = generate_login(first_name, last_name, cur)
                 random_pw_hash = hash_password(secrets.token_urlsafe(24))
+                personal_account = generate_personal_account(cur)
                 cur.execute(
                     f"""INSERT INTO {SCHEMA}.users
                         (login, password_hash, full_name, first_name, last_name, email, school, role,
-                         created_by, subscription_status, email_confirmed, registration_ip, vk_id)
-                        VALUES (%s, %s, %s, %s, %s, %s, 'САОУ', %s, 'vk_oauth', 'none', TRUE, %s, %s)
+                         created_by, subscription_status, email_confirmed, registration_ip, vk_id,
+                         personal_account)
+                        VALUES (%s, %s, %s, %s, %s, %s, 'САОУ', %s, 'vk_oauth', 'none', TRUE, %s, %s, %s)
                         RETURNING id""",
                     (login, random_pw_hash, full_name, first_name, last_name, vk_email or None,
-                     new_role, reg_ip or None, vk_user_id)
+                     new_role, reg_ip or None, vk_user_id, personal_account)
                 )
                 user_id = cur.fetchone()[0]
                 record_consent(
@@ -923,7 +943,8 @@ def handler(event: dict, context) -> dict:
                 cur.execute(
                     f"""SELECT login, full_name, first_name, last_name, email, school, role, is_active,
                                subscription_status, subscription_until,
-                               trial_until, trial_ai_calls_today, trial_ai_date, ai_balance_kopecks, password_hash
+                               trial_until, trial_ai_calls_today, trial_ai_date, ai_balance_kopecks, password_hash,
+                               personal_account
                         FROM {SCHEMA}.users WHERE login = %s""",
                     (login,)
                 )
@@ -931,7 +952,15 @@ def handler(event: dict, context) -> dict:
 
             (u_login, u_full_name, u_first, u_last, u_email, u_school, u_role, u_active,
              sub_status, sub_until, trial_until, trial_ai_calls_today, trial_ai_date,
-             ai_balance_kopecks, stored_ph) = row
+             ai_balance_kopecks, stored_ph, personal_account) = row
+
+            # Старые аккаунты без лицевого счёта — выдаём его при входе
+            if not personal_account:
+                personal_account = generate_personal_account(cur)
+                cur.execute(
+                    f"UPDATE {SCHEMA}.users SET personal_account = %s WHERE login = %s",
+                    (personal_account, u_login)
+                )
 
             if not u_active:
                 return _resp(403, {"error": "Аккаунт заблокирован. Обратитесь к администратору."})
@@ -956,6 +985,7 @@ def handler(event: dict, context) -> dict:
                 "email": u_email, "school": u_school, "token": token,
                 "ai_balance_kopecks": ai_balance_kopecks or 0,
                 "ai_balance_rub": round((ai_balance_kopecks or 0) / 100, 2),
+                "personal_account": personal_account,
                 **sub,
             })
         finally:
@@ -1155,7 +1185,8 @@ def handler(event: dict, context) -> dict:
             cur.execute(
                 f"""SELECT login, password_hash, full_name, first_name, last_name, email, school, role, is_active,
                           subscription_status, subscription_until,
-                          trial_until, trial_ai_calls_today, trial_ai_date, ai_balance_kopecks, email_confirmed
+                          trial_until, trial_ai_calls_today, trial_ai_date, ai_balance_kopecks, email_confirmed,
+                          personal_account
                     FROM {SCHEMA}.users
                     WHERE login = %s OR LOWER(email) = LOWER(%s)
                     LIMIT 1""",
@@ -1171,7 +1202,15 @@ def handler(event: dict, context) -> dict:
 
             (login, stored_ph, full_name, first_name, last_name, email, school, role, is_active,
              sub_status, sub_until, trial_until, trial_ai_calls_today, trial_ai_date, ai_balance_kopecks,
-             email_confirmed) = row
+             email_confirmed, personal_account) = row
+
+            # Старые аккаунты без лицевого счёта — выдаём его при первом входе
+            if not personal_account:
+                personal_account = generate_personal_account(cur)
+                cur.execute(
+                    f"UPDATE {SCHEMA}.users SET personal_account = %s WHERE login = %s",
+                    (personal_account, login)
+                )
 
             if not is_active:
                 return _resp(403, {"error": "Аккаунт заблокирован. Обратитесь к администратору."})
@@ -1220,6 +1259,7 @@ def handler(event: dict, context) -> dict:
                 "email": email, "school": school, "token": token,
                 "ai_balance_kopecks": ai_balance_kopecks or 0,
                 "ai_balance_rub": round((ai_balance_kopecks or 0) / 100, 2),
+                "personal_account": personal_account,
                 **sub,
             })
         finally:
@@ -1240,7 +1280,8 @@ def handler(event: dict, context) -> dict:
             cur = conn.cursor()
             cur.execute(
                 f"""SELECT subscription_status, subscription_until,
-                           trial_until, trial_ai_calls_today, trial_ai_date, role, ai_balance_kopecks
+                           trial_until, trial_ai_calls_today, trial_ai_date, role, ai_balance_kopecks,
+                           personal_account
                     FROM {SCHEMA}.users WHERE login = %s""",
                 (login,)
             )
@@ -1250,10 +1291,18 @@ def handler(event: dict, context) -> dict:
             sub = get_subscription_payload(row[0], row[1], row[2], row[3] or 0, row[4])
             user_role = row[5]
             ai_balance_kop = row[6] or 0
+            personal_account = row[7]
+            if not personal_account:
+                personal_account = generate_personal_account(cur)
+                cur.execute(
+                    f"UPDATE {SCHEMA}.users SET personal_account = %s WHERE login = %s",
+                    (personal_account, login)
+                )
+                conn.commit()
             if user_role == "tester":
                 sub["subscription_active"] = True
                 sub["subscription_status"] = "active"
-            return _resp(200, {"login": login, "role": user_role, "ai_balance_kopecks": ai_balance_kop, "ai_balance_rub": round(ai_balance_kop / 100, 2), **sub})
+            return _resp(200, {"login": login, "role": user_role, "ai_balance_kopecks": ai_balance_kop, "ai_balance_rub": round(ai_balance_kop / 100, 2), "personal_account": personal_account, **sub})
         finally:
             conn.close()
 
@@ -1411,8 +1460,9 @@ def handler(event: dict, context) -> dict:
         try:
             cur = conn.cursor()
             cur.execute(
-                f"INSERT INTO {SCHEMA}.users (login, password_hash, full_name, school, role, created_by) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
-                (login, hash_password(password), full_name, school, role, "admin")
+                f"INSERT INTO {SCHEMA}.users (login, password_hash, full_name, school, role, created_by, personal_account) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                (login, hash_password(password), full_name, school, role, "admin",
+                 generate_personal_account(cur))
             )
             conn.commit()
             user_id = cur.fetchone()[0]

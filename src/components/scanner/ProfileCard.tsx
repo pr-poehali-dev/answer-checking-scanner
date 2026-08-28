@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import Icon from "@/components/ui/icon";
 import { appStore, useAppStore } from "@/store/appStore";
 import { authApi } from "@/lib/api";
-import { AutoRenewCard } from "@/components/scanner/AutoRenewCard";
 
 interface TokenLog {
   action: string;
@@ -140,9 +139,6 @@ export function ProfileCard() {
                 </span>
               )}
             </div>
-
-            {/* Управление автопродлением (если включено) */}
-            <AutoRenewCard login={teacher.login} />
 
             {/* Данные */}
             <div className="grid grid-cols-2 gap-x-6 gap-y-3">

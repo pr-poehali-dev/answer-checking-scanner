@@ -27,6 +27,7 @@ function saveSession(teacher: Teacher) {
       trialAiCallsToday: teacher.trialAiCallsToday,
       trialAiLimit: teacher.trialAiLimit,
       aiTokensKopecks: teacher.aiTokensKopecks,
+      personalAccount: teacher.personalAccount,
     }));
   } catch { /* ignore */ }
 }
@@ -78,6 +79,7 @@ function loadSession(): Teacher | null {
       trialAiCallsToday: d.trialAiCallsToday || 0,
       trialAiLimit: d.trialAiLimit || 5,
       aiTokensKopecks: d.aiTokensKopecks || 0,
+      personalAccount: d.personalAccount || null,
     };
   } catch { return null; }
 }
@@ -158,6 +160,8 @@ export interface Teacher {
   trialAiCallsToday: number;
   trialAiLimit: number;
   aiTokensKopecks: number;
+  /** Лицевой счёт пользователя — 9 цифр, выдаётся при регистрации. */
+  personalAccount?: string | null;
 }
 
 export interface Student {
@@ -383,6 +387,7 @@ function applyConfirmedUser(user: AuthUser) {
     trialAiCallsToday: user.trial_ai_calls_today || 0,
     trialAiLimit: user.trial_ai_limit || 5,
     aiTokensKopecks: 0,
+    personalAccount: null,
   };
   saveSession(signupTeacher);
   state = { ...state, teacher: signupTeacher, storageMode: loadStorageMode(signupTeacher.login) };
@@ -424,6 +429,7 @@ export const appStore = {
         trialAiCallsToday: user.trial_ai_calls_today || 0,
         trialAiLimit: user.trial_ai_limit || 5,
         aiTokensKopecks: (user as unknown as { ai_balance_kopecks?: number }).ai_balance_kopecks || 0,
+        personalAccount: (user as unknown as { personal_account?: string }).personal_account || null,
       };
       saveSession(newTeacher);
       state = { ...state, teacher: newTeacher, storageMode: loadStorageMode(newTeacher.login) };
@@ -484,6 +490,7 @@ export const appStore = {
         trialAiCallsToday: user.trial_ai_calls_today || 0,
         trialAiLimit: user.trial_ai_limit || 5,
         aiTokensKopecks: (user as unknown as { ai_balance_kopecks?: number }).ai_balance_kopecks || 0,
+        personalAccount: (user as unknown as { personal_account?: string }).personal_account || null,
       };
       saveSession(newTeacher);
       state = { ...state, teacher: newTeacher, storageMode: loadStorageMode(newTeacher.login) };
@@ -584,6 +591,7 @@ export const appStore = {
         trialAiCallsToday: data.trial_ai_calls_today || 0,
         trialAiLimit: data.trial_ai_limit || 5,
         aiTokensKopecks: (data as unknown as { ai_balance_kopecks?: number }).ai_balance_kopecks ?? state.teacher!.aiTokensKopecks,
+        personalAccount: (data as unknown as { personal_account?: string }).personal_account ?? state.teacher!.personalAccount ?? null,
       };
       saveSession(updatedTeacher);
       state = { ...state, teacher: updatedTeacher };

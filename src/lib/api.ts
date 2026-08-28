@@ -2018,6 +2018,18 @@ export interface AutorenewStatus {
   last_error: string | null;
 }
 
+/** Привязанная карта. Полных данных карты сервис не хранит — только тип и последние 4 цифры. */
+export interface SavedCard {
+  id: number;
+  card_type: string;
+  card_last4: string | null;
+  card_title: string | null;
+  is_default: boolean;
+  autorenew_enabled: boolean;
+  created_at: string | null;
+  last_used_at: string | null;
+}
+
 export const subscriptionApi = {
   plans: () =>
     subRequest<{ plans: SubscriptionPlan[]; available: boolean }>("plans", { method: "GET" }),
@@ -2057,15 +2069,45 @@ export const subscriptionApi = {
       login,
     }),
 
-  buyTokens: (login: string, amount_rub: number, return_url: string) =>
+  buyTokens: (login: string, amount_rub: number, return_url: string, save_card = false) =>
     subRequest<{ payment_id: string; confirmation_url: string; status: string; amount_rub: number }>(
       "buy-tokens",
       {
         method: "POST",
         login,
-        body: JSON.stringify({ login, amount_rub, return_url }),
+        body: JSON.stringify({ login, amount_rub, return_url, save_card }),
       }
     ),
+
+  cards: (login: string) =>
+    subRequest<{ cards: SavedCard[]; personal_account: string | null }>("cards", {
+      method: "GET",
+      login,
+    }),
+
+  addCard: (login: string, return_url: string) =>
+    subRequest<{ payment_id: string; confirmation_url: string; status: string; amount_rub: number }>(
+      "add-card",
+      {
+        method: "POST",
+        login,
+        body: JSON.stringify({ login, return_url }),
+      }
+    ),
+
+  deleteCard: (login: string, card_id: number) =>
+    subRequest<{ ok: boolean; deleted: number; cards_left: number }>("delete-card", {
+      method: "POST",
+      login,
+      body: JSON.stringify({ login, card_id }),
+    }),
+
+  deleteAllCards: (login: string) =>
+    subRequest<{ ok: boolean; deleted: number; cards_left: number }>("delete-all-cards", {
+      method: "POST",
+      login,
+      body: JSON.stringify({ login }),
+    }),
 
   checkTokens: (payment_id: string) =>
     subRequest<{ status: string; amount_rub?: number; ai_balance_kopecks?: number; ai_balance_rub?: number }>(

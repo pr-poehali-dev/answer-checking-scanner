@@ -80,6 +80,55 @@ def get_plan(code: str):
     return None
 
 
+# ── Тестовый магазин ЮKassa (закрыт от обычных пользователей) ───────────────
+# Пользователи с ролью "tester" всегда платят через отдельный тестовый магазин
+# ЮKassa — это позволяет проверять весь платёжный сценарий (подписка, баланс,
+# автоплатёж) без списания реальных денег и без риска затронуть боевые данные.
+# Обычные пользователи не могут включить этот режим — переключение целиком
+# определяется ролью аккаунта в БД, а не параметрами запроса от фронта.
+
+def get_user_role(cur, login: str) -> str | None:
+    cur.execute(f"SELECT role FROM {SCHEMA}.users WHERE login = %s", (login,))
+    row = cur.fetchone()
+    return row[0] if row else None
+
+
+def is_tester_role(role: str | None) -> bool:
+    return role == "tester"
+
+
+def get_yookassa_creds(is_test: bool) -> tuple[str, str]:
+    if is_test:
+        shop_id = os.environ.get("YOOKASSA_TEST_SHOP_ID", "").strip()
+        secret = os.environ.get("YOOKASSA_TEST_SECRET_KEY", "").strip()
+        if not shop_id or not secret:
+            raise RuntimeError("Тестовый магазин ЮKassa не настроен (YOOKASSA_TEST_SHOP_ID/SECRET_KEY)")
+        return shop_id, secret
+    shop_id = os.environ.get("YOOKASSA_SHOP_ID", "").strip()
+    secret = os.environ.get("YOOKASSA_SECRET_KEY", "").strip()
+    if not shop_id or not secret:
+        raise RuntimeError("ЮKassa не настроена (YOOKASSA_SHOP_ID/SECRET_KEY)")
+    return shop_id, secret
+
+
+def yookassa_available(is_test: bool) -> bool:
+    if is_test:
+        return bool(os.environ.get("YOOKASSA_TEST_SHOP_ID") and os.environ.get("YOOKASSA_TEST_SECRET_KEY"))
+    return bool(os.environ.get("YOOKASSA_SHOP_ID") and os.environ.get("YOOKASSA_SECRET_KEY"))
+
+
+def payment_is_test(cur, payment_id: str) -> bool:
+    """Определяет, через какой магазин (боевой/тестовый) был создан платёж —
+    по нашей записи в payments. Нужно, чтобы GET /payments/{id} ушёл в тот же
+    магазин ЮKassa, где платёж создавался (иначе ЮKassa вернёт 404)."""
+    cur.execute(
+        f"SELECT is_test FROM {SCHEMA}.payments WHERE provider_payment_id = %s LIMIT 1",
+        (payment_id,)
+    )
+    row = cur.fetchone()
+    return bool(row[0]) if row else False
+
+
 # ── Привязанные карты ────────────────────────────────────────────────────────
 # Полные данные карты у нас НЕ хранятся: ЮKassa отдаёт только тип платёжной
 # системы и последние 4 цифры — этого достаточно, чтобы пользователь узнал
@@ -107,11 +156,13 @@ def card_type_label(raw: str | None) -> str:
     return CARD_TYPE_LABELS.get(raw, CARD_TYPE_LABELS.get(str(raw).title(), str(raw)))
 
 
-def save_card(cur, login: str, payment_method: dict) -> None:
+def save_card(cur, login: str, payment_method: dict, is_test: bool = False) -> None:
     """Сохраняет привязанную карту пользователя (токен + тип + последние 4 цифры).
 
     Вызывается после успешной оплаты, если пользователь согласился запомнить карту.
     Повторная оплата той же картой не плодит дубли — обновляем существующую запись.
+    is_test помечает карты, привязанные через тестовый магазин ЮKassa (роль tester) —
+    такие карты нельзя перепутать с боевыми при отображении и автосписании.
     """
     pm_id = (payment_method or {}).get("id")
     if not pm_id:
@@ -124,23 +175,24 @@ def save_card(cur, login: str, payment_method: dict) -> None:
     cur.execute(
         f"""INSERT INTO {SCHEMA}.saved_cards
             (user_login, payment_method_id, card_type, card_last4, card_title,
-             is_default, autorenew_enabled, last_used_at)
-            VALUES (%s, %s, %s, %s, %s, TRUE, FALSE, NOW())
+             is_default, autorenew_enabled, last_used_at, is_test)
+            VALUES (%s, %s, %s, %s, %s, TRUE, FALSE, NOW(), %s)
             ON CONFLICT (payment_method_id) DO UPDATE
             SET card_type = EXCLUDED.card_type,
                 card_last4 = EXCLUDED.card_last4,
                 card_title = EXCLUDED.card_title,
                 last_used_at = NOW()""",
-        (login, pm_id, card_type, last4, title[:128])
+        (login, pm_id, card_type, last4, title[:128], is_test)
     )
 
 
-def yookassa_request(method: str, path: str, body: dict | None = None, idempotence: str | None = None) -> dict:
-    """REST-запрос к ЮKassa API (api.yookassa.ru/v3)."""
-    shop_id = os.environ.get("YOOKASSA_SHOP_ID", "").strip()
-    secret = os.environ.get("YOOKASSA_SECRET_KEY", "").strip()
-    if not shop_id or not secret:
-        raise RuntimeError("ЮKassa не настроена (YOOKASSA_SHOP_ID/SECRET_KEY)")
+def yookassa_request(method: str, path: str, body: dict | None = None, idempotence: str | None = None,
+                     is_test: bool = False) -> dict:
+    """REST-запрос к ЮKassa API (api.yookassa.ru/v3).
+
+    is_test=True уходит в отдельный тестовый магазин (закрыт от обычных
+    пользователей, доступен только для роли "tester" — см. get_yookassa_creds)."""
+    shop_id, secret = get_yookassa_creds(is_test)
 
     auth = base64.b64encode(f"{shop_id}:{secret}".encode()).decode()
     url = f"https://api.yookassa.ru/v3{path}"
@@ -170,7 +222,7 @@ def yookassa_request(method: str, path: str, body: dict | None = None, idempoten
 def grant_subscription(login: str, plan_code: str, months: int, payment_id: str | None,
                        autorenew: bool = False, payment_method_id: str | None = None,
                        payment_method_title: str | None = None, is_recurrent: bool = False,
-                       payment_method: dict | None = None) -> datetime:
+                       payment_method: dict | None = None, is_test: bool = False) -> datetime:
     """Активирует подписку: продлевает или начинает новую. Начисляет подарочные ИИ-рубли
     по тарифу (40 ₽ / 250 ₽ / 550 ₽ за 1/6/12 месяцев). Возвращает дату окончания.
 
@@ -246,7 +298,7 @@ def grant_subscription(login: str, plan_code: str, months: int, payment_id: str 
 
         # Карта, которую пользователь разрешил запомнить — в список привязанных
         if payment_method and payment_method.get("saved"):
-            save_card(cur, login, payment_method)
+            save_card(cur, login, payment_method, is_test=is_test)
             if autorenew and payment_method_id:
                 cur.execute(
                     f"""UPDATE {SCHEMA}.saved_cards SET autorenew_enabled = TRUE
@@ -272,11 +324,12 @@ def grant_subscription(login: str, plan_code: str, months: int, payment_id: str 
             )
             u = cur.fetchone()
             if u and u[0]:
+                base_plan_name = (plan or {}).get("name") or f"Подписка САОУ ({months} мес.)"
                 send_payment_receipt(
                     cur, SCHEMA,
                     to_email=u[0], full_name=u[1] or "", personal_account=u[2],
                     kind="subscription",
-                    plan_name=(plan or {}).get("name") or f"Подписка САОУ ({months} мес.)",
+                    plan_name=(f"[ТЕСТ] {base_plan_name}" if is_test else base_plan_name),
                     amount_rub=float((plan or {}).get("amount") or 0),
                     payment_id=payment_id or "",
                     subscription_until=new_until,
@@ -313,9 +366,17 @@ def handler(event: dict, context) -> dict:
 
     # ── GET plans ───────────────────────────────────────────────────────────
     if route == "plans":
+        is_test = False
+        if user_login and user_login != "admin":
+            conn = get_conn()
+            try:
+                is_test = is_tester_role(get_user_role(conn.cursor(), user_login))
+            finally:
+                conn.close()
         return _resp(200, {
             "plans": PLANS,
-            "available": bool(os.environ.get("YOOKASSA_SHOP_ID") and os.environ.get("YOOKASSA_SECRET_KEY")),
+            "available": yookassa_available(is_test),
+            "test_mode": is_test,
         })
 
     # ── POST create ─────────────────────────────────────────────────────────
@@ -332,20 +393,22 @@ def handler(event: dict, context) -> dict:
         # Автопродление: только для месячного тарифа и при явном согласии пользователя
         autorenew = bool(body.get("autorenew")) and plan_code == "monthly"
 
-        # Проверим, что пользователь существует и не админ
+        # Проверим, что пользователь существует и не админ. Роль определяет магазин
+        # ЮKassa (боевой/тестовый) — пользователь НЕ может повлиять на это сам.
         conn = get_conn()
         try:
             cur = conn.cursor()
             cur.execute(
-                f"SELECT email, full_name FROM {SCHEMA}.users WHERE login = %s",
+                f"SELECT email, full_name, role FROM {SCHEMA}.users WHERE login = %s",
                 (user_login,)
             )
             row = cur.fetchone()
             if not row:
                 return _resp(404, {"error": "Пользователь не найден"})
-            email, full_name = row[0], row[1]
+            email, full_name, user_role = row[0], row[1], row[2]
         finally:
             conn.close()
+        is_test = is_tester_role(user_role)
 
         try:
             payment_body = {
@@ -356,6 +419,7 @@ def handler(event: dict, context) -> dict:
                 "metadata": {
                     "login": user_login, "plan": plan_code, "months": str(plan["months"]),
                     "autorenew": "1" if autorenew else "0",
+                    "is_test": "1" if is_test else "0",
                 },
             }
             # Сохраняем способ оплаты для будущих безакцептных списаний (54-ФЗ: с согласия)
@@ -375,7 +439,7 @@ def handler(event: dict, context) -> dict:
                 }
 
             idempotence = str(uuid.uuid4())
-            result = yookassa_request("POST", "/payments", payment_body, idempotence=idempotence)
+            result = yookassa_request("POST", "/payments", payment_body, idempotence=idempotence, is_test=is_test)
         except Exception as e:
             return _resp(503, {"error": f"Не удалось создать платёж: {e}"})
 
@@ -388,9 +452,9 @@ def handler(event: dict, context) -> dict:
             cur = conn.cursor()
             cur.execute(
                 f"""INSERT INTO {SCHEMA}.payments
-                    (user_login, plan, amount, months, provider, provider_payment_id, status, source)
-                    VALUES (%s, %s, %s, %s, 'yookassa', %s, %s, 'user')""",
-                (user_login, plan_code, plan["amount"], plan["months"], payment_id, status)
+                    (user_login, plan, amount, months, provider, provider_payment_id, status, source, is_test)
+                    VALUES (%s, %s, %s, %s, 'yookassa', %s, %s, 'user', %s)""",
+                (user_login, plan_code, plan["amount"], plan["months"], payment_id, status, is_test)
             )
             conn.commit()
         finally:
@@ -402,6 +466,7 @@ def handler(event: dict, context) -> dict:
             "status": status,
             "amount": plan["amount"],
             "plan": plan_code,
+            "test_mode": is_test,
         })
 
     # ── POST check ──────────────────────────────────────────────────────────
@@ -410,8 +475,16 @@ def handler(event: dict, context) -> dict:
         if not payment_id:
             return _resp(400, {"error": "Укажите payment_id"})
 
+        # Платёж мог быть создан в тестовом магазине (роль tester) — узнаём это
+        # по нашей записи в payments, иначе запрос уйдёт не в тот магазин ЮKassa.
+        conn = get_conn()
         try:
-            result = yookassa_request("GET", f"/payments/{payment_id}")
+            is_test = payment_is_test(conn.cursor(), payment_id)
+        finally:
+            conn.close()
+
+        try:
+            result = yookassa_request("GET", f"/payments/{payment_id}", is_test=is_test)
         except Exception as e:
             return _resp(503, {"error": f"Не удалось проверить платёж: {e}"})
 
@@ -436,7 +509,7 @@ def handler(event: dict, context) -> dict:
                 until = grant_subscription(
                     login, plan_code, months, payment_id,
                     autorenew=autorenew, payment_method_id=pm_id, payment_method_title=pm_title,
-                    payment_method=pm,
+                    payment_method=pm, is_test=is_test,
                 )
                 plan = get_plan(plan_code)
                 return _resp(200, {
@@ -515,13 +588,13 @@ def handler(event: dict, context) -> dict:
         try:
             cur = conn.cursor()
             cur.execute(
-                f"SELECT email, full_name, subscription_until, trial_until FROM {SCHEMA}.users WHERE login = %s",
+                f"SELECT email, full_name, subscription_until, trial_until, role FROM {SCHEMA}.users WHERE login = %s",
                 (user_login,)
             )
             row = cur.fetchone()
             if not row:
                 return _resp(404, {"error": "Пользователь не найден"})
-            email, full_name, sub_until, trial_until = row
+            email, full_name, sub_until, trial_until, user_role = row
             now = datetime.utcnow()
             has_paid_sub = isinstance(sub_until, datetime) and sub_until > now
             on_trial = isinstance(trial_until, datetime) and trial_until > now
@@ -530,6 +603,7 @@ def handler(event: dict, context) -> dict:
                 return _resp(403, {"error": "Пополнение баланса ИИ недоступно во время пробного периода. Оформите подписку — вы получите подарочный ИИ-баланс."})
         finally:
             conn.close()
+        is_test = is_tester_role(user_role)
 
         try:
             payment_body = {
@@ -537,7 +611,8 @@ def handler(event: dict, context) -> dict:
                 "capture": True,
                 "confirmation": {"type": "redirect", "return_url": return_url},
                 "description": f"САОУ · Пополнение баланса ИИ · {full_name}",
-                "metadata": {"login": user_login, "plan": "balance", "amount_rub": str(amount_rub)},
+                "metadata": {"login": user_login, "plan": "balance", "amount_rub": str(amount_rub),
+                             "is_test": "1" if is_test else "0"},
             }
             # Пользователь отметил «Запомнить данные карты» — просим ЮKassa сохранить токен
             if bool(body.get("save_card")):
@@ -555,7 +630,7 @@ def handler(event: dict, context) -> dict:
                     }],
                 }
             idempotence = str(uuid.uuid4())
-            result = yookassa_request("POST", "/payments", payment_body, idempotence=idempotence)
+            result = yookassa_request("POST", "/payments", payment_body, idempotence=idempotence, is_test=is_test)
         except Exception as e:
             return _resp(503, {"error": f"Не удалось создать платёж: {e}"})
 
@@ -568,9 +643,9 @@ def handler(event: dict, context) -> dict:
             cur = conn.cursor()
             cur.execute(
                 f"""INSERT INTO {SCHEMA}.payments
-                    (user_login, plan, amount, months, provider, provider_payment_id, status, source)
-                    VALUES (%s, 'balance', %s, 0, 'yookassa', %s, %s, 'user')""",
-                (user_login, amount_rub, payment_id, status)
+                    (user_login, plan, amount, months, provider, provider_payment_id, status, source, is_test)
+                    VALUES (%s, 'balance', %s, 0, 'yookassa', %s, %s, 'user', %s)""",
+                (user_login, amount_rub, payment_id, status, is_test)
             )
             conn.commit()
         finally:
@@ -581,6 +656,7 @@ def handler(event: dict, context) -> dict:
             "confirmation_url": confirmation,
             "status": status,
             "amount_rub": amount_rub,
+            "test_mode": is_test,
         })
 
     # ── POST check-tokens — проверить статус платежа за пополнение баланса ────
@@ -588,8 +664,15 @@ def handler(event: dict, context) -> dict:
         payment_id = (body.get("payment_id") or "").strip()
         if not payment_id:
             return _resp(400, {"error": "Укажите payment_id"})
+
+        conn = get_conn()
         try:
-            result = yookassa_request("GET", f"/payments/{payment_id}")
+            is_test = payment_is_test(conn.cursor(), payment_id)
+        finally:
+            conn.close()
+
+        try:
+            result = yookassa_request("GET", f"/payments/{payment_id}", is_test=is_test)
         except Exception as e:
             return _resp(503, {"error": f"Не удалось проверить платёж: {e}"})
 
@@ -635,7 +718,7 @@ def handler(event: dict, context) -> dict:
                 # Если пользователь разрешил запомнить карту — добавляем её в список привязанных
                 pm = result.get("payment_method") or {}
                 if pm.get("saved"):
-                    save_card(cur, login, pm)
+                    save_card(cur, login, pm, is_test=is_test)
                 conn.commit()
 
                 # Чек шлём только при первом подтверждении платежа (updated > 0),
@@ -649,12 +732,13 @@ def handler(event: dict, context) -> dict:
                         u = cur.fetchone()
                         if u and u[0]:
                             bind_card = meta.get("bind_card") == "1"
+                            base_name = ("Привязка карты (зачислено на баланс ИИ)"
+                                        if bind_card else "Пополнение баланса ИИ")
                             send_payment_receipt(
                                 cur, SCHEMA,
                                 to_email=u[0], full_name=u[1] or "", personal_account=u[2],
                                 kind="balance",
-                                plan_name=("Привязка карты (зачислено на баланс ИИ)"
-                                           if bind_card else "Пополнение баланса ИИ"),
+                                plan_name=(f"[ТЕСТ] {base_name}" if is_test else base_name),
                                 amount_rub=amount_rub,
                                 payment_id=payment_id,
                                 balance_rub=round(new_kop / 100, 2),
@@ -734,7 +818,7 @@ def handler(event: dict, context) -> dict:
             cur = conn.cursor()
             cur.execute(
                 f"""SELECT id, card_type, card_last4, card_title, is_default,
-                           autorenew_enabled, created_at, last_used_at
+                           autorenew_enabled, created_at, last_used_at, is_test
                     FROM {SCHEMA}.saved_cards
                     WHERE user_login = %s
                     ORDER BY created_at DESC""",
@@ -750,6 +834,7 @@ def handler(event: dict, context) -> dict:
                     "autorenew_enabled": bool(r[5]),
                     "created_at": str(r[6]) if r[6] else None,
                     "last_used_at": str(r[7]) if r[7] else None,
+                    "is_test": bool(r[8]),
                 }
                 for r in cur.fetchall()
             ]
@@ -848,15 +933,16 @@ def handler(event: dict, context) -> dict:
         try:
             cur = conn.cursor()
             cur.execute(
-                f"SELECT email, full_name FROM {SCHEMA}.users WHERE login = %s",
+                f"SELECT email, full_name, role FROM {SCHEMA}.users WHERE login = %s",
                 (user_login,)
             )
             row = cur.fetchone()
             if not row:
                 return _resp(404, {"error": "Пользователь не найден"})
-            email, full_name = row
+            email, full_name, user_role = row
         finally:
             conn.close()
+        is_test = is_tester_role(user_role)
 
         try:
             payment_body = {
@@ -866,7 +952,8 @@ def handler(event: dict, context) -> dict:
                 "confirmation": {"type": "redirect", "return_url": return_url},
                 "description": f"САОУ · Привязка карты · {full_name}",
                 "metadata": {"login": user_login, "plan": "balance",
-                             "amount_rub": str(amount_rub), "bind_card": "1"},
+                             "amount_rub": str(amount_rub), "bind_card": "1",
+                             "is_test": "1" if is_test else "0"},
             }
             if email:
                 payment_body["receipt"] = {
@@ -881,7 +968,7 @@ def handler(event: dict, context) -> dict:
                     }],
                 }
             result = yookassa_request("POST", "/payments", payment_body,
-                                      idempotence=str(uuid.uuid4()))
+                                      idempotence=str(uuid.uuid4()), is_test=is_test)
         except Exception as e:
             return _resp(503, {"error": f"Не удалось создать платёж: {e}"})
 
@@ -894,9 +981,9 @@ def handler(event: dict, context) -> dict:
             cur = conn.cursor()
             cur.execute(
                 f"""INSERT INTO {SCHEMA}.payments
-                    (user_login, plan, amount, months, provider, provider_payment_id, status, source)
-                    VALUES (%s, 'balance', %s, 0, 'yookassa', %s, %s, 'user')""",
-                (user_login, amount_rub, payment_id, status)
+                    (user_login, plan, amount, months, provider, provider_payment_id, status, source, is_test)
+                    VALUES (%s, 'balance', %s, 0, 'yookassa', %s, %s, 'user', %s)""",
+                (user_login, amount_rub, payment_id, status, is_test)
             )
             conn.commit()
         finally:
@@ -907,6 +994,7 @@ def handler(event: dict, context) -> dict:
             "confirmation_url": confirmation,
             "status": status,
             "amount_rub": amount_rub,
+            "test_mode": is_test,
         })
 
     # ── POST charge-recurring — безакцептные автосписания (вызывается по cron) ──
@@ -929,7 +1017,7 @@ def handler(event: dict, context) -> dict:
             cur = conn.cursor()
             # Берём подписки с включённым автопродлением, срок которых истекает в ближайшее окно
             cur.execute(
-                f"""SELECT login, autorenew_plan, payment_method_id, email, full_name
+                f"""SELECT login, autorenew_plan, payment_method_id, email, full_name, role
                     FROM {SCHEMA}.users
                     WHERE autorenew_enabled = true
                       AND payment_method_id IS NOT NULL
@@ -944,10 +1032,11 @@ def handler(event: dict, context) -> dict:
             conn.close()
 
         charged, failed = [], []
-        for login, plan_code, pm_id, email, full_name in due:
+        for login, plan_code, pm_id, email, full_name, user_role in due:
             plan = get_plan(plan_code or "monthly")
             if not plan:
                 continue
+            is_test = is_tester_role(user_role)
             try:
                 pay_body = {
                     "amount": {"value": f"{plan['amount']:.2f}", "currency": "RUB"},
@@ -956,7 +1045,7 @@ def handler(event: dict, context) -> dict:
                     "description": f"САОУ · Автопродление · {plan['name']} · {full_name}",
                     "metadata": {
                         "login": login, "plan": plan_code, "months": str(plan["months"]),
-                        "autorenew": "0", "recurrent": "1",
+                        "autorenew": "0", "recurrent": "1", "is_test": "1" if is_test else "0",
                     },
                 }
                 if email:
@@ -971,7 +1060,7 @@ def handler(event: dict, context) -> dict:
                             "payment_mode": "full_payment",
                         }],
                     }
-                result = yookassa_request("POST", "/payments", pay_body, idempotence=str(uuid.uuid4()))
+                result = yookassa_request("POST", "/payments", pay_body, idempotence=str(uuid.uuid4()), is_test=is_test)
                 pay_id = result.get("id")
                 status = result.get("status", "pending")
 
@@ -981,17 +1070,17 @@ def handler(event: dict, context) -> dict:
                     cur = conn.cursor()
                     cur.execute(
                         f"""INSERT INTO {SCHEMA}.payments
-                            (user_login, plan, amount, months, provider, provider_payment_id, status, source, is_recurrent)
-                            VALUES (%s, %s, %s, %s, 'yookassa', %s, %s, 'autorenew', true)""",
-                        (login, plan_code, plan["amount"], plan["months"], pay_id, status)
+                            (user_login, plan, amount, months, provider, provider_payment_id, status, source, is_recurrent, is_test)
+                            VALUES (%s, %s, %s, %s, 'yookassa', %s, %s, 'autorenew', true, %s)""",
+                        (login, plan_code, plan["amount"], plan["months"], pay_id, status, is_test)
                     )
                     conn.commit()
                 finally:
                     conn.close()
 
                 if status == "succeeded":
-                    grant_subscription(login, plan_code, plan["months"], pay_id, is_recurrent=True)
-                    charged.append({"login": login, "payment_id": pay_id, "amount": plan["amount"]})
+                    grant_subscription(login, plan_code, plan["months"], pay_id, is_recurrent=True, is_test=is_test)
+                    charged.append({"login": login, "payment_id": pay_id, "amount": plan["amount"], "test_mode": is_test})
                 else:
                     # Платёж не прошёл сразу (например, требует действий) — не продлеваем
                     _mark_autorenew_error(login, f"Статус платежа: {status}")

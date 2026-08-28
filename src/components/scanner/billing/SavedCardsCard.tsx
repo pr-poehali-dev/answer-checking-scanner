@@ -164,6 +164,12 @@ export function SavedCardsCard({ login, cards, onChanged }: Props) {
                             Автоплатёж
                           </span>
                         )}
+                        {card.is_test && (
+                          <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded-sm bg-amber-100 text-amber-700 font-medium">
+                            <Icon name="FlaskConical" size={10} fallback="AlertTriangle" />
+                            Тест
+                          </span>
+                        )}
                       </div>
                       <p className="text-xs text-muted-foreground mt-0.5">
                         Привязана {formatDate(card.created_at)}

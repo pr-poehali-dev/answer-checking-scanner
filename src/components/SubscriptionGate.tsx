@@ -35,7 +35,7 @@ export default function SubscriptionGate() {
 
   useEffect(() => {
     const load = (attempt = 1) => {
-      subscriptionApi.plans()
+      subscriptionApi.plans(teacher?.login)
         .then(d => { setPlans(d.plans); setAvailable(d.available); setLoadingPlans(false); })
         .catch(e => {
           const msg = (e as Error).message || "";

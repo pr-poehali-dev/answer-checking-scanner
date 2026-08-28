@@ -2,6 +2,7 @@ import { useState } from "react";
 import Icon from "@/components/ui/icon";
 import { subscriptionApi } from "@/lib/api";
 import { useAppStore, appStore } from "@/store/appStore";
+import TestPaymentBanner from "@/components/TestPaymentBanner";
 
 interface TokensModalProps {
   onClose: () => void;
@@ -134,6 +135,8 @@ export default function TokensModal({ onClose }: TokensModalProps) {
         </div>
 
         <div className="p-5 space-y-4">
+          {teacher?.role === "tester" && <TestPaymentBanner />}
+
           {/* Баланс */}
           <div className="flex items-center gap-3 p-3 bg-muted rounded-sm">
             <Icon name="Wallet" size={16} className="text-muted-foreground flex-shrink-0" />

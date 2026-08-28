@@ -6,6 +6,7 @@ import { AutoRenewCard } from "@/components/scanner/AutoRenewCard";
 import PersonalAccountCard from "@/components/scanner/billing/PersonalAccountCard";
 import SavedCardsCard from "@/components/scanner/billing/SavedCardsCard";
 import PaymentHistoryCard from "@/components/scanner/billing/PaymentHistoryCard";
+import TestPaymentBanner from "@/components/TestPaymentBanner";
 
 /**
  * Раздел настроек «Оплаты, карты, автоплатежи».
@@ -66,6 +67,8 @@ export function BillingCard() {
 
   return (
     <div className="space-y-4">
+      {teacher.role === "tester" && <TestPaymentBanner />}
+
       <PersonalAccountCard
         personalAccount={account}
         balanceKopecks={teacher.aiTokensKopecks ?? 0}

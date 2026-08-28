@@ -2034,14 +2034,16 @@ export interface SavedCard {
   autorenew_enabled: boolean;
   created_at: string | null;
   last_used_at: string | null;
+  /** Карта привязана через тестовый магазин ЮKassa (доступно только роли "tester"). */
+  is_test?: boolean;
 }
 
 export const subscriptionApi = {
-  plans: () =>
-    subRequest<{ plans: SubscriptionPlan[]; available: boolean }>("plans", { method: "GET" }),
+  plans: (login?: string) =>
+    subRequest<{ plans: SubscriptionPlan[]; available: boolean; test_mode?: boolean }>("plans", { method: "GET", login }),
 
   create: (login: string, plan: string, return_url: string, autorenew = false) =>
-    subRequest<{ payment_id: string; confirmation_url: string; status: string; amount: number; plan: string }>(
+    subRequest<{ payment_id: string; confirmation_url: string; status: string; amount: number; plan: string; test_mode?: boolean }>(
       "create",
       {
         method: "POST",
@@ -2076,7 +2078,7 @@ export const subscriptionApi = {
     }),
 
   buyTokens: (login: string, amount_rub: number, return_url: string, save_card = false) =>
-    subRequest<{ payment_id: string; confirmation_url: string; status: string; amount_rub: number }>(
+    subRequest<{ payment_id: string; confirmation_url: string; status: string; amount_rub: number; test_mode?: boolean }>(
       "buy-tokens",
       {
         method: "POST",

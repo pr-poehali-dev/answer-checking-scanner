@@ -7,6 +7,7 @@ import PersonalAccountCard from "@/components/scanner/billing/PersonalAccountCar
 import SavedCardsCard from "@/components/scanner/billing/SavedCardsCard";
 import PaymentHistoryCard from "@/components/scanner/billing/PaymentHistoryCard";
 import TestPaymentBanner from "@/components/TestPaymentBanner";
+import { usePaymentReturn } from "@/hooks/usePaymentReturn";
 
 /**
  * Раздел настроек «Оплаты, карты, автоплатежи».
@@ -55,11 +56,11 @@ export function BillingCard() {
   useEffect(() => { loadCards(); }, [loadCards]);
   useEffect(() => { loadHistory(); }, [loadHistory]);
 
-  // Пользователь вернулся с оплаты — обновляем баланс и списки
-  useEffect(() => {
-    if (!login) return;
-    appStore.refreshSubscription();
-  }, [login]);
+  // Пользователь вернулся с оплаты (пополнение баланса, привязка карты) —
+  // подтверждаем платёж у ЮKassa и обновляем баланс/список карт/историю.
+  usePaymentReturn(!!login, {
+    onBalanceConfirmed: () => { loadCards(); loadHistory(); },
+  });
 
   if (!teacher) return null;
 

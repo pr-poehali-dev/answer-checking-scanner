@@ -3,6 +3,7 @@ import Icon from "@/components/ui/icon";
 import { appStore, useAppStore } from "@/store/appStore";
 import { subscriptionApi, type SubscriptionPlan } from "@/lib/api";
 import CompanyFooter from "@/components/CompanyFooter";
+import { rememberPendingPayment, getPendingSubscriptionPaymentId, clearPendingPayment } from "@/hooks/usePaymentReturn";
 
 function daysLeft(iso: string | null | undefined): number {
   if (!iso) return 0;
@@ -50,10 +51,11 @@ export default function SubscriptionGate() {
     load();
   }, []);
 
-  // Возврат после оплаты — обрабатываем ?payment_id=...
+  // Возврат после оплаты — обрабатываем ?payment_id=... Если ЮKassa не добавила
+  // параметр в return_url (так бывает), достаём сохранённый ранее payment_id.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const pid = params.get("payment_id");
+    const pid = params.get("payment_id") || getPendingSubscriptionPaymentId();
     if (pid) {
       setReturnedPaymentId(pid);
       handleCheck(pid);
@@ -70,12 +72,14 @@ export default function SubscriptionGate() {
     try {
       const res = await subscriptionApi.check(pid);
       if (res.subscription_active) {
+        clearPendingPayment();
         await appStore.refreshSubscription();
         const giftStr = res.ai_gift_rub ? ` Вам начислено ${formatRub(res.ai_gift_rub)} на ИИ-баланс в подарок.` : "";
         setInfo((res.autorenew_enabled
           ? "Подписка активирована! Автопродление включено — отключить можно в разделе «Подписка»."
           : "Подписка активирована! Все разделы доступны.") + giftStr);
       } else if (res.status === "canceled") {
+        clearPendingPayment();
         setError("Платёж был отменён. Попробуйте оформить подписку ещё раз.");
       } else {
         setError("Платёж пока не подтверждён банком. Обновите страницу через минуту.");
@@ -98,6 +102,9 @@ export default function SubscriptionGate() {
       const wantAutoRenew = plan.code === "monthly" && autoRenew;
       const result = await subscriptionApi.create(teacher.login, plan.code, returnUrl, wantAutoRenew);
       if (result.confirmation_url) {
+        // Подстраховка: ЮKassa не гарантированно добавляет payment_id в return_url,
+        // поэтому запоминаем его сами — проверим при следующей загрузке страницы.
+        if (result.payment_id) rememberPendingPayment(result.payment_id, "subscription");
         window.location.href = result.confirmation_url;
       } else {
         setError("Не удалось получить ссылку на оплату");

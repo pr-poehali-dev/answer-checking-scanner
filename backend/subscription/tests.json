@@ -116,6 +116,22 @@
       "expectedStatus": 400,
       "expectedBody": {"error": "string"},
       "bodyMatcher": "partial"
+    },
+    {
+      "name": "POST notification без данных отвечает 200 (ЮKassa не должна ретраить)",
+      "method": "POST",
+      "path": "/?action=notification",
+      "body": {},
+      "expectedStatus": 200
+    },
+    {
+      "name": "POST reconcile-pending без секрета запрещён",
+      "method": "POST",
+      "path": "/?action=reconcile-pending",
+      "body": {},
+      "expectedStatus": 403,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
     }
   ]
 }

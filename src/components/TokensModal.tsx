@@ -3,6 +3,7 @@ import Icon from "@/components/ui/icon";
 import { subscriptionApi } from "@/lib/api";
 import { useAppStore, appStore } from "@/store/appStore";
 import TestPaymentBanner from "@/components/TestPaymentBanner";
+import { rememberPendingPayment, clearPendingPayment } from "@/hooks/usePaymentReturn";
 
 interface TokensModalProps {
   onClose: () => void;
@@ -41,6 +42,10 @@ export default function TokensModal({ onClose }: TokensModalProps) {
       );
       if (result.confirmation_url) {
         setCheckingId(result.payment_id);
+        // Подстраховка: если пользователь закроет эту модалку/вкладку до того,
+        // как нажмёт «Я оплатил», платёж всё равно подтвердится при следующей
+        // загрузке любой страницы приложения (см. usePaymentReturn).
+        rememberPendingPayment(result.payment_id, "balance");
         window.open(result.confirmation_url, "_blank");
       }
     } catch (e) {
@@ -57,11 +62,13 @@ export default function TokensModal({ onClose }: TokensModalProps) {
     try {
       const result = await subscriptionApi.checkTokens(checkingId);
       if (result.status === "succeeded") {
+        clearPendingPayment();
         if (result.ai_balance_kopecks !== undefined) {
           appStore.setAiBalance(result.ai_balance_kopecks);
         }
         setSuccess(true);
       } else if (result.status === "canceled") {
+        clearPendingPayment();
         setError("Платёж отменён");
         setCheckingId("");
       } else {

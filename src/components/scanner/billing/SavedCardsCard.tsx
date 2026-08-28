@@ -1,6 +1,7 @@
 import { useState } from "react";
 import Icon from "@/components/ui/icon";
 import { subscriptionApi, type SavedCard } from "@/lib/api";
+import { rememberPendingPayment } from "@/hooks/usePaymentReturn";
 
 interface Props {
   login: string;
@@ -62,6 +63,9 @@ export function SavedCardsCard({ login, cards, onChanged }: Props) {
     try {
       const res = await subscriptionApi.addCard(login, window.location.href);
       if (res.confirmation_url) {
+        // Подстраховка: ЮKassa не гарантированно добавляет payment_id в return_url —
+        // без этого привязанная карта могла годами висеть неподтверждённой.
+        if (res.payment_id) rememberPendingPayment(res.payment_id, "balance");
         window.location.href = res.confirmation_url;
       } else {
         setError("Не удалось открыть форму оплаты");

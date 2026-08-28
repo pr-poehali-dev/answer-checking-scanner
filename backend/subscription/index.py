@@ -3,6 +3,12 @@ API подписки САОУ.
 GET  /plans — список тарифов
 POST /create — создать платёж в ЮKassa, вернуть confirmation_url
 POST /check — проверить статус платежа (вызывается фронтом после возврата с оплаты)
+POST /notification — webhook ЮKassa: подтверждает платёж НЕЗАВИСИМО от возврата
+                      пользователя на сайт (см. документацию по рекуррентным
+                      платежам). Нужно один раз включить в личном кабинете ЮKassa:
+                      Настройки магазина → HTTP-уведомления → адрес этого URL.
+POST /reconcile-pending — подстраховка: добирает зависшие pending-платежи
+                      (X-Cron-Secret, вызывается по расписанию)
 GET  /history — история платежей пользователя
 GET  /cards — привязанные карты + лицевой счёт
 POST /add-card — привязать новую карту (платёж 10 ₽ с зачислением на баланс)
@@ -156,20 +162,43 @@ def card_type_label(raw: str | None) -> str:
     return CARD_TYPE_LABELS.get(raw, CARD_TYPE_LABELS.get(str(raw).title(), str(raw)))
 
 
-def save_card(cur, login: str, payment_method: dict, is_test: bool = False) -> None:
-    """Сохраняет привязанную карту пользователя (токен + тип + последние 4 цифры).
+# Человекочитаемые названия для НЕ-карточных способов оплаты, которые ЮKassa
+# тоже умеет сохранять для рекуррентных списаний (payment_method.saved=true).
+PAYMENT_METHOD_TYPE_LABELS = {
+    "bank_card": "Карта",
+    "yoo_money": "Кошелёк ЮMoney",
+    "sberbank": "SberPay",
+    "sbp": "СБП",
+    "tinkoff_bank": "Т-Банк Pay",
+    "mobile_balance": "Баланс телефона",
+}
 
-    Вызывается после успешной оплаты, если пользователь согласился запомнить карту.
-    Повторная оплата той же картой не плодит дубли — обновляем существующую запись.
-    is_test помечает карты, привязанные через тестовый магазин ЮKassa (роль tester) —
-    такие карты нельзя перепутать с боевыми при отображении и автосписании.
+
+def save_card(cur, login: str, payment_method: dict, is_test: bool = False) -> None:
+    """Сохраняет привязанный способ оплаты пользователя (токен + тип + последние 4 цифры).
+
+    Вызывается после успешной оплаты, если пользователь согласился запомнить способ
+    оплаты (payment_method.saved=true в ответе ЮKassa). ЮKassa может сохранять не
+    только банковскую карту, но и кошелёк ЮMoney и др. — для карты берём тип
+    платёжной системы и последние 4 цифры, для остальных способов — их название
+    и, если есть, номер счёта/кошелька.
+    is_test помечает способы оплаты, привязанные через тестовый магазин ЮKassa
+    (роль tester) — их нельзя перепутать с боевыми при отображении и автосписании.
     """
     pm_id = (payment_method or {}).get("id")
     if not pm_id:
         return
+    pm_type = (payment_method or {}).get("type") or ""
     card = (payment_method or {}).get("card") or {}
-    card_type = card_type_label(card.get("card_type"))
-    last4 = (card.get("last4") or "").strip()[:4] or None
+
+    if pm_type == "bank_card" or card:
+        card_type = card_type_label(card.get("card_type"))
+        last4 = (card.get("last4") or "").strip()[:4] or None
+    else:
+        card_type = PAYMENT_METHOD_TYPE_LABELS.get(pm_type, pm_type or "Способ оплаты")
+        account = (payment_method or {}).get("account_number") or ""
+        last4 = (account[-4:] if len(account) >= 4 else None)
+
     title = (payment_method or {}).get("title") or (f"{card_type} •••• {last4}" if last4 else card_type)
 
     cur.execute(
@@ -343,6 +372,184 @@ def grant_subscription(login: str, plan_code: str, months: int, payment_id: str 
         conn.close()
 
 
+def confirm_payment_by_id(payment_id: str) -> dict:
+    """Единая точка подтверждения платежа: запрашивает АКТУАЛЬНЫЙ статус у ЮKassa
+    (никогда не доверяем статусу из тела webhook-уведомления — он может быть
+    подделан) и, если платёж успешен, зачисляет подписку или баланс ИИ.
+
+    Используется тремя путями к одному и тому же результату:
+    1) POST /check, /check-tokens — фронт вызывает сам после возврата с оплаты;
+    2) POST /notification — webhook ЮKassa (см. базовую документацию по
+       рекуррентным платежам: https://yookassa.ru/developers/payment-acceptance/
+       scenario-extensions/recurring-payments/basics) — подтверждает платёж
+       НЕЗАВИСИМО от того, вернулся ли пользователь на сайт браузером;
+    3) периодическая доборка "зависших" pending-платежей (см. reconcile-pending).
+
+    Идемпотентна: повторный вызов для уже подтверждённого платежа ничего не
+    ломает (баланс не задваивается, чек повторно не шлётся) — это гарантирует
+    once-логика по updated=cur.rowcount в confirm_balance_payment и проверка
+    is_first_paid_after_trial/повторного provider_payment_id в grant_subscription.
+    """
+    conn = get_conn()
+    try:
+        is_test = payment_is_test(conn.cursor(), payment_id)
+    finally:
+        conn.close()
+
+    result = yookassa_request("GET", f"/payments/{payment_id}", is_test=is_test)
+    status = result.get("status", "pending")
+    meta = result.get("metadata") or {}
+    plan_code = meta.get("plan")
+
+    if plan_code == "balance":
+        return confirm_balance_payment(payment_id, result, is_test)
+    return confirm_subscription_payment(payment_id, result, is_test)
+
+
+def confirm_subscription_payment(payment_id: str, result: dict, is_test: bool) -> dict:
+    """Подтверждает платёж подписки (plan in monthly/halfyear/year) по уже
+    полученному от ЮKassa результату GET /payments/{id}. Общая логика для
+    /check и webhook /notification."""
+    status = result.get("status", "pending")
+    meta = result.get("metadata") or {}
+    login = meta.get("login")
+    plan_code = meta.get("plan")
+    try:
+        months = int(meta.get("months") or 1)
+    except (TypeError, ValueError):
+        months = 1
+
+    autorenew = meta.get("autorenew") == "1"
+    pm = result.get("payment_method") or {}
+    pm_id = pm.get("id") if pm.get("saved") else None
+    card = pm.get("card") or {}
+    pm_title = (pm.get("title") or (f"•••• {card.get('last4')}" if card.get("last4") else None))
+
+    if status == "succeeded" and login and plan_code:
+        until = grant_subscription(
+            login, plan_code, months, payment_id,
+            autorenew=autorenew, payment_method_id=pm_id, payment_method_title=pm_title,
+            payment_method=pm, is_test=is_test,
+        )
+        plan = get_plan(plan_code)
+        return {
+            "status": "succeeded",
+            "subscription_until": until.isoformat(),
+            "subscription_active": True,
+            "autorenew_enabled": bool(autorenew and pm_id),
+            "ai_gift_rub": (plan or {}).get("ai_gift_rub", 0),
+        }
+
+    if status in ("canceled", "pending", "waiting_for_capture"):
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"UPDATE {SCHEMA}.payments SET status=%s WHERE provider_payment_id=%s",
+                (status, payment_id)
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    return {"status": status, "subscription_active": False}
+
+
+def confirm_balance_payment(payment_id: str, result: dict, is_test: bool) -> dict:
+    """Подтверждает платёж пополнения баланса ИИ / привязки карты (plan=balance)
+    по уже полученному от ЮKassa результату GET /payments/{id}. Общая логика
+    для /check-tokens и webhook /notification."""
+    status = result.get("status", "pending")
+    meta = result.get("metadata") or {}
+    login = meta.get("login")
+
+    try:
+        amount_rub = float(meta.get("amount_rub") or 0)
+    except (TypeError, ValueError):
+        amount_rub = 0
+    if not amount_rub:
+        try:
+            amount_rub = float((result.get("amount") or {}).get("value") or 0)
+        except (TypeError, ValueError):
+            amount_rub = 0
+    kopecks = round(amount_rub * 100)
+
+    if status == "succeeded" and login and kopecks > 0:
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"""UPDATE {SCHEMA}.payments SET status='succeeded', paid_at=NOW()
+                    WHERE provider_payment_id = %s AND status != 'succeeded'""",
+                (payment_id,)
+            )
+            updated = cur.rowcount
+            if updated > 0:
+                cur.execute(
+                    f"""UPDATE {SCHEMA}.users
+                        SET ai_balance_kopecks = ai_balance_kopecks + %s
+                        WHERE login = %s RETURNING ai_balance_kopecks""",
+                    (kopecks, login)
+                )
+                row = cur.fetchone()
+                new_kop = row[0] if row else 0
+            else:
+                cur.execute(f"SELECT ai_balance_kopecks FROM {SCHEMA}.users WHERE login = %s", (login,))
+                row = cur.fetchone()
+                new_kop = row[0] if row else 0
+
+            pm = result.get("payment_method") or {}
+            if pm.get("saved"):
+                save_card(cur, login, pm, is_test=is_test)
+            conn.commit()
+
+            if updated > 0:
+                try:
+                    cur.execute(
+                        f"SELECT email, full_name, personal_account FROM {SCHEMA}.users WHERE login = %s",
+                        (login,)
+                    )
+                    u = cur.fetchone()
+                    if u and u[0]:
+                        bind_card = meta.get("bind_card") == "1"
+                        base_name = ("Привязка карты (зачислено на баланс ИИ)"
+                                    if bind_card else "Пополнение баланса ИИ")
+                        send_payment_receipt(
+                            cur, SCHEMA,
+                            to_email=u[0], full_name=u[1] or "", personal_account=u[2],
+                            kind="balance",
+                            plan_name=(f"[ТЕСТ] {base_name}" if is_test else base_name),
+                            amount_rub=amount_rub,
+                            payment_id=payment_id,
+                            balance_rub=round(new_kop / 100, 2),
+                        )
+                except Exception as e:
+                    print(f"[RECEIPT] balance receipt failed for {login}: {e}")
+
+            return {
+                "status": "succeeded",
+                "amount_rub": amount_rub,
+                "ai_balance_kopecks": new_kop,
+                "ai_balance_rub": round(new_kop / 100, 2),
+            }
+        finally:
+            conn.close()
+
+    if status in ("canceled", "pending", "waiting_for_capture"):
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"UPDATE {SCHEMA}.payments SET status=%s WHERE provider_payment_id=%s",
+                (status, payment_id)
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    return {"status": status, "amount_rub": amount_rub}
+
+
 def handler(event: dict, context) -> dict:
     """Платежи и подписки САОУ через ЮKassa."""
     if event.get("httpMethod") == "OPTIONS":
@@ -488,54 +695,10 @@ def handler(event: dict, context) -> dict:
         except Exception as e:
             return _resp(503, {"error": f"Не удалось проверить платёж: {e}"})
 
-        status = result.get("status", "pending")
-        meta = result.get("metadata") or {}
-        login = meta.get("login")
-        plan_code = meta.get("plan")
         try:
-            months = int(meta.get("months") or 1)
-        except (TypeError, ValueError):
-            months = 1
-
-        # Сохранённый способ оплаты (для автопродления)
-        autorenew = meta.get("autorenew") == "1"
-        pm = result.get("payment_method") or {}
-        pm_id = pm.get("id") if pm.get("saved") else None
-        card = pm.get("card") or {}
-        pm_title = (pm.get("title") or (f"•••• {card.get('last4')}" if card.get("last4") else None))
-
-        if status == "succeeded" and login and plan_code:
-            try:
-                until = grant_subscription(
-                    login, plan_code, months, payment_id,
-                    autorenew=autorenew, payment_method_id=pm_id, payment_method_title=pm_title,
-                    payment_method=pm, is_test=is_test,
-                )
-                plan = get_plan(plan_code)
-                return _resp(200, {
-                    "status": "succeeded",
-                    "subscription_until": until.isoformat(),
-                    "subscription_active": True,
-                    "autorenew_enabled": bool(autorenew and pm_id),
-                    "ai_gift_rub": (plan or {}).get("ai_gift_rub", 0),
-                })
-            except Exception as e:
-                return _resp(500, {"error": f"Ошибка активации подписки: {e}"})
-
-        # Обновляем статус в payments если нужно
-        if status in ("canceled", "pending", "waiting_for_capture"):
-            conn = get_conn()
-            try:
-                cur = conn.cursor()
-                cur.execute(
-                    f"UPDATE {SCHEMA}.payments SET status=%s WHERE provider_payment_id=%s",
-                    (status, payment_id)
-                )
-                conn.commit()
-            finally:
-                conn.close()
-
-        return _resp(200, {"status": status, "subscription_active": False})
+            return _resp(200, confirm_subscription_payment(payment_id, result, is_test))
+        except Exception as e:
+            return _resp(500, {"error": f"Ошибка активации подписки: {e}"})
 
     # ── GET history ─────────────────────────────────────────────────────────
     if route == "history":
@@ -676,86 +839,27 @@ def handler(event: dict, context) -> dict:
         except Exception as e:
             return _resp(503, {"error": f"Не удалось проверить платёж: {e}"})
 
-        status = result.get("status", "pending")
-        meta = result.get("metadata") or {}
-        login = meta.get("login")
+        return _resp(200, confirm_balance_payment(payment_id, result, is_test))
 
-        # amount_rub: берём из metadata, либо из суммы платежа от ЮKassa
+    # ── POST notification — webhook ЮKassa (см. документацию по рекуррентным
+    # платежам). ЮKassa шлёт сюда HTTP-уведомление сразу после смены статуса
+    # платежа — это ГЛАВНЫЙ, самый надёжный способ подтвердить оплату: не
+    # зависит от того, вернулся ли пользователь браузером на return_url.
+    # Статус из тела запроса НЕ используем (его можно подделать) — только как
+    # триггер: реальные данные всегда переспрашиваем у ЮKassa через GET по
+    # нашим API-ключам (см. confirm_payment_by_id).
+    if method == "POST" and route == "notification":
         try:
-            amount_rub = float(meta.get("amount_rub") or 0)
-        except (TypeError, ValueError):
-            amount_rub = 0
-        if not amount_rub:
-            try:
-                amount_rub = float((result.get("amount") or {}).get("value") or 0)
-            except (TypeError, ValueError):
-                amount_rub = 0
-        kopecks = round(amount_rub * 100)
-
-        if status == "succeeded" and login and kopecks > 0:
-            conn = get_conn()
-            try:
-                cur = conn.cursor()
-                cur.execute(
-                    f"""UPDATE {SCHEMA}.payments SET status='succeeded', paid_at=NOW()
-                        WHERE provider_payment_id = %s AND status != 'succeeded'""",
-                    (payment_id,)
-                )
-                updated = cur.rowcount
-                if updated > 0:
-                    cur.execute(
-                        f"""UPDATE {SCHEMA}.users
-                            SET ai_balance_kopecks = ai_balance_kopecks + %s
-                            WHERE login = %s RETURNING ai_balance_kopecks""",
-                        (kopecks, login)
-                    )
-                    row = cur.fetchone()
-                    new_kop = row[0] if row else 0
-                else:
-                    cur.execute(f"SELECT ai_balance_kopecks FROM {SCHEMA}.users WHERE login = %s", (login,))
-                    row = cur.fetchone()
-                    new_kop = row[0] if row else 0
-                # Если пользователь разрешил запомнить карту — добавляем её в список привязанных
-                pm = result.get("payment_method") or {}
-                if pm.get("saved"):
-                    save_card(cur, login, pm, is_test=is_test)
-                conn.commit()
-
-                # Чек шлём только при первом подтверждении платежа (updated > 0),
-                # чтобы повторные проверки статуса не слали письмо заново.
-                if updated > 0:
-                    try:
-                        cur.execute(
-                            f"SELECT email, full_name, personal_account FROM {SCHEMA}.users WHERE login = %s",
-                            (login,)
-                        )
-                        u = cur.fetchone()
-                        if u and u[0]:
-                            bind_card = meta.get("bind_card") == "1"
-                            base_name = ("Привязка карты (зачислено на баланс ИИ)"
-                                        if bind_card else "Пополнение баланса ИИ")
-                            send_payment_receipt(
-                                cur, SCHEMA,
-                                to_email=u[0], full_name=u[1] or "", personal_account=u[2],
-                                kind="balance",
-                                plan_name=(f"[ТЕСТ] {base_name}" if is_test else base_name),
-                                amount_rub=amount_rub,
-                                payment_id=payment_id,
-                                balance_rub=round(new_kop / 100, 2),
-                            )
-                    except Exception as e:
-                        print(f"[RECEIPT] balance receipt failed for {login}: {e}")
-
-                return _resp(200, {
-                    "status": "succeeded",
-                    "amount_rub": amount_rub,
-                    "ai_balance_kopecks": new_kop,
-                    "ai_balance_rub": round(new_kop / 100, 2),
-                })
-            finally:
-                conn.close()
-
-        return _resp(200, {"status": status, "amount_rub": amount_rub})
+            payment_id = ((body.get("object") or {}).get("id") or "").strip()
+        except Exception:
+            payment_id = ""
+        if not payment_id:
+            return _resp(200, {"ok": True})  # отвечаем 200 всегда, иначе ЮKassa будет ретраить бесконечно
+        try:
+            confirm_payment_by_id(payment_id)
+        except Exception as e:
+            print(f"[WEBHOOK] confirm failed for {payment_id}: {e}")
+        return _resp(200, {"ok": True})
 
     # ── GET autorenew-status — состояние автопродления пользователя ────────────
     if route in ("autorenew-status", "autorenew_status"):
@@ -1090,6 +1194,49 @@ def handler(event: dict, context) -> dict:
                 failed.append({"login": login, "reason": str(e)[:200]})
 
         return _resp(200, {"charged": charged, "failed": failed, "due_count": len(due)})
+
+    # ── POST reconcile-pending — доборка "зависших" pending-платежей ──────────
+    # Третий, подстраховочный уровень (после webhook и ручной проверки на
+    # фронте): если пользователь закрыл вкладку до возврата на сайт И webhook
+    # ещё не был включён/не долетел — платёж годами висел бы в статусе pending,
+    # хотя в ЮKassa уже succeeded. Проверяет все pending-платежи не старше
+    # 3 дней. Защищён тем же секретом, что и charge-recurring (вызывается по cron).
+    if method == "POST" and route in ("reconcile-pending", "reconcile_pending"):
+        cron_secret = os.environ.get("CRON_SECRET", "").strip()
+        provided = (headers.get("x-cron-secret") or body.get("cron_secret") or "").strip()
+        if not cron_secret or provided != cron_secret:
+            return _resp(403, {"error": "Доступ запрещён"})
+
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"""SELECT provider_payment_id FROM {SCHEMA}.payments
+                    WHERE status = 'pending' AND provider_payment_id IS NOT NULL
+                      AND created_at > NOW() - INTERVAL '3 days'
+                    ORDER BY created_at DESC LIMIT 100"""
+            )
+            pending_ids = [r[0] for r in cur.fetchall()]
+        finally:
+            conn.close()
+
+        confirmed, still_pending, errors = [], [], []
+        for pid in pending_ids:
+            try:
+                res = confirm_payment_by_id(pid)
+                if res.get("status") == "succeeded":
+                    confirmed.append(pid)
+                else:
+                    still_pending.append(pid)
+            except Exception as e:
+                errors.append({"payment_id": pid, "error": str(e)[:200]})
+
+        return _resp(200, {
+            "checked": len(pending_ids),
+            "confirmed": confirmed,
+            "still_pending": still_pending,
+            "errors": errors,
+        })
 
     return _resp(404, {"error": "Метод не найден"})
 

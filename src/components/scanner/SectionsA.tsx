@@ -10,7 +10,7 @@ import { appStore, useAppStore } from "@/store/appStore";
 const OPT_LABELS = ["\u0410", "\u0411", "\u0412", "\u0413", "\u0414", "\u0415"];
 
 export function UploadSection() {
-  const { works, students } = useAppStore();
+  const { works, students, teacher } = useAppStore();
   const [step, setStep] = useState<FlowStep>("idle");
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -65,10 +65,16 @@ export function UploadSection() {
         questionsCount,
         0,
         (status, progress) => { setOcrStatus(status); setOcrProgress(progress); },
-        optionsCount
+        optionsCount,
+        teacher?.login
       );
       setResult(data);
       setStep("done");
+
+      // Распознавание платное — сразу показываем актуальный ИИ-баланс
+      if (data.balance_rub !== undefined) {
+        appStore.setAiBalance(Math.round(data.balance_rub * 100));
+      }
 
       if (selectedWorkId) {
         const work = works.find(w => w.id === selectedWorkId);

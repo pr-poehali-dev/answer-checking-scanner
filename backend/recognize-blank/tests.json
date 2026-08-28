@@ -21,19 +21,23 @@
       "expectedStatus": 400
     },
     {
-      "name": "Tiny image without anchors returns 422",
-      "method": "POST",
-      "path": "/",
-      "body": {
-        "image": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
-      },
-      "expectedStatus": 422
-    },
-    {
       "name": "Wrong method returns 405",
       "method": "GET",
       "path": "/",
       "expectedStatus": 405
+    },
+    {
+      "name": "Reanalyze mode works without image and without billing",
+      "method": "POST",
+      "path": "/",
+      "body": {
+        "answers": ["А", "Б", "В"],
+        "answerKey": "АБВ",
+        "studentCode": "12345"
+      },
+      "expectedStatus": 200,
+      "expectedBody": { "studentCode": "string", "answers": "array" },
+      "bodyMatcher": "partial"
     }
   ]
 }

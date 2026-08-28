@@ -52,7 +52,23 @@ export function RecognitionResults({ result, answerKey: initialKey, optionsCount
     setApplyErr("");
     try {
       const resp = await recognizeApi.reanalyze(all_answers, draftKey, student_code);
-      setAnalysis(resp.analysis);
+      // Backend отдаёт details в своём формате {q, answer, correct, ok} —
+      // приводим к формату интерфейса {question, student, key, correct, part}.
+      setAnalysis({
+        total: resp.analysis.total,
+        correct: resp.analysis.correct,
+        wrong: resp.analysis.wrong,
+        percent: resp.analysis.percent,
+        score_raw: resp.analysis.correct,
+        score_scaled: resp.analysis.correct,
+        details: (resp.analysis.details || []).map(d => ({
+          question: d.q,
+          student: d.answer ?? "",
+          key: d.correct ?? "",
+          correct: d.ok ?? false,
+          part: 1,
+        })),
+      });
       setEditKey(draftKey);
       setEditing(false);
     } catch (e) {
@@ -102,6 +118,19 @@ export function RecognitionResults({ result, answerKey: initialKey, optionsCount
           <div className="text-2xl font-bold leading-none mt-1">{hasKey ? grade : "—"}</div>
         </div>
       </div>
+
+      {/* Стоимость распознавания (Yandex Vision OCR) */}
+      {result.spent_rub !== undefined && result.spent_rub > 0 && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-gray-50 border border-gray-200">
+          <Icon name="Coins" size={13} className="text-gray-400 flex-shrink-0" />
+          <p className="text-xs text-gray-500">
+            Распознавание: <span className="font-semibold text-gray-700">{result.spent_rub.toFixed(2)} ₽</span>
+            {result.balance_rub !== undefined && (
+              <> · остаток на балансе: <span className="font-semibold text-gray-700">{result.balance_rub.toFixed(2)} ₽</span></>
+            )}
+          </p>
+        </div>
+      )}
 
       {/* Прогрессбар */}
       {hasKey && (

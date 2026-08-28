@@ -25,7 +25,7 @@ function calcGrade(correct: number, gs: GradeScale): string {
 }
 
 export function BulkUpload() {
-  const { works, students } = useAppStore();
+  const { works, students, teacher } = useAppStore();
   const [workId, setWorkId] = useState("");
   const [items, setItems] = useState<BulkItem[]>([]);
   const [busy, setBusy] = useState(false);
@@ -75,7 +75,12 @@ export function BulkUpload() {
           questionsCount: work.totalQuestions,
           optionsCount: work.optionsCount || 4,
           answerKey: normKey,
+          login: teacher?.login,
         });
+        // Каждый бланк — платная ИИ-операция, обновляем баланс на лету
+        if (resp.balanceRub !== undefined) {
+          appStore.setAiBalance(Math.round(resp.balanceRub * 100));
+        }
         const correct = resp.analysis.correct;
         const grade = calcGrade(correct, work.gradeScale);
         const student = students.find(s => s.code === resp.studentCode);
@@ -102,11 +107,19 @@ export function BulkUpload() {
           confidence: resp.averageConfidence,
         } : i));
       } catch (e) {
+        const msg = (e as Error).message;
         setItems(prev => prev.map(i => i.id === it.id ? {
           ...i,
           status: "error",
-          error: (e as Error).message,
+          error: msg,
         } : i));
+        // Закончились деньги или нет подписки — дальше сканировать бессмысленно,
+        // каждый следующий бланк упадёт с той же ошибкой. Останавливаемся.
+        if (msg.includes("Недостаточно средств") || msg.includes("активная подписка")) {
+          setDoneCount(processed);
+          setBusy(false);
+          return;
+        }
       }
       processed++;
       setDoneCount(processed);

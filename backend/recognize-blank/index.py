@@ -1,7 +1,12 @@
 """
-Распознавание бланка ответов через OpenCV.
+Распознавание бланка ответов через Yandex Vision OCR.
 POST / — { image: base64, questionsCount?: 20, optionsCount?: 4, answerKey?: "АБВГ..." }
--> { studentCode, answers[], confidence[], analysis }
+Header: X-User-Login — логин учителя (нужен для списания ИИ-баланса)
+-> { studentCode, answers[], confidence[], analysis, spentRub, balanceRub }
+
+Распознавание — платная ИИ-операция: перед сканированием проверяется подписка
+и баланс (precheck-ai), после успешного распознавания списывается стоимость
+страницы Vision OCR с наценкой +40% — как у всех ИИ-функций проекта.
 """
 # v52: robust QR read for phone photos (CLAHE/adaptive/unsharp/upscale variants) +
 # density-based QR-zone masking fallback when decode fails.
@@ -22,6 +27,9 @@ import json, base64, math
 import numpy as np
 import cv2
 from template import build_answer_template
+import yandex_vision
+import vision_recognize
+from billing import precheck_ai, spend_ai_tokens
 
 
 def _project(u, v, tl, tr, bl, br):
@@ -38,7 +46,7 @@ def _project(u, v, tl, tr, bl, br):
 CORS = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, X-Authorization",
+    "Access-Control-Allow-Headers": "Content-Type, X-Authorization, X-User-Login",
 }
 
 RU_OPTS = ["А", "Б", "В", "Г", "Д", "Е"]
@@ -1504,9 +1512,45 @@ def _analyze(answers: list, answer_key: str) -> dict:
     }
 
 
+# ── Распознавание через Yandex Vision OCR ─────────────────────────────────────
+def _recognize_vision(image_b64: str, questions_count: int, options_count: int) -> dict:
+    """Распознаёт бланк через Yandex Vision OCR.
+
+    Vision OCR даёт координаты напечатанного текста (номера вопросов и буквы
+    вариантов) — по ним строится сетка клеток, а закрашенная клетка
+    определяется по заполненности пикселей (сам OCR «крестики» не читает).
+    Код ученика читаем из QR-кода — он не текст и OCR его не распознаёт.
+    """
+    img, gray = _load(image_b64)
+
+    ocr_raw = yandex_vision.recognize_text(image_b64)
+    words = yandex_vision.extract_words(ocr_raw)
+
+    res = vision_recognize.recognize_from_ocr(gray, words, questions_count, options_count)
+
+    # QR-код с кодом ученика — отдельная зона, читаем проверенным способом
+    code, dbg_code = _read_qr_code(img, gray)
+
+    return {
+        "answers": res["answers"],
+        "confidences": res["confidences"],
+        "code": code or "?????",
+        "code_confs": [0.0] * 5,
+        "squares_found": res["cols_found"],
+        "answer_rows": res["rows_found"],
+        "code_rows": len(code or ""),
+        "dbg_fills": [],
+        "dbg_rows_dist": ["vision_ocr",
+                          f"words={len(words)}",
+                          f"rows={res['rows_found']}",
+                          f"cols={res['cols_found']}"],
+        "dbg_code": dbg_code,
+    }
+
+
 # ── Handler ───────────────────────────────────────────────────────────────────
 def handler(event: dict, context) -> dict:
-    """Распознавание бланка ответов: находит якоря, детектирует квадраты, читает ответы и код ученика."""
+    """Распознавание бланка ответов через Yandex Vision OCR (списывает ИИ-баланс)."""
     if event.get("httpMethod") == "OPTIONS":
         return {"statusCode": 200, "headers": CORS, "body": ""}
     if event.get("httpMethod") != "POST":
@@ -1534,6 +1578,8 @@ def handler(event: dict, context) -> dict:
         questions_count, options_count = 20, 4
 
     answer_key = str(body.get("answerKey") or body.get("answer_key") or "").strip()
+    headers_lc = {k.lower(): v for k, v in (event.get("headers") or {}).items()}
+    login = (headers_lc.get("x-user-login") or body.get("login") or "").strip()
 
     # Режим reanalyze: нет изображения, но есть готовые answers
     if not image_b64:
@@ -1555,14 +1601,30 @@ def handler(event: dict, context) -> dict:
         return {"statusCode": 200, "headers": {**CORS, "Content-Type": "application/json"},
                 "body": json.dumps(resp, ensure_ascii=False)}
 
+    # Распознавание — платная ИИ-операция (Yandex Vision OCR). Проверяем
+    # подписку и баланс ДО обращения к сервису: нет средств — не сканируем.
+    est_tokens = yandex_vision.PAGE_TOKENS_EQUIV
+    allowed, pc_status, pc_err = precheck_ai(login, est_tokens=est_tokens)
+    if not allowed:
+        return {"statusCode": pc_status, "headers": {**CORS, "Content-Type": "application/json"},
+                "body": json.dumps({"error": pc_err}, ensure_ascii=False)}
+
     try:
-        result = _recognize(image_b64, questions_count, options_count)
+        result = _recognize_vision(image_b64, questions_count, options_count)
+    except yandex_vision.VisionError as e:
+        return {"statusCode": 503, "headers": {**CORS, "Content-Type": "application/json"},
+                "body": json.dumps({"error": f"Сервис распознавания недоступен: {e}"},
+                                   ensure_ascii=False)}
     except (ValueError, base64.binascii.Error, Exception) as e:
         err_str = str(e)
         code = 400 if "padding" in err_str.lower() or "decode" in err_str.lower() else 422
         return {"statusCode": code, "headers": CORS,
                 "body": json.dumps({"error": f"Ошибка распознавания: {e}"},
                                    ensure_ascii=False)}
+
+    # Списываем фактическое потребление (страница Vision OCR + наценка 40%,
+    # которую добавляет auth/spend-tokens — как у всех ИИ-функций проекта).
+    spent_rub, balance_rub = spend_ai_tokens(login, est_tokens)
 
     analysis = _analyze(result["answers"], answer_key)
 
@@ -1573,6 +1635,8 @@ def handler(event: dict, context) -> dict:
         "confidences":   result["confidences"],
         "squaresFound":  result["squares_found"],
         "answerRows":    result["answer_rows"],
+        "spentRub":      spent_rub,
+        "balanceRub":    balance_rub,
         "_debug": {
             "ocr": {
                 "anchorsFound": result["squares_found"],

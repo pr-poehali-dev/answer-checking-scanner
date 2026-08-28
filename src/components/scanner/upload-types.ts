@@ -22,6 +22,10 @@ export interface RecognitionResult {
     _dbg?: unknown;
   };
   image_size_kb: number;
+  /** Списано с ИИ-баланса за распознавание, ₽. */
+  spent_rub?: number;
+  /** Остаток ИИ-баланса после списания, ₽. */
+  balance_rub?: number;
 }
 
 export type FlowStep = "idle" | "uploading" | "recognizing" | "done" | "error";

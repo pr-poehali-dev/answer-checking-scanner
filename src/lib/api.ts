@@ -1301,9 +1301,15 @@ export interface RecognizeResponse {
     correct: number;
     wrong: number;
     percent: number;
-    details: { q: number; student: string; key: string; correct: boolean }[];
+    /** Backend отдаёт: q — номер вопроса, answer — ответ ученика,
+     *  correct — верный ответ из ключа, ok — совпало ли. */
+    details: { q: number; answer: string; correct: string; ok: boolean }[];
     _dbg?: unknown;
   };
+  /** Списано за распознавание, ₽ (Yandex Vision OCR + наценка). */
+  spentRub?: number;
+  /** Остаток ИИ-баланса после списания, ₽. */
+  balanceRub?: number;
 }
 
 function fileToBase64(file: File): Promise<string> {
@@ -1342,16 +1348,21 @@ function fileToBase64(file: File): Promise<string> {
 }
 
 export const recognizeApi = {
-  recognize: async (file: File, params: { questionsCount?: number; optionsCount?: number; answerKey?: string }) => {
+  recognize: async (file: File, params: { questionsCount?: number; optionsCount?: number; answerKey?: string; login?: string }) => {
     const image = await fileToBase64(file);
     const res = await fetch(RECOGNIZE_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        // Логин нужен для списания ИИ-баланса за распознавание (Yandex Vision OCR)
+        ...(params.login ? { "X-User-Login": params.login } : {}),
+      },
       body: JSON.stringify({
         image,
         questionsCount: params.questionsCount ?? 40,
         optionsCount: params.optionsCount ?? 4,
         answerKey: params.answerKey ?? "",
+        login: params.login ?? "",
       }),
     });
     const data = await res.json();

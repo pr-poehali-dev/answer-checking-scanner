@@ -1,5 +1,5 @@
-// OCR-движок САОУ — реальное распознавание через бэкенд (OpenCV).
-// Старая сигнатура сохранена, чтобы не ломать UI.
+// OCR-движок САОУ — распознавание бланков через Yandex Vision OCR на бэкенде.
+// Операция платная: списывается с ИИ-баланса учителя, поэтому нужен его логин.
 import { AnalysisDetail, RecognitionResult } from "./upload-types";
 import { recognizeApi } from "@/lib/api";
 
@@ -11,7 +11,8 @@ export async function recognizeBlank(
   part1Count: number,
   part2Count: number,
   onProgress?: OcrProgressCallback,
-  optionsCount?: number
+  optionsCount?: number,
+  login?: string
 ): Promise<RecognitionResult> {
   const total = (part1Count || 0) + (part2Count || 0) || 20;
 
@@ -20,9 +21,9 @@ export async function recognizeBlank(
   // Имитация прогресса пока ждём ответа сервера (GigaChat до 25с)
   let p = 10;
   const messages = [
-    "Отправляю бланк на сервер...",
-    "Анализирую кружки А/Б/В/Г...",
-    "Распознаю ответы...",
+    "Отправляю бланк на распознавание...",
+    "ИИ читает разметку бланка...",
+    "Определяю отмеченные ответы...",
     "Читаю QR-код ученика...",
     "Почти готово, ещё немного...",
   ];
@@ -39,6 +40,7 @@ export async function recognizeBlank(
       questionsCount: total,
       optionsCount: optionsCount || 4,
       answerKey: answerKey || "",
+      login,
     });
   } catch (e) {
     clearInterval(tick);
@@ -55,9 +57,9 @@ export async function recognizeBlank(
   // Backend возвращает: {q, answer, correct (строка-ключ), ok (bool)}
   const details: AnalysisDetail[] = (resp.analysis.details || []).map(d => ({
     question: d.q,
-    student: d.answer ?? d.student ?? "",
-    key: d.correct ?? d.key ?? "",
-    correct: d.ok ?? (typeof d.correct === "boolean" ? d.correct : false),
+    student: d.answer ?? "",
+    key: d.correct ?? "",
+    correct: d.ok ?? false,
     part: d.q <= part1Count ? 1 : 2,
   }));
 
@@ -80,5 +82,7 @@ export async function recognizeBlank(
       _dbg: (resp as unknown as any)._debug ?? { analyze: resp.analysis._dbg, ocr: (resp as unknown as any).debug },
     },
     image_size_kb: Math.round((file.size / 1024) * 10) / 10,
+    spent_rub: resp.spentRub,
+    balance_rub: resp.balanceRub,
   };
 }

@@ -1,0 +1,22 @@
+{
+  "tests": [
+    {
+      "name": "OPTIONS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    },
+    {
+      "name": "No token returns 403",
+      "method": "GET",
+      "path": "/?action=info",
+      "expectedStatus": 403
+    },
+    {
+      "name": "Unknown action without auth still 403 first",
+      "method": "GET",
+      "path": "/?action=unknown-action",
+      "expectedStatus": 403
+    }
+  ]
+}

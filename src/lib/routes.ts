@@ -160,7 +160,7 @@ export const SJOU_PARENT_PATHS = Object.values(SJOU_PARENT_TAB_TO_PATH);
 // ── УДС: вкладки внутри секретной панели /piot-colldent19 ────────────────
 // Базовый путь остаётся прежним (намеренно неочевидным для посторонних),
 // остальные вкладки — его короткие суффиксы через дефис.
-export type UdsTab = "employees" | "wards" | "users" | "audit" | "consents" | "support" | "profile" | "lkview" | "maintenance" | "mail" | "materials" | "promotion";
+export type UdsTab = "employees" | "wards" | "users" | "audit" | "consents" | "support" | "profile" | "lkview" | "maintenance" | "mail" | "materials" | "promotion" | "dev";
 export const UDS_BASE_PATH = "/piot-colldent19";
 export const UDS_TAB_TO_PATH: Record<UdsTab, string> = {
   employees: "/piot-colldent19",
@@ -175,6 +175,7 @@ export const UDS_TAB_TO_PATH: Record<UdsTab, string> = {
   mail: "/piot-colldent19-pochta",
   materials: "/piot-colldent19-materialy",
   promotion: "/piot-colldent19-promo",
+  dev: "/piot-colldent19-dev",
 };
 export const PATH_TO_UDS_TAB: Record<string, UdsTab> = Object.fromEntries(
   Object.entries(UDS_TAB_TO_PATH).map(([tab, path]) => [path, tab as UdsTab])

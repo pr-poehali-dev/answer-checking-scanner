@@ -10,6 +10,7 @@ import UdsMaintenance from "@/pages/uds/UdsMaintenance";
 import UdsMail from "@/pages/uds/UdsMail";
 import UdsMaterials from "@/pages/uds/UdsMaterials";
 import UdsPromotion from "@/pages/uds/UdsPromotion";
+import UdsDev from "@/pages/uds/UdsDev";
 import MyWards from "@/pages/uds/MyWards";
 import { PANEL_ROLE_LABELS, Session, Tab } from "@/pages/uds/udsSession";
 
@@ -42,6 +43,7 @@ export default function UdsDashboard({ session, tab, setTab, logout, onProfileUp
     { id: "maintenance", label: "Тех. работы", icon: "Construction", show: perms.can_maintenance },
     { id: "audit", label: "Логи действий", icon: "ScrollText", show: true },
     { id: "consents", label: "Согласия", icon: "ShieldCheck", show: canConsents },
+    { id: "dev", label: "DEV", icon: "Server", show: !!perms.can_dev },
     { id: "profile", label: "Мой профиль", icon: "UserCog", show: true },
   ];
   const TABS = ALL_TABS.filter(t => t.show);
@@ -128,6 +130,9 @@ export default function UdsDashboard({ session, tab, setTab, logout, onProfileUp
         )}
         {tab === "consents" && (
           <UdsConsents login={session.login} token={session.token} />
+        )}
+        {tab === "dev" && (
+          <UdsDev login={session.login} token={session.token} />
         )}
         {tab === "support" && (
           <UdsSupport login={session.login} token={session.token} panelRole={session.panel_role} />

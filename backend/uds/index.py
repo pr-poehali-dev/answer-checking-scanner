@@ -84,6 +84,9 @@ CAN_PROMOTION = {"head", "deputy"}
 # клиентов напрямую — данные пользователя они видят только в обращении,
 # которое взяли в работу (вкладка "Тех. поддержка" → кнопка "Все данные").
 NO_USERS_SECTION = {"operator", "tester_role"}
+# Раздел "DEV" (экспорт кода/БД/файлов для переноса на свой хостинг) —
+# только Разработчик, Зам. Главы и Глава. Содержит секреты — самый узкий круг.
+CAN_DEV = {"developer", "deputy", "head"}
 
 # Ящики-отправители рассылки — свои для каждого статуса важности
 MAILING_SENDERS = {
@@ -312,6 +315,8 @@ def perms_for(role: str, subrole: str = None) -> dict:
         "can_promotion": role in CAN_PROMOTION,  # раздел "Продвижение" — Глава и Зам
         # Раздел "Пользователи" закрыт для Оператора ТП и Тестера
         "can_users": role not in NO_USERS_SECTION,
+        # Раздел "DEV" — экспорт проекта для переноса на свой хостинг
+        "can_dev": role in CAN_DEV,
         "is_curator": is_curator,         # является куратором (подроль или Глава/Зам)
         "can_assign_subrole": PANEL_ROLE_RANK.get(role, 0) >= 5,  # подроли назначают Глава/Зам
         "subrole": subrole,

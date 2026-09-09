@@ -11,6 +11,7 @@ const STUDENT_LINK_URL = "https://functions.poehali.dev/23f6c20d-f0bd-4bfb-84fe-
 const TEACHER_DATA_URL = "https://functions.poehali.dev/4fb82b33-77af-4fce-933b-fe06a3bdb427";
 const UDS_URL = "https://functions.poehali.dev/3f54b399-3af0-45fa-a2b6-0736484f6059";
 const MATERIALS_URL = "https://functions.poehali.dev/b8c11774-1a89-4bd2-a962-df36ddc786d7";
+const DEV_EXPORT_URL = "https://functions.poehali.dev/eb9a5ad9-4b8b-4a86-98aa-8dc7807e175e";
 
 export type UserRole = "admin" | "teacher" | "tester" | "student";
 export type SubscriptionStatus = "none" | "active" | "expired" | "trial";
@@ -439,6 +440,8 @@ export interface UdsPerms {
   can_promotion?: boolean;
   /** Раздел "Пользователи" — закрыт для Оператора ТП и Тестера. */
   can_users?: boolean;
+  /** Раздел "DEV" — экспорт кода/БД/файлов для переноса на свой хостинг. */
+  can_dev?: boolean;
 }
 
 export type MailingAudience = "all" | "staff" | "roles";
@@ -2306,4 +2309,96 @@ export const supportApi = {
     supReq<{ ok: boolean }>("remove-operator", {
       method: "POST", login, token, body: { target_login },
     }),
+};
+
+// ── DEV — экспорт проекта (БД/файлы/секреты) для переноса на свой хостинг ──
+
+export interface DevInfo {
+  schema: string;
+  tables_count: number;
+  total_rows: number;
+  s3_bucket: string;
+  s3_files_count: number;
+  s3_files_size_bytes: number;
+  secrets_total: number;
+  secrets_set: number;
+}
+
+export interface DevTableRow {
+  table: string;
+  rows: number;
+}
+
+export interface DevFileItem {
+  key: string;
+  size: number;
+  modified: string;
+  url: string;
+}
+
+export interface DevSecretItem {
+  name: string;
+  is_set: boolean;
+}
+
+export interface DevSecretValue {
+  name: string;
+  value: string;
+}
+
+async function devGet<T>(action: string, login: string, token: string, query?: Record<string, string>): Promise<T> {
+  const qs = new URLSearchParams({ action, login, ...(query || {}) });
+  const res = await fetch(`${DEV_EXPORT_URL}?${qs.toString()}`, {
+    headers: { "X-Authorization": token },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || `Ошибка ${res.status}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+async function devGetText(action: string, login: string, token: string, query?: Record<string, string>): Promise<string> {
+  const qs = new URLSearchParams({ action, login, ...(query || {}) });
+  const res = await fetch(`${DEV_EXPORT_URL}?${qs.toString()}`, {
+    headers: { "X-Authorization": token },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || `Ошибка ${res.status}`);
+  }
+  return res.text();
+}
+
+export const devApi = {
+  info: (login: string, token: string) => devGet<DevInfo>("info", login, token),
+
+  tables: (login: string, token: string) => devGet<{ tables: DevTableRow[] }>("tables", login, token),
+
+  schemaAll: (login: string, token: string) => devGetText("schema-all", login, token),
+
+  tableSchema: (login: string, token: string, table: string) =>
+    devGetText("table-schema", login, token, { table }),
+
+  tableData: (login: string, token: string, table: string) =>
+    devGetText("table-data", login, token, { table }),
+
+  files: (login: string, token: string, prefix?: string, marker?: string) =>
+    devGet<{ files: DevFileItem[]; is_truncated: boolean; next_marker: string | null; known_prefixes: string[] }>(
+      "files", login, token, { ...(prefix ? { prefix } : {}), ...(marker ? { marker } : {}) }
+    ),
+
+  secrets: (login: string, token: string) =>
+    devGet<{ secrets: DevSecretItem[]; reveal_configured: boolean }>("secrets", login, token),
+
+  revealSecrets: async (login: string, token: string, confirmCode: string) => {
+    const res = await fetch(`${DEV_EXPORT_URL}?action=reveal-secrets`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Authorization": token },
+      body: JSON.stringify({ login, confirm_code: confirmCode }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Ошибка ${res.status}`);
+    return data as { secrets: DevSecretValue[] };
+  },
 };

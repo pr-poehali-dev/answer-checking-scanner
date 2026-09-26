@@ -6,6 +6,27 @@ const AD_IMAGE = "/promotion/vk-ad-saou.jpg";
 const COVER_IMAGE = "/promotion/vk-cover-saou.jpg";
 const VK_URL = "https://vk.ru/saoy_ooo29";
 
+interface BannerItem {
+  id: string;
+  file: string;
+  title: string;
+  desc: string;
+  tag: string;
+}
+
+const BANNERS: BannerItem[] = [
+  { id: "01", file: "banner-01-glavny.jpg", title: "Общий баннер", desc: "Всё в одном: функции для учителей и учеников, тарифы, бесплатный период. Универсальный креатив для любой площадки.", tag: "Универсальный" },
+  { id: "02", file: "banner-02-uchitelyam.jpg", title: "Для учителей", desc: "Акцент на экономии времени: сканер бланков, ИИ-тесты, презентации и журнал. С фото и ценой 199 ₽/мес.", tag: "Учителям" },
+  { id: "03", file: "banner-03-uchenikam.jpg", title: "Для учеников и студентов", desc: "Подготовка к ЕГЭ/ОГЭ, курсовые и рефераты по ГОСТ, ИИ-помощник 24/7. С фото ученика за учёбой.", tag: "Ученикам" },
+  { id: "04", file: "banner-04-socseti.jpg", title: "Для соцсетей", desc: "Яркий креатив с иконками VK, TikTok, Telegram, Instagram, YouTube — для продвижения сообществ.", tag: "VK · TikTok" },
+  { id: "05", file: "banner-05-roditelyam.jpg", title: "Для родителей", desc: "Контроль успеваемости ребёнка, электронный журнал, защита данных. С тёплым семейным фото.", tag: "Родителям" },
+  { id: "06", file: "banner-06-skidka-god.jpg", title: "Акция: годовой тариф", desc: "Яркий промо-баннер с выгодой 4% на годовую подписку — привлекает внимание крупным акцентом на скидке.", tag: "Промо" },
+  { id: "07", file: "banner-07-mobilnost.jpg", title: "Мобильность", desc: "«Учёба и работа в одном приложении» — синхронизация между устройствами, с фото телефона в руках.", tag: "Приложение" },
+  { id: "08", file: "banner-08-doverie.jpg", title: "Доверие и статистика", desc: "Цифры и отзыв учителя: в 12 раз быстрее проверка, данные в РФ, ИИ-помощник 24/7.", tag: "Соц. доказательство" },
+  { id: "09", file: "banner-09-nachalo-goda.jpg", title: "Начало учебного года", desc: "Сезонный баннер «Начните год с умной платформой» — для запуска рекламы в начале четверти.", tag: "Сезонный" },
+  { id: "10", file: "banner-10-premium.jpg", title: "Премиум-стиль", desc: "Минималистичный тёмный дизайн с акцентом на ИИ-технологичность — для имиджевой рекламы.", tag: "Premium" },
+];
+
 interface PostVariant {
   id: string;
   title: string;
@@ -146,11 +167,59 @@ export default function UdsPromotion() {
         </div>
       </div>
 
+      {/* Новая коллекция баннеров */}
+      <div className="border border-border rounded-lg bg-white overflow-hidden">
+        <div className="px-4 py-3 border-b border-border bg-muted flex items-center justify-between flex-wrap gap-2">
+          <p className="text-xs font-semibold flex items-center gap-2">
+            <Icon name="Sparkles" size={14} fallback="Star" /> Новые рекламные баннеры
+          </p>
+          <span className="text-[10px] text-muted-foreground font-mono">10 шт · 1080 × 1080 px</span>
+        </div>
+        <div className="p-4">
+          <p className="text-xs text-muted-foreground leading-relaxed mb-4">
+            Готовая подборка из 10 рекламных креативов: общий баннер со всеми функциями и тарифами,
+            отдельные баннеры для учителей и учеников/студентов, баннер для соцсетей (VK, TikTok, Telegram,
+            Instagram, YouTube), а также 5 дополнительных вариантов — акция, мобильность, доверие/статистика,
+            начало учебного года и премиум-стиль. Формат подходит для VK Рекламы, постов и сторис.
+          </p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+            {BANNERS.map((b) => (
+              <div key={b.id} className="group border border-border rounded-md overflow-hidden bg-white flex flex-col">
+                <div className="relative aspect-square overflow-hidden bg-muted">
+                  <img
+                    src={`/promotion/banners/${b.file}`}
+                    alt={b.title}
+                    className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                  />
+                  <span className="absolute top-2 left-2 text-[9px] font-bold px-2 py-0.5 rounded-full bg-black/60 text-white backdrop-blur-sm">
+                    {b.tag}
+                  </span>
+                </div>
+                <div className="p-2.5 flex flex-col gap-2 flex-1">
+                  <div>
+                    <p className="text-[11px] font-bold leading-tight">{b.title}</p>
+                    <p className="text-[10px] text-muted-foreground leading-snug mt-1">{b.desc}</p>
+                  </div>
+                  <a
+                    href={`/promotion/banners/${b.file}`}
+                    download={b.file}
+                    className="mt-auto inline-flex items-center justify-center gap-1.5 px-2 py-1.5 bg-primary text-primary-foreground text-[10px] font-semibold rounded-sm hover:opacity-90 transition-opacity"
+                  >
+                    <Icon name="Download" size={11} />
+                    Скачать
+                  </a>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
       {/* Изображение для рекламы */}
       <div className="border border-border rounded-lg bg-white overflow-hidden">
         <div className="px-4 py-3 border-b border-border bg-muted flex items-center justify-between">
           <p className="text-xs font-semibold flex items-center gap-2">
-            <Icon name="Image" size={14} /> Рекламное изображение
+            <Icon name="Image" size={14} /> Рекламное изображение (архив)
           </p>
           <span className="text-[10px] text-muted-foreground font-mono">2160 × 2160 px</span>
         </div>

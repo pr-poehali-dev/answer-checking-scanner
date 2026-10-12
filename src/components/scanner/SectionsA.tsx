@@ -72,11 +72,6 @@ export function UploadSection() {
       setResult(data);
       setStep("done");
 
-      // Распознавание платное — сразу показываем актуальный ИИ-баланс
-      if (data.balance_rub !== undefined) {
-        appStore.setAiBalance(Math.round(data.balance_rub * 100));
-      }
-
       if (selectedWorkId) {
         const work = works.find(w => w.id === selectedWorkId);
         // Код может быть прочитан не полностью — ищем ученика с подстраховкой

@@ -10,27 +10,62 @@
       "name": "Пустые бланки на 20 вопросов, 4 варианта",
       "method": "POST",
       "path": "/",
-      "body": { "workId": "123456", "workTitle": "Контрольная по математике", "questionsCount": 20, "optionsCount": 4 },
+      "body": {
+        "workId": "123456",
+        "workTitle": "Контрольная по математике",
+        "questionsCount": 20,
+        "optionsCount": 4
+      },
       "expectedStatus": 200,
-      "expectedBody": { "questionsCount": 20, "optionsCount": 4 },
+      "expectedBody": {
+        "questionsCount": 20,
+        "optionsCount": 4
+      },
       "bodyMatcher": "partial"
     },
     {
       "name": "Бланки на 10 вопросов, 5 вариантов",
       "method": "POST",
       "path": "/",
-      "body": { "workId": "654321", "workTitle": "Проверочная", "questionsCount": 10, "optionsCount": 5 },
+      "body": {
+        "workId": "654321",
+        "workTitle": "Проверочная",
+        "questionsCount": 10,
+        "optionsCount": 5
+      },
       "expectedStatus": 200,
-      "expectedBody": { "questionsCount": 10, "optionsCount": 5 },
+      "expectedBody": {
+        "questionsCount": 10,
+        "optionsCount": 5
+      },
       "bodyMatcher": "partial"
     },
     {
       "name": "Именные бланки с впечатанным кодом ученика",
       "method": "POST",
       "path": "/",
-      "body": { "workId": "777777", "workTitle": "Тест", "questionsCount": 10, "optionsCount": 4, "students": [{ "code": "12345", "name": "Иванов Иван", "classLabel": "9А" }, { "code": "54321", "name": "Петров Пётр", "classLabel": "9А" }] },
+      "body": {
+        "workId": "777777",
+        "workTitle": "Тест",
+        "questionsCount": 10,
+        "optionsCount": 4,
+        "students": [
+          {
+            "code": "12345",
+            "name": "Иванов Иван",
+            "classLabel": "9А"
+          },
+          {
+            "code": "54321",
+            "name": "Петров Пётр",
+            "classLabel": "9А"
+          }
+        ]
+      },
       "expectedStatus": 200,
-      "expectedBody": { "studentsCount": 2 },
+      "expectedBody": {
+        "studentsCount": 2
+      },
       "bodyMatcher": "partial"
     },
     {
@@ -38,6 +73,38 @@
       "method": "GET",
       "path": "/",
       "expectedStatus": 405
+    },
+    {
+      "name": "Бланк на 50 вопросов: 2 на листе",
+      "method": "POST",
+      "path": "/",
+      "body": {
+        "workId": "1",
+        "workTitle": "Т",
+        "questionsCount": 50,
+        "optionsCount": 4
+      },
+      "expectedStatus": 200,
+      "expectedBody": {
+        "perSheet": 2
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Бланк на 12 вопросов: 4 на листе",
+      "method": "POST",
+      "path": "/",
+      "body": {
+        "workId": "1",
+        "workTitle": "Т",
+        "questionsCount": 12,
+        "optionsCount": 4
+      },
+      "expectedStatus": 200,
+      "expectedBody": {
+        "perSheet": 4
+      },
+      "bodyMatcher": "partial"
     }
   ]
 }

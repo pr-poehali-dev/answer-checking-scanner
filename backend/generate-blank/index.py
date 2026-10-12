@@ -1,32 +1,30 @@
 """
-Генерация PDF-бланков ответов (компактный рукописный формат).
+Генерация PDF-бланков ответов «САОУ» (бланк с закрашиваемыми кружками).
 
-Формат бланка (без реперов и QR — читается через Yandex Vision OCR):
-  • сверху 5 клеток для КОДА УЧЕНИКА (по одной цифре в клетке);
-  • ниже пары «номер вопроса → пустая клетка», куда ученик от руки пишет
-    русскую букву ответа (А, Б, В, Г, Д — по числу вариантов работы);
-  • лишние вопросы ученик перечёркивает латинской Z — такие не засчитываются.
+Как устроен бланк:
+  • в углах четыре чёрных квадрата-метки — по ним программа выравнивает фото;
+  • вверху код ученика: 5 строк по 10 цифр, в каждой строке закрашивается один
+    кружок (на именных бланках код уже впечатан);
+  • ниже ответы: номер вопроса и ряд кружков А Б В Г Д Е — ученик полностью
+    закрашивает кружок выбранного ответа.
 
-Бланк маленький, поэтому на лист A4 их помещается сразу несколько — сколько
-влезет при данном количестве вопросов. Между бланками печатаются линии отреза.
-
-Учитель может напечатать бланки заранее «на класс»: тогда код ученика уже
-впечатан в клетки, а сверху подписано, чей это бланк.
+На лист A4 помещается от 1 до 4 бланков — зависит от числа вопросов и вариантов.
+Между бланками печатаются пунктирные линии отреза.
 
 POST / — { workId, workTitle, questionsCount, optionsCount(2-6),
            subject?, classLabel?, date?,
            students?: [{ code, name, classLabel }] }
--> { pdf_b64, filename, perSheet, sheets }
-Если students пуст — печатается лист пустых бланков без кода.
+-> { pdf_b64, filename, perSheet, sheets, ... }
 """
-import json, base64, io, math, os
+import json, base64, io, os, math
 
 from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import A4
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.lib.units import mm
 from reportlab.lib.colors import HexColor, black, white
+
+import geometry as G
 
 CORS = {
     "Access-Control-Allow-Origin": "*",
@@ -36,8 +34,7 @@ CORS = {
 
 
 def _reg():
-    """Подбирает шрифт с кириллицей. Helvetica её не содержит, поэтому без
-    подходящего TTF надписи на бланке превратились бы в квадраты."""
+    """Подбирает шрифт с кириллицей (Helvetica её не содержит)."""
     pairs = [
         ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
          "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
@@ -55,7 +52,7 @@ def _reg():
     for rp, bp in pairs:
         if os.path.exists(rp) and os.path.exists(bp):
             try:
-                pdfmetrics.registerFont(TTFont("F",  rp))
+                pdfmetrics.registerFont(TTFont("F", rp))
                 pdfmetrics.registerFont(TTFont("FB", bp))
                 return "F", "FB"
             except Exception:
@@ -65,217 +62,190 @@ def _reg():
 
 REG, BOLD = _reg()
 
-C_DARK  = HexColor("#1a1a2e")
-C_BLUE  = HexColor("#1e3a5f")
-C_GRAY  = HexColor("#8898aa")
-C_LINE  = HexColor("#9fb3c8")
-# Рамка клетки — светлее линий: не должна сливаться с рукописной буквой
-C_BOX   = HexColor("#c3d0dd")
-RU_OPTS = ["А", "Б", "В", "Г", "Д", "Е"]
+C_DARK = HexColor("#1a1a2e")
+C_BLUE = HexColor("#1e3a5f")
+C_GRAY = HexColor("#6f7f90")
+C_RULE = HexColor("#9fb3c8")
+C_RING = HexColor("#4a5b70")
+C_LETTER = HexColor("#9aa8b8")
 
-CODE_CELLS = 5          # длина кода ученика
-
-
-def T(c, x, y, s, font, sz, color=C_DARK, align="left"):
-    c.setFont(font, sz); c.setFillColor(color)
-    if align == "center":
-        c.drawCentredString(x, y, s)
-    elif align == "right":
-        c.drawRightString(x, y, s)
-    else:
-        c.drawString(x, y, s)
+INSTRUCTION = [
+    "Закрашивайте кружок",
+    "полностью тёмной ручкой.",
+    "Код: в каждой строке",
+    "одна цифра. На вопрос —",
+    "один кружок.",
+]
 
 
-def HL(c, x1, y, x2, lw=0.4, color=C_LINE):
-    c.setStrokeColor(color); c.setLineWidth(lw); c.line(x1, y, x2, y)
+class Slot:
+    """Один бланк на листе: переводит координаты бланка (мм, Y вниз) в PDF."""
+
+    def __init__(self, c, sx, sy, w, h):
+        self.c, self.sx, self.sy, self.w, self.h = c, sx, sy, w, h
+
+    def X(self, x):
+        return (self.sx + x) * mm
+
+    def Y(self, y):
+        return (G.SHEET_H - self.sy - y) * mm
+
+    def text(self, x, y, s, font, size, color=C_DARK, align="left"):
+        c = self.c
+        c.setFont(font, size)
+        c.setFillColor(color)
+        if align == "center":
+            c.drawCentredString(self.X(x), self.Y(y), s)
+        elif align == "right":
+            c.drawRightString(self.X(x), self.Y(y), s)
+        else:
+            c.drawString(self.X(x), self.Y(y), s)
+
+    def hline(self, x1, x2, y, lw=0.4, color=C_RULE):
+        c = self.c
+        c.setStrokeColor(color)
+        c.setLineWidth(lw)
+        c.line(self.X(x1), self.Y(y), self.X(x2), self.Y(y))
+
+    def square(self, cx, cy, side):
+        c = self.c
+        c.setFillColor(black)
+        c.rect(self.X(cx - side / 2), self.Y(cy + side / 2), side * mm, side * mm, stroke=0, fill=1)
+
+    def bubble(self, x, y, r, filled=False, label=None, label_size=6.0):
+        c = self.c
+        if filled:
+            c.setFillColor(black)
+            c.circle(self.X(x), self.Y(y), r * mm, stroke=0, fill=1)
+            return
+        c.setStrokeColor(C_RING)
+        c.setLineWidth(0.6)
+        c.setFillColor(white)
+        c.circle(self.X(x), self.Y(y), r * mm, stroke=1, fill=1)
+        if label:
+            c.setFont(REG, label_size)
+            c.setFillColor(C_LETTER)
+            c.drawCentredString(self.X(x), self.Y(y) - label_size * 0.36, label)
 
 
-def BOX(c, x, y, w, h, lw=0.5, color=C_BOX):
-    """Клетка под рукописный символ.
-
-    Рамка нужна: без неё распознавание теряет структуру бланка. Но она
-    намеренно тонкая и светлая — так она не «прилипает» к букве внутри и не
-    мешает ИИ её прочитать.
-    """
-    c.setStrokeColor(color); c.setFillColor(white); c.setLineWidth(lw)
-    c.rect(x, y, w, h, stroke=1, fill=1)
-
-
-# ─── Геометрия бланка ────────────────────────────────────────────────────────
-# Размеры подобраны так, чтобы клетка была удобной для письма от руки и при
-# этом хорошо читалась Vision OCR на фото с телефона.
-# Клетка намеренно крупная: мелкие одиночные буквы распознаются заметно хуже,
-# а лишнее место на листе всё равно есть — бланков помещается достаточно.
-CELL      = 10.0 * mm    # сторона клетки для буквы/цифры
-CELL_GAP  = 2.2 * mm     # зазор между парой «номер-клетка»
-NUM_W     = 7.0 * mm     # ширина колонки с номером вопроса
-PAIR_W    = NUM_W + CELL + CELL_GAP
-ROW_H     = CELL + 2.4 * mm
-PAD       = 3.5 * mm     # внутреннее поле бланка
-HEAD_H    = 38.0 * mm    # шапка: заголовок, ФИО, код ученика, подсказка
+def _fit(text, font, size, max_w_mm):
+    """Обрезает строку, чтобы она поместилась в заданную ширину."""
+    max_pt = max_w_mm * mm
+    if pdfmetrics.stringWidth(text, font, size) <= max_pt:
+        return text
+    while text and pdfmetrics.stringWidth(text + "…", font, size) > max_pt:
+        text = text[:-1]
+    return text + "…"
 
 
-def blank_columns(n_q: int) -> int:
-    """Сколько колонок пар «номер-ответ» внутри одного бланка."""
-    if n_q <= 8:
-        return 1
-    if n_q <= 24:
-        return 2
-    return 3
-
-
-def blank_size(n_q: int) -> tuple:
-    """Размер одного бланка (ширина, высота) в пунктах."""
-    n_cols = blank_columns(n_q)
-    n_rows = math.ceil(n_q / n_cols)
-    # Ширина должна вместить и шапку с кодом (5 клеток), и колонки вопросов
-    grid_w = n_cols * PAIR_W
-    code_w = CODE_CELLS * (CELL + 1.6 * mm)
-    bw = max(grid_w, code_w) + 2 * PAD
-    bh = HEAD_H + n_rows * ROW_H + PAD
-    return bw, bh
-
-
-def sheet_grid(n_q: int) -> tuple:
-    """Сколько бланков помещается на лист A4: (по горизонтали, по вертикали)."""
-    pw, ph = A4
-    margin = 8 * mm
-    gap = 4 * mm
-    bw, bh = blank_size(n_q)
-    cols = max(1, int((pw - 2 * margin + gap) // (bw + gap)))
-    rows = max(1, int((ph - 2 * margin + gap) // (bh + gap)))
-    return cols, rows
-
-
-def draw_blank(c, x0, y0, cfg):
-    """Рисует один бланк, левый нижний угол — (x0, y0)."""
-    n_q      = cfg["n_q"]
-    opts     = cfg["opts"]
-    work_id  = cfg["work_id"]
-    subject  = cfg.get("subject", "")
-    cls_lbl  = cfg.get("class_label", "")
-    stu_name = cfg.get("student_name", "")
+def draw_blank(c, slot_xywh, cfg):
+    sx, sy, w, h = slot_xywh
+    sl = Slot(c, sx, sy, w, h)
+    n_q, n_opts = cfg["n_q"], cfg["n_opts"]
+    opts = G.OPT_LABELS[:n_opts]
     stu_code = cfg.get("student_code", "")
+    stu_name = cfg.get("student_name", "")
+    inner_r = w - G.PAD
 
-    bw, bh = blank_size(n_q)
-    n_cols = blank_columns(n_q)
-    n_rows = math.ceil(n_q / n_cols)
+    for name, (mx, my) in G.marker_centers(w, h).items():
+        sl.square(mx, my, G.BIG_MARK if name == "tl" else G.SMALL_MARK)
 
-    top = y0 + bh
+    sl.text(11, G.Y_TITLE, "БЛАНК ОТВЕТОВ", BOLD, 8, C_BLUE)
+    sl.text(inner_r, G.Y_TITLE, f"№{cfg['work_id']}", REG, 5.5, C_GRAY, "right")
+    sl.hline(11, inner_r, G.Y_RULE, lw=0.5)
 
-    # ── Заголовок ────────────────────────────────────────────────────────────
-    T(c, x0 + PAD, top - 4.2 * mm, "БЛАНК ОТВЕТОВ", BOLD, 7.5, C_BLUE)
-    T(c, x0 + bw - PAD, top - 4.2 * mm, f"№{work_id}", REG, 5.5, C_GRAY, "right")
-    HL(c, x0 + PAD, top - 5.6 * mm, x0 + bw - PAD, lw=0.5)
+    info = cfg.get("title", "")
+    extra = " · ".join(x for x in (cfg.get("subject"), cfg.get("class_label"), cfg.get("date")) if x)
+    if extra:
+        info = f"{info} · {extra}" if info else extra
+    if info:
+        sl.text(G.PAD, G.Y_INFO, _fit(info, REG, 5.5, w - 2 * G.PAD), REG, 5.5, C_GRAY)
 
-    # ── ФИО ученика ──────────────────────────────────────────────────────────
-    name_y = top - 9.6 * mm
     if stu_name:
-        # Бланк напечатан для конкретного ученика — подписываем, чей он
-        T(c, x0 + PAD, name_y, stu_name[:34], BOLD, 6.5, C_DARK)
+        sl.text(G.PAD, G.Y_NAME, _fit(stu_name, BOLD, 7, w - 2 * G.PAD), BOLD, 7, C_DARK)
     else:
-        T(c, x0 + PAD, name_y, "ФИО:", BOLD, 6, C_DARK)
-        HL(c, x0 + PAD + 9 * mm, name_y - 0.6 * mm, x0 + bw - PAD, lw=0.5)
+        sl.text(G.PAD, G.Y_NAME, "ФИО:", BOLD, 6.5, C_DARK)
+        sl.hline(G.PAD + 8, inner_r, G.Y_NAME + 0.7, lw=0.5)
 
-    sub_y = top - 13.2 * mm
-    left_note = subject or ""
-    if cls_lbl:
-        left_note = f"{left_note} · {cls_lbl}" if left_note else cls_lbl
-    if left_note:
-        T(c, x0 + PAD, sub_y, left_note[:38], REG, 5.5, C_GRAY)
+    sl.text(G.PAD, G.Y_CODE_LABEL, "КОД УЧЕНИКА", BOLD, 5.6, C_BLUE)
 
-    # ── Код ученика: 5 клеток ────────────────────────────────────────────────
-    code_y = top - 28.0 * mm
-    code_step = CELL + 1.6 * mm
-    T(c, x0 + PAD, code_y + CELL + 1.6 * mm, "КОД УЧЕНИКА", BOLD, 5.4, C_BLUE)
-    for i in range(CODE_CELLS):
-        cx = x0 + PAD + i * code_step
-        BOX(c, cx, code_y, CELL, CELL, lw=0.6)
-        if stu_code and i < len(stu_code):
-            # Код уже впечатан — ученику ничего писать не нужно
-            T(c, cx + CELL / 2, code_y + CELL * 0.28, stu_code[i], BOLD, 10, C_DARK, "center")
+    for d in range(G.CODE_DIGITS):
+        x = G.PAD + G.CODE_LABEL_W + G.CODE_R + d * G.CODE_PX
+        sl.text(x, G.Y_DIGITS, str(d), BOLD, 5.6, C_DARK, "center")
+    for p in range(G.CODE_LEN):
+        y = G.Y_CODE_ROW0 + p * G.CODE_PY
+        sl.text(G.PAD + G.CODE_LABEL_W - 1.3, y + 0.7, str(p + 1), REG, 4.6, C_GRAY, "right")
+    for (p, d, x, y) in G.code_bubbles():
+        on = bool(stu_code) and p < len(stu_code) and stu_code[p] == str(d)
+        sl.bubble(x, y, G.CODE_R, filled=on)
 
-    # Подсказка по вариантам ответа и пропуску — печатной буквой в клетку
-    hint = f"Впишите букву: {' '.join(opts)}   ·   лишние вопросы — Z"
-    T(c, x0 + PAD, code_y - 3.0 * mm, hint, REG, 4.8, C_GRAY)
+    code_w = G.CODE_LABEL_W + G.CODE_DIGITS * G.CODE_PX
+    if G.instr_below(w):
+        y = G.Y_CODE_ROW0 + (G.CODE_LEN - 1) * G.CODE_PY + G.CODE_R + 3.4
+        for i, line in enumerate(INSTRUCTION):
+            sl.text(G.PAD, y + i * 3.0, line, REG, 5, C_GRAY)
+    else:
+        x = G.PAD + code_w + 3
+        for i, line in enumerate(INSTRUCTION):
+            sl.text(x, G.Y_CODE_LABEL + 3.0 * i, line, REG, 5, C_GRAY)
 
-    # ── Сетка вопросов ───────────────────────────────────────────────────────
-    grid_top = y0 + bh - HEAD_H
-    for qi in range(n_q):
-        ci = qi // n_rows
-        ri = qi % n_rows
-        px = x0 + PAD + ci * PAIR_W
-        py = grid_top - (ri + 1) * ROW_H + (ROW_H - CELL) / 2
+    qc = max(1, G.question_columns(w, n_opts))
+    rows = math.ceil(n_q / qc)
+    col_step = (w - 2 * G.PAD) / qc
+    for q in range(n_q):
+        col, row = divmod(q, rows)
+        x_col = G.PAD + col * col_step
+        cy = G.head_end(w) + (row + 0.5) * G.ROW_H
+        sl.text(x_col + G.NUM_W - 1.6, cy + 0.9, f"{q + 1}.", BOLD, 7, C_DARK, "right")
+    for (q, j, x, y) in G.answer_bubbles(w, h, n_q, n_opts):
+        sl.bubble(x, y, G.BUB_R, label=opts[j])
 
-        # Номер вопроса — точка обязательна: по ней распознавание находит строку
-        T(c, px + NUM_W - 1.4 * mm, py + CELL * 0.30, f"{qi + 1}.", BOLD, 7, C_DARK, "right")
-        BOX(c, px + NUM_W, py, CELL, CELL)
-
-    return bw, bh
+    foot = f"САОУ · {n_q} вопр. · {opts[0]}–{opts[-1]}"
+    sl.text(w / 2, h - 2.6, foot, REG, 4.2, C_LETTER, "center")
 
 
-def _cut_lines(c, positions, n_q):
-    """Пунктирные линии отреза между бланками."""
-    pw, ph = A4
-    bw, bh = blank_size(n_q)
-    xs = sorted({round(x, 2) for x, _ in positions})
-    ys = sorted({round(y, 2) for _, y in positions})
-    c.setStrokeColor(C_GRAY); c.setLineWidth(0.3); c.setDash(2, 4)
-    gap = 4 * mm
-    for x in xs[1:]:
-        mx = x - gap / 2
-        c.line(mx, 4 * mm, mx, ph - 4 * mm)
-    for y in ys[:-1]:
-        my = y + bh + gap / 2
-        c.line(4 * mm, my, pw - 4 * mm, my)
+def _cut_lines(c, rects, cols, rows):
+    if len(rects) < 2:
+        return
+    c.setStrokeColor(C_GRAY)
+    c.setLineWidth(0.3)
+    c.setDash(2, 3)
+    sw, sh = G.slot_size(cols, rows)
+    for k in range(1, cols):
+        x = (G.SHEET_MARGIN + k * sw + (k - 0.5) * G.SLOT_GAP) * mm
+        c.line(x, 2 * mm, x, (G.SHEET_H - 2) * mm)
+    for k in range(1, rows):
+        y = (G.SHEET_H - (G.SHEET_MARGIN + k * sh + (k - 0.5) * G.SLOT_GAP)) * mm
+        c.line(2 * mm, y, (G.SHEET_W - 2) * mm, y)
     c.setDash()
 
 
-def render_pdf(cfg: dict, students: list) -> tuple:
+def render_pdf(cfg, students):
     """Раскладывает бланки по листам A4. Возвращает (pdf_bytes, per_sheet, sheets)."""
-    n_q = cfg["n_q"]
+    per, cs, rs = G.choose_layout(cfg["n_q"], cfg["n_opts"])
+    rects = G.slot_rects(cs, rs)
     buf = io.BytesIO()
-    c = canvas.Canvas(buf, pagesize=A4)
+    c = canvas.Canvas(buf, pagesize=(G.SHEET_W * mm, G.SHEET_H * mm))
 
-    pw, ph = A4
-    margin = 8 * mm
-    gap = 4 * mm
-    bw, bh = blank_size(n_q)
-    cols, rows = sheet_grid(n_q)
-    per_sheet = cols * rows
-
-    # Центрируем сетку бланков на листе
-    total_w = cols * bw + (cols - 1) * gap
-    total_h = rows * bh + (rows - 1) * gap
-    x_start = (pw - total_w) / 2
-    y_top = ph - (ph - total_h) / 2
-
-    positions = []
-    for r in range(rows):
-        for k in range(cols):
-            positions.append((x_start + k * (bw + gap), y_top - (r + 1) * bh - r * gap))
-
-    items = students if students else [None] * per_sheet
+    items = students if students else [None] * per
     sheets = 0
     for i, stu in enumerate(items):
-        slot = i % per_sheet
+        slot = i % per
         if i > 0 and slot == 0:
-            _cut_lines(c, positions, n_q)
+            _cut_lines(c, rects, cs, rs)
             c.showPage()
             sheets += 1
-        x, y = positions[slot]
         scfg = dict(cfg)
         if stu:
             scfg["student_name"] = stu.get("name", "")
             scfg["student_code"] = stu.get("code", "")
             if stu.get("classLabel"):
-                scfg["class_label"] = stu.get("classLabel")
-        draw_blank(c, x, y, scfg)
-
-    _cut_lines(c, positions, n_q)
-    c.showPage(); c.save()
-    sheets += 1
-    return buf.getvalue(), per_sheet, sheets
+                scfg["class_label"] = stu["classLabel"]
+        draw_blank(c, rects[slot], scfg)
+    _cut_lines(c, rects, cs, rs)
+    c.showPage()
+    c.save()
+    return buf.getvalue(), per, sheets + 1
 
 
 def _resp(status, body):
@@ -287,7 +257,7 @@ def _resp(status, body):
 
 
 def handler(event: dict, context) -> dict:
-    """PDF-бланк: клетки для кода ученика и рукописных букв ответа."""
+    """PDF-бланк с закрашиваемыми кружками: код ученика и ответы на вопросы."""
     if event.get("httpMethod") == "OPTIONS":
         return {"statusCode": 200, "headers": CORS, "body": ""}
     if event.get("httpMethod") != "POST":
@@ -299,38 +269,35 @@ def handler(event: dict, context) -> dict:
         body = {}
 
     work_id = str(body.get("workId", "000000"))[:10]
-    title   = str(body.get("workTitle", "Бланк ответов"))[:60]
-    n_q     = max(1, min(int(body.get("questionsCount", 20)), 80))
-    n_opts  = max(2, min(int(body.get("optionsCount", 4)), 6))
+    title = str(body.get("workTitle", ""))[:60]
+    n_q = max(1, min(int(body.get("questionsCount") or 20), G.MAX_Q))
+    n_opts = max(2, min(int(body.get("optionsCount") or 4), 6))
     subject = str(body.get("subject", ""))[:40]
     cls_lbl = str(body.get("classLabel", ""))[:10]
-    date_s  = str(body.get("date", ""))[:12]
+    date_s = str(body.get("date", ""))[:12]
 
-    raw_students = body.get("students") or []
+    raw = body.get("students") or []
     students = []
-    if isinstance(raw_students, list):
-        for s in raw_students[:300]:
-            code = str(s.get("code", "")).strip()[:CODE_CELLS]
+    if isinstance(raw, list):
+        for s in raw[:300]:
+            code = "".join(ch for ch in str(s.get("code", "")) if ch.isdigit())[:G.CODE_LEN]
             name = str(s.get("name", "")).strip()[:60]
             clbl = str(s.get("classLabel", "")).strip()[:10]
-            if code and name:
+            if len(code) == G.CODE_LEN and name:
                 students.append({"code": code, "name": name, "classLabel": clbl})
 
-    opts = RU_OPTS[:n_opts]
-    cfg = {
-        "n_q": n_q, "opts": opts, "work_id": work_id, "title": title,
-        "subject": subject, "class_label": cls_lbl, "date": date_s,
-    }
+    cfg = {"n_q": n_q, "n_opts": n_opts, "work_id": work_id, "title": title,
+           "subject": subject, "class_label": cls_lbl, "date": date_s}
 
     pdf_bytes, per_sheet, sheets = render_pdf(cfg, students)
     suffix = f"_{len(students)}st" if students else ""
     return _resp(200, {
-        "pdf_b64":        base64.b64encode(pdf_bytes).decode(),
-        "filename":       f"blank_{work_id}_{n_q}q{suffix}.pdf",
+        "pdf_b64": base64.b64encode(pdf_bytes).decode(),
+        "filename": f"blank_{work_id}_{n_q}q{suffix}.pdf",
         "questionsCount": n_q,
-        "optionsCount":   n_opts,
-        "options":        opts,
-        "studentsCount":  len(students),
-        "perSheet":       per_sheet,
-        "sheets":         sheets,
+        "optionsCount": n_opts,
+        "options": G.OPT_LABELS[:n_opts],
+        "studentsCount": len(students),
+        "perSheet": per_sheet,
+        "sheets": sheets,
     })

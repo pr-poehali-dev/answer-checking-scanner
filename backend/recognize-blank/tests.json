@@ -17,7 +17,9 @@
       "name": "Invalid base64 returns 400",
       "method": "POST",
       "path": "/",
-      "body": { "image": "not-a-base64-!!!" },
+      "body": {
+        "image": "not-a-base64-!!!"
+      },
       "expectedStatus": 400
     },
     {
@@ -31,12 +33,33 @@
       "method": "POST",
       "path": "/",
       "body": {
-        "answers": ["А", "Б", "В"],
+        "answers": [
+          "А",
+          "Б",
+          "В"
+        ],
         "answerKey": "АБВ",
         "studentCode": "12345"
       },
       "expectedStatus": 200,
-      "expectedBody": { "studentCode": "string" },
+      "expectedBody": {
+        "studentCode": "string"
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Белая картинка без меток возвращает понятную ошибку",
+      "method": "POST",
+      "path": "/",
+      "body": {
+        "image": "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAMCAgMCAgMDAwMEAwMEBQgFBQQEBQoHBwYIDAoMDAsKCwsNDhIQDQ4RDgsLEBYQERMUFRUVDA8XGBYUGBIUFRT/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACv/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AVN//2Q==",
+        "questionsCount": 20,
+        "optionsCount": 4
+      },
+      "expectedStatus": 422,
+      "expectedBody": {
+        "error": "string"
+      },
       "bodyMatcher": "partial"
     }
   ]

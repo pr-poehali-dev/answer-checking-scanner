@@ -1,5 +1,5 @@
-// OCR-движок САОУ — распознавание бланков через Yandex Vision OCR на бэкенде.
-// Операция платная: списывается с ИИ-баланса учителя, поэтому нужен его логин.
+// Распознавание бланков САОУ: фото читается программно по закрашенным кружкам.
+// Операция бесплатная, ИИ-баланс не списывается.
 import { AnalysisDetail, RecognitionResult } from "./upload-types";
 import { recognizeApi } from "@/lib/api";
 
@@ -18,14 +18,13 @@ export async function recognizeBlank(
 
   onProgress?.("Подготавливаю изображение...", 10);
 
-  // Имитация прогресса пока ждём ответа сервера (GigaChat до 25с)
   let p = 10;
   const messages = [
-    "Отправляю бланк на распознавание...",
-    "ИИ читает разметку бланка...",
-    "Определяю отмеченные ответы...",
-    "Читаю QR-код ученика...",
-    "Почти готово, ещё немного...",
+    "Отправляю фото бланка...",
+    "Ищу квадраты в углах и выравниваю фото...",
+    "Определяю закрашенные кружки...",
+    "Читаю код ученика...",
+    "Почти готово...",
   ];
   let msgIdx = 0;
   const tick = setInterval(() => {
@@ -82,7 +81,6 @@ export async function recognizeBlank(
       _dbg: (resp as unknown as any)._debug ?? { analyze: resp.analysis._dbg, ocr: (resp as unknown as any).debug },
     },
     image_size_kb: Math.round((file.size / 1024) * 10) / 10,
-    spent_rub: resp.spentRub,
-    balance_rub: resp.balanceRub,
+    warnings: resp.warnings ?? [],
   };
 }

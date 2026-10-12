@@ -78,10 +78,6 @@ export function BulkUpload() {
           answerKey: normKey,
           login: teacher?.login,
         });
-        // Каждый бланк — платная ИИ-операция, обновляем баланс на лету
-        if (resp.balanceRub !== undefined) {
-          appStore.setAiBalance(Math.round(resp.balanceRub * 100));
-        }
         const correct = resp.analysis.correct;
         const grade = calcGrade(correct, work.gradeScale);
         // Код может быть прочитан не полностью — ищем ученика с подстраховкой
@@ -115,13 +111,6 @@ export function BulkUpload() {
           status: "error",
           error: msg,
         } : i));
-        // Закончились деньги или нет подписки — дальше сканировать бессмысленно,
-        // каждый следующий бланк упадёт с той же ошибкой. Останавливаемся.
-        if (msg.includes("Недостаточно средств") || msg.includes("активная подписка")) {
-          setDoneCount(processed);
-          setBusy(false);
-          return;
-        }
       }
       processed++;
       setDoneCount(processed);

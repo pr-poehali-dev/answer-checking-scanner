@@ -1315,10 +1315,8 @@ export interface RecognizeResponse {
     details: { q: number; answer: string; correct: string; ok: boolean }[];
     _dbg?: unknown;
   };
-  /** Списано за распознавание, ₽ (Yandex Vision OCR + наценка). */
-  spentRub?: number;
-  /** Остаток ИИ-баланса после списания, ₽. */
-  balanceRub?: number;
+  /** Замечания по бланку: пустые, двойные и слабо закрашенные отметки. */
+  warnings?: string[];
 }
 
 function fileToBase64(file: File): Promise<string> {
@@ -1328,9 +1326,8 @@ function fileToBase64(file: File): Promise<string> {
       const r = reader.result as string;
       const img = new Image();
       img.onload = () => {
-        // 2200px — рукописную букву в клетке распознавание читает тем лучше,
-        // чем она крупнее в пикселях. Дальше увеличивать смысла мало: растёт
-        // вес файла и время загрузки, а точность уже не прибавляется.
+        // 2200px — достаточно, чтобы кружки и угловые квадраты читались чётко;
+        // больше только увеличивает вес файла.
         const MAX_SIDE = 2200;
         let { width, height } = img;
         if (width > MAX_SIDE || height > MAX_SIDE) {
@@ -1364,7 +1361,6 @@ export const recognizeApi = {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        // Логин нужен для списания ИИ-баланса за распознавание (Yandex Vision OCR)
         ...(params.login ? { "X-User-Login": params.login } : {}),
       },
       body: JSON.stringify({

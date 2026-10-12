@@ -22,10 +22,8 @@ export interface RecognitionResult {
     _dbg?: unknown;
   };
   image_size_kb: number;
-  /** Списано с ИИ-баланса за распознавание, ₽. */
-  spent_rub?: number;
-  /** Остаток ИИ-баланса после списания, ₽. */
-  balance_rub?: number;
+  /** Что программа не смогла прочитать уверенно: пустые, двойные и слабые отметки. */
+  warnings?: string[];
 }
 
 export type FlowStep = "idle" | "uploading" | "recognizing" | "done" | "error";

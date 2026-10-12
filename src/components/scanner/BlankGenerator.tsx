@@ -16,77 +16,110 @@ export interface BlankConfig {
 
 const OPTION_LABELS = ["А", "Б", "В", "Г", "Д", "Е"];
 
-/** Предпросмотр бланка — компактный, точно соответствует PDF */
+const LAYOUTS: [number, number, number][] = [[4, 2, 2], [3, 3, 1], [2, 1, 2], [1, 1, 1]];
+
+/** Те же размеры и правила, что в генераторе PDF (backend/generate-blank/geometry.py). */
+const G = {
+  SW: 210, SH: 297, SM: 5, GAP: 4, PAD: 7, BUB_R: 2.3, PITCH: 6.6, ROW_H: 6.2, NUM_W: 8, COL_GAP: 1,
+  CODE_R: 1.8, CODE_PX: 4.4, CODE_PY: 4.6, CODE_LABEL_W: 4,
+  Y_TITLE: 8.3, Y_RULE: 10, Y_INFO: 13, Y_NAME: 18, Y_CODE_LABEL: 22.2, Y_DIGITS: 26, Y_CODE0: 29.5, Y_HEAD: 52.5,
+  BOTTOM: 7, BIG: 7, SMALL: 4.5, INSET: 2, INSTR_MIN: 26, INSTR_BELOW: 15,
+};
+
+function slotSize(cols: number, rows: number) {
+  return [
+    (G.SW - 2 * G.SM - G.GAP * (cols - 1)) / cols,
+    (G.SH - 2 * G.SM - G.GAP * (rows - 1)) / rows,
+  ];
+}
+const instrBelow = (w: number) => w - 2 * G.PAD - (G.CODE_LABEL_W + 10 * G.CODE_PX) - 3 < G.INSTR_MIN;
+const headEnd = (w: number) => G.Y_HEAD + (instrBelow(w) ? G.INSTR_BELOW : 0);
+const blockW = (opts: number) => G.NUM_W + (opts - 1) * G.PITCH + 2 * G.BUB_R + G.COL_GAP;
+const qCols = (w: number, opts: number) => Math.max(0, Math.min(4, Math.floor((w - 2 * G.PAD) / blockW(opts) + 1e-6)));
+const maxRows = (w: number, h: number) => Math.max(0, Math.floor((h - headEnd(w) - G.BOTTOM) / G.ROW_H + 1e-6));
+
+/** Раскладка на лист A4: сколько бланков помещается при данном числе вопросов. */
+export function chooseLayout(nQ: number, nOpts: number): { per: number; cols: number; rows: number } {
+  for (const [per, cols, rows] of LAYOUTS) {
+    const [w, h] = slotSize(cols, rows);
+    const qc = qCols(w, nOpts);
+    if (qc >= 1 && qc * maxRows(w, h) >= nQ) return { per, cols, rows };
+  }
+  return { per: 1, cols: 1, rows: 1 };
+}
+
+/** Предпросмотр бланка — повторяет PDF: метки в углах, код ученика и кружки ответов. */
 function BlankPreview({ config }: { config: BlankConfig }) {
-  const { questionsCount, optionsCount } = config;
-  const opts = OPTION_LABELS.slice(0, optionsCount);
+  const { questionsCount: nQ, optionsCount: nOpts } = config;
+  const opts = OPTION_LABELS.slice(0, nOpts);
+  const { cols, rows } = chooseLayout(nQ, nOpts);
+  const [w, h] = slotSize(cols, rows);
 
-  // Раскладка колонок — как в генераторе PDF
-  const nCols = questionsCount <= 8 ? 1 : questionsCount <= 24 ? 2 : 3;
-  const nRows = Math.ceil(questionsCount / nCols);
+  const qc = Math.max(1, qCols(w, nOpts));
+  const nRows = Math.ceil(nQ / qc);
+  const colStep = (w - 2 * G.PAD) / qc;
+  const y0 = headEnd(w);
+  const visibleH = Math.min(h, y0 + nRows * G.ROW_H + G.BOTTOM);
 
-  // Размеры в SVG-пикселях (≈2.6 px на мм печатного бланка)
-  const PAD = 9;
-  const CELL = 18;        // клетка под рукописный символ
-  const NUM_W = 16;
-  const PAIR_W = NUM_W + CELL + 4;
-  const ROW_H = CELL + 6;
-  const CODE_CELLS = 5;
-  const CODE_STEP = CELL + 3;
-  const HEAD_H = 82;      // шапка: заголовок, ФИО, код, подсказка
-
-  const gridW = nCols * PAIR_W;
-  const codeW = CODE_CELLS * CODE_STEP;
-  const svgW = Math.max(gridW, codeW) + 2 * PAD;
-  const svgH = HEAD_H + nRows * ROW_H + PAD;
-
-  const codeY = 52;
+  const marks = [
+    { x: G.INSET, y: G.INSET, s: G.BIG },
+    { x: w - G.INSET - G.SMALL, y: G.INSET, s: G.SMALL },
+    { x: G.INSET, y: visibleH - G.INSET - G.SMALL, s: G.SMALL },
+    { x: w - G.INSET - G.SMALL, y: visibleH - G.INSET - G.SMALL, s: G.SMALL },
+  ];
+  const below = instrBelow(w);
 
   return (
-    <svg viewBox={`0 0 ${svgW} ${svgH}`}
-      className="w-full border border-gray-200 rounded bg-white shadow-sm"
-      style={{ fontFamily: "Arial, sans-serif" }}
-    >
-      <rect x={0} y={0} width={svgW} height={svgH} fill="white" />
+    <svg viewBox={`0 0 ${w} ${visibleH}`}
+      className="w-full max-w-[420px] mx-auto border border-gray-200 rounded bg-white shadow-sm"
+      style={{ fontFamily: "Arial, sans-serif" }}>
+      {marks.map((m, i) => <rect key={i} x={m.x} y={m.y} width={m.s} height={m.s} fill="#000" />)}
 
-      {/* Заголовок */}
-      <text x={PAD} y={13} fill="#1e3a5f" fontSize={9} fontWeight="bold">БЛАНК ОТВЕТОВ</text>
-      <text x={svgW - PAD} y={13} textAnchor="end" fill="#8898aa" fontSize={6}>№{config.workId}</text>
-      <line x1={PAD} y1={17} x2={svgW - PAD} y2={17} stroke="#9fb3c8" strokeWidth={0.6} />
+      <text x={11} y={G.Y_TITLE} fill="#1e3a5f" fontSize={3} fontWeight="bold">БЛАНК ОТВЕТОВ</text>
+      <text x={w - G.PAD} y={G.Y_TITLE} textAnchor="end" fill="#6f7f90" fontSize={2}>№{config.workId}</text>
+      <line x1={11} y1={G.Y_RULE} x2={w - G.PAD} y2={G.Y_RULE} stroke="#9fb3c8" strokeWidth={0.2} />
+      <text x={G.PAD} y={G.Y_NAME} fill="#1a1a2e" fontSize={2.5} fontWeight="bold">ФИО:</text>
+      <line x1={G.PAD + 8} y1={G.Y_NAME + 0.7} x2={w - G.PAD} y2={G.Y_NAME + 0.7} stroke="#9fb3c8" strokeWidth={0.2} />
+      <text x={G.PAD} y={G.Y_CODE_LABEL} fill="#1e3a5f" fontSize={2.1} fontWeight="bold">КОД УЧЕНИКА</text>
 
-      {/* ФИО */}
-      <text x={PAD} y={29} fill="#1a1a2e" fontSize={7} fontWeight="bold">ФИО:</text>
-      <line x1={PAD + 24} y1={30} x2={svgW - PAD} y2={30} stroke="#9fb3c8" strokeWidth={0.6} />
-
-      {/* Подпись предмета/класса */}
-      {(config.subject || config.classLabel) && (
-        <text x={PAD} y={41} fill="#8898aa" fontSize={6}>
-          {[config.subject, config.classLabel].filter(Boolean).join(" · ")}
-        </text>
-      )}
-
-      {/* Код ученика — 5 клеток */}
-      <text x={PAD} y={codeY - 3} fill="#1e3a5f" fontSize={5.6} fontWeight="bold">КОД УЧЕНИКА</text>
-      {Array.from({ length: CODE_CELLS }).map((_, i) => (
-        <rect key={`c${i}`} x={PAD + i * CODE_STEP} y={codeY} width={CELL} height={CELL}
-          fill="white" stroke="#9fb3c8" strokeWidth={0.9} />
+      {Array.from({ length: 10 }).map((_, d) => (
+        <text key={`d${d}`} x={G.PAD + G.CODE_LABEL_W + G.CODE_R + d * G.CODE_PX} y={G.Y_DIGITS}
+          textAnchor="middle" fontSize={2.1} fontWeight="bold" fill="#1a1a2e">{d}</text>
       ))}
-      <text x={PAD} y={codeY + CELL + 9} fill="#8898aa" fontSize={5.4}>
-        Впишите букву: {opts.join(" ")} · лишние вопросы — Z
-      </text>
+      {Array.from({ length: 5 }).map((_, p) => (
+        <g key={`p${p}`}>
+          <text x={G.PAD + G.CODE_LABEL_W - 1.3} y={G.Y_CODE0 + p * G.CODE_PY + 0.7} textAnchor="end" fontSize={1.7} fill="#6f7f90">{p + 1}</text>
+          {Array.from({ length: 10 }).map((__, d) => (
+            <circle key={d} cx={G.PAD + G.CODE_LABEL_W + G.CODE_R + d * G.CODE_PX} cy={G.Y_CODE0 + p * G.CODE_PY}
+              r={G.CODE_R} fill="#fff" stroke="#4a5b70" strokeWidth={0.22} />
+          ))}
+        </g>
+      ))}
 
-      {/* Пары «номер вопроса → клетка для буквы» */}
-      {Array.from({ length: questionsCount }).map((_, qi) => {
-        const ci = Math.floor(qi / nRows);
-        const ri = qi % nRows;
-        const px = PAD + ci * PAIR_W;
-        const py = HEAD_H + ri * ROW_H;
+      {!below && ["Закрашивайте кружок", "полностью тёмной ручкой.", "Код: в каждой строке", "одна цифра. На вопрос —", "один кружок."].map((t, i) => (
+        <text key={i} x={G.PAD + G.CODE_LABEL_W + 10 * G.CODE_PX + 3} y={G.Y_CODE_LABEL + 3 * i} fontSize={1.8} fill="#6f7f90">{t}</text>
+      ))}
+      {below && ["Закрашивайте кружок", "полностью тёмной ручкой.", "Код: в каждой строке", "одна цифра. На вопрос —", "один кружок."].map((t, i) => (
+        <text key={i} x={G.PAD} y={G.Y_CODE0 + 4 * G.CODE_PY + G.CODE_R + 3.4 + i * 3} fontSize={1.8} fill="#6f7f90">{t}</text>
+      ))}
+
+      {Array.from({ length: nQ }).map((_, q) => {
+        const c = Math.floor(q / nRows);
+        const r = q % nRows;
+        const xCol = G.PAD + c * colStep;
+        const cy = y0 + (r + 0.5) * G.ROW_H;
         return (
-          <g key={qi}>
-            <text x={px + NUM_W - 3} y={py + CELL * 0.68} textAnchor="end"
-              fill="#1a1a2e" fontSize={7} fontWeight="bold">{qi + 1}.</text>
-            <rect x={px + NUM_W} y={py} width={CELL} height={CELL}
-              fill="white" stroke="#9fb3c8" strokeWidth={0.8} />
+          <g key={q}>
+            <text x={xCol + G.NUM_W - 1.6} y={cy + 0.9} textAnchor="end" fontSize={2.5} fontWeight="bold" fill="#1a1a2e">{q + 1}.</text>
+            {opts.map((o, j) => {
+              const cx = xCol + G.NUM_W + G.BUB_R + j * G.PITCH;
+              return (
+                <g key={o}>
+                  <circle cx={cx} cy={cy} r={G.BUB_R} fill="#fff" stroke="#4a5b70" strokeWidth={0.25} />
+                  <text x={cx} y={cy + 0.8} textAnchor="middle" fontSize={2.2} fill="#9aa8b8">{o}</text>
+                </g>
+              );
+            })}
           </g>
         );
       })}
@@ -114,7 +147,7 @@ export function BlankGenerator({ workId, workTitle, questionsCount: initQ, optio
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Выбор учеников для персональных бланков (QR + ФИО)
+  // Выбор учеников для персональных бланков (код + ФИО)
   const { students } = useAppStore();
   const [selectedCodes, setSelectedCodes] = useState<Set<string>>(new Set());
   const [classFilter, setClassFilter] = useState<string>("all");
@@ -152,23 +185,10 @@ export function BlankGenerator({ workId, workTitle, questionsCount: initQ, optio
   const upd = (k: keyof BlankConfig, v: unknown) =>
     setConfig(c => ({ ...c, [k]: v }));
 
-  // Сколько бланков влезает на лист A4 — повторяет расчёт генератора PDF
-  const perSheet = useMemo(() => {
-    const nQ = config.questionsCount;
-    const nCols = nQ <= 8 ? 1 : nQ <= 24 ? 2 : 3;
-    const nRows = Math.ceil(nQ / nCols);
-    const MM = 1;
-    const CELL = 7.0, GAP_C = 1.6, NUM_W = 6.2, PAD_B = 3.5;
-    const PAIR_W = NUM_W + CELL + GAP_C;
-    const ROW_H = CELL + 2.4;
-    const HEAD_H = 31.5;
-    const bw = Math.max(nCols * PAIR_W, 5 * (CELL + 1.2)) + 2 * PAD_B;
-    const bh = HEAD_H + nRows * ROW_H + PAD_B;
-    const pw = 210 * MM, ph = 297 * MM, margin = 8, gap = 4;
-    const cols = Math.max(1, Math.floor((pw - 2 * margin + gap) / (bw + gap)));
-    const rows = Math.max(1, Math.floor((ph - 2 * margin + gap) / (bh + gap)));
-    return cols * rows;
-  }, [config.questionsCount]);
+  const perSheet = useMemo(
+    () => chooseLayout(config.questionsCount, config.optionsCount).per,
+    [config.questionsCount, config.optionsCount],
+  );
 
   const handleDownload = async () => {
     setLoading(true);
@@ -311,18 +331,18 @@ export function BlankGenerator({ workId, workTitle, questionsCount: initQ, optio
             <div className="flex items-start gap-2 p-3 rounded-lg bg-blue-50 border border-blue-100">
               <Icon name="Info" size={14} className="text-blue-500 flex-shrink-0 mt-0.5" />
               <p className="text-xs text-blue-900">
-                Бланки компактные — на лист A4 помещается{" "}
+                На лист A4 помещается{" "}
                 <span className="font-semibold">{perSheet}</span>{" "}
-                {perSheet === 1 ? "бланк" : perSheet < 5 ? "бланка" : "бланков"}.
-                Между ними печатаются линии отреза.
+                {perSheet === 1 ? "бланк" : "бланка"}: чем меньше вопросов, тем больше бланков на листе.
+                Распечатайте без масштабирования («реальный размер»), затем разрежьте по пунктиру.
               </p>
             </div>
           </section>
 
-          {/* Ученики (персональные бланки с QR) */}
+          {/* Ученики (персональные бланки с кодом) */}
           <section>
             <div className="flex items-center justify-between mb-2">
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Ученики (QR на бланке)</p>
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Ученики (код на бланке)</p>
               {selectedCodes.size > 0 && (
                 <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">
                   {selectedCodes.size}
@@ -332,7 +352,7 @@ export function BlankGenerator({ workId, workTitle, questionsCount: initQ, optio
 
             {students.length === 0 ? (
               <p className="text-xs text-gray-400 bg-white border border-gray-200 rounded-lg p-2.5">
-                Список учеников пуст. Будет напечатан пустой бланк без QR. Добавьте учеников в разделе «Ученики».
+                Список учеников пуст. Будет напечатан пустой бланк: ученик закрасит код сам. Добавьте учеников в разделе «Ученики».
               </p>
             ) : (
               <div className="space-y-2">
@@ -370,7 +390,7 @@ export function BlankGenerator({ workId, workTitle, questionsCount: initQ, optio
                   })}
                 </div>
                 <p className="text-[11px] text-gray-400">
-                  На каждого выбранного — отдельный бланк с его ФИО и персональным QR-кодом.
+                  На каждого выбранного — отдельный бланк с его ФИО и уже закрашенным кодом.
                 </p>
               </div>
             )}
@@ -401,9 +421,10 @@ export function BlankGenerator({ workId, workTitle, questionsCount: initQ, optio
           {/* Инфо */}
           <div className="text-xs text-gray-500 bg-blue-50 border border-blue-100 rounded-lg p-3 space-y-1">
             <div className="font-semibold text-blue-700 mb-1">Как заполнять</div>
-            <div>● — закрасить кружок выбранного ответа</div>
-            <div>✕ — зачеркнуть ошибочный, закрасить верный</div>
-            <div>QR-код определяет ученика автоматически</div>
+            <div>● Закрасить кружок выбранного ответа полностью, тёмной ручкой</div>
+            <div>● На один вопрос — один кружок</div>
+            <div>● Код ученика: в каждой из 5 строк закрасить одну цифру</div>
+            <div>● Фото: бланк целиком, чтобы были видны 4 чёрных квадрата в углах</div>
           </div>
         </div>
 

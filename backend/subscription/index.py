@@ -758,6 +758,8 @@ def handler(event: dict, context) -> dict:
             if not row:
                 return _resp(404, {"error": "Пользователь не найден"})
             email, full_name, sub_until, trial_until, user_role = row
+            if not email:
+                return _resp(400, {"error": "Для оплаты нужен email: укажите его в профиле, на него придёт чек"})
             now = datetime.utcnow()
             has_paid_sub = isinstance(sub_until, datetime) and sub_until > now
             on_trial = isinstance(trial_until, datetime) and trial_until > now

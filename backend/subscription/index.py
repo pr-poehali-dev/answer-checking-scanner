@@ -733,7 +733,7 @@ def handler(event: dict, context) -> dict:
 
     # ── POST buy-tokens — создать платёж на пополнение баланса ИИ ─────────────
     if method == "POST" and route in ("buy-tokens", "buy_tokens"):
-        if not user_login or user_login == "admin":
+        if not user_login:
             return _resp(400, {"error": "Неизвестный пользователь"})
         try:
             amount_rub = float(body.get("amount_rub") or 0)

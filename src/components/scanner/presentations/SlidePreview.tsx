@@ -135,8 +135,9 @@ export function SlidePreview({ theme, slide, num, total, className = "" }: Slide
   return (
     <div
       className={`relative overflow-hidden rounded-md shadow-sm border border-black/5 ${className}`}
-      style={{ aspectRatio: ASPECT, background: hex(theme.bg) }}
+      style={{ aspectRatio: ASPECT, background: hex(theme.bg), containerType: "inline-size" }}
     >
+      <div className="absolute inset-0" style={{ fontSize: "50cqw" }}>
       <ContentHeader theme={theme} title={slide.title || "Заголовок слайда"} num={num} total={total} />
       <div
         className="absolute bottom-0 flex flex-col gap-[3%] overflow-hidden"
@@ -158,6 +159,7 @@ export function SlidePreview({ theme, slide, num, total, className = "" }: Slide
       </div>
       {/* нижняя полоса — footer акцент, как в PPTX */}
       <div className="absolute bottom-0 left-0 right-0 h-[2.5%]" style={{ background: hex(theme.accent2), opacity: 0.5 }} />
+      </div>
     </div>
   );
 }
@@ -174,9 +176,10 @@ export function TitleSlidePreview({ theme, topic, subtitle, className = "" }: Ti
   const titleFont = theme.font_title || "inherit";
   return (
     <div
-      className={`relative overflow-hidden rounded-md shadow-sm border border-black/5 flex flex-col items-center justify-center text-center px-[6%] ${className}`}
-      style={{ aspectRatio: ASPECT, background: hex(theme.title_bg) }}
+      className={`relative overflow-hidden rounded-md shadow-sm border border-black/5 ${className}`}
+      style={{ aspectRatio: ASPECT, background: hex(theme.title_bg), containerType: "inline-size" }}
     >
+      <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-[6%]" style={{ fontSize: "50cqw" }}>
       {theme.label && (
         <span className="uppercase tracking-widest font-bold mb-2" style={{ color: hex(theme.accent2), fontSize: "3.5%" }}>
           {theme.label}
@@ -190,6 +193,7 @@ export function TitleSlidePreview({ theme, topic, subtitle, className = "" }: Ti
           {subtitle}
         </span>
       )}
+      </div>
     </div>
   );
 }

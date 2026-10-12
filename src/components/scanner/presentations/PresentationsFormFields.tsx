@@ -118,7 +118,7 @@ export function PresentationsFormFields({
       <ModePicker mode={mode} setMode={setMode} disabled={busy} />
 
       <TemplatePicker designMode={designMode} setDesignMode={setDesignMode}
-        templateId={templateId} setTemplateId={setTemplateId} disabled={busy} />
+        templateId={templateId} setTemplateId={setTemplateId} topic={topic} disabled={busy} />
 
       {designMode === "custom" && (
         <div className="w-full rounded-xl border border-transparent p-4 shadow-sm"

@@ -1,15 +1,20 @@
+import { useState } from "react";
 import Icon from "@/components/ui/icon";
-import { READY_TEMPLATES, type DesignMode } from "./presentationTemplates";
+import { SlidePreview } from "./SlidePreview";
+import { TemplateGallery } from "./TemplateGallery";
+import { READY_TEMPLATES, SAMPLE_SLIDE, templateToTheme, type DesignMode } from "./presentationTemplates";
 
 interface TemplatePickerProps {
   designMode: DesignMode;
   setDesignMode: (v: DesignMode) => void;
   templateId: string;
   setTemplateId: (v: string) => void;
+  topic?: string;
   disabled?: boolean;
 }
 
-export function TemplatePicker({ designMode, setDesignMode, templateId, setTemplateId, disabled }: TemplatePickerProps) {
+export function TemplatePicker({ designMode, setDesignMode, templateId, setTemplateId, topic, disabled }: TemplatePickerProps) {
+  const [galleryOpen, setGalleryOpen] = useState(false);
   return (
     <div>
       <label className="text-xs font-bold text-foreground block mb-1.5">Оформление</label>
@@ -36,31 +41,38 @@ export function TemplatePicker({ designMode, setDesignMode, templateId, setTempl
       </div>
 
       {designMode === "template" && (
-        <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
-          {READY_TEMPLATES.map(t => (
-            <button key={t.id} type="button" disabled={disabled} onClick={() => setTemplateId(t.id)}
-              className={`rounded-lg overflow-hidden border-2 text-left transition-all disabled:opacity-50 ${
-                templateId === t.id ? "border-primary shadow-md" : "border-transparent hover:border-primary/30"
-              }`}>
-              <div className="h-14 relative" style={{ background: t.bg }}>
-                <div className="absolute inset-x-0 top-0 h-6" style={{ background: t.dark }} />
-                <div className="absolute left-2 top-2 h-1.5 w-1/2 rounded-full" style={{ background: "rgba(255,255,255,.75)" }} />
-                <div className="absolute left-2 bottom-2 h-1 w-3/4 rounded-full" style={{ background: t.dark, opacity: 0.35 }} />
-                <div className="absolute left-2 bottom-4 h-1 w-1/2 rounded-full" style={{ background: t.dark, opacity: 0.35 }} />
-                <div className="absolute right-2 bottom-2 w-4 h-4 rounded-full" style={{ background: t.accent }} />
-                <div className="absolute right-5 bottom-3 w-3 h-3 rounded-full" style={{ background: t.accent2 }} />
+        <div className="mt-3">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-[11px] text-muted-foreground">Выбран: <b className="text-foreground">{READY_TEMPLATES.find(t => t.id === templateId)?.name}</b></p>
+            <button type="button" onClick={() => setGalleryOpen(true)}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline">
+              <Icon name="Maximize2" size={13} fallback="Eye" />
+              Посмотреть все крупно
+            </button>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {READY_TEMPLATES.map(t => (
+              <button key={t.id} type="button" disabled={disabled} onClick={() => setTemplateId(t.id)}
+                className={`relative rounded-lg overflow-hidden border-2 text-left transition-all disabled:opacity-50 ${
+                  templateId === t.id ? "border-primary shadow-md" : "border-transparent hover:border-primary/30"
+                }`}>
+                <SlidePreview theme={templateToTheme(t)} slide={SAMPLE_SLIDE} num={2} total={8} className="!rounded-none !shadow-none !border-0" />
                 {templateId === t.id && (
-                  <div className="absolute top-1 right-1 w-4 h-4 rounded-full bg-white flex items-center justify-center">
+                  <div className="absolute top-1 right-1 w-4 h-4 rounded-full bg-white flex items-center justify-center shadow">
                     <Icon name="Check" size={11} className="text-primary" />
                   </div>
                 )}
-              </div>
-              <div className="px-2 py-1 bg-white">
-                <p className="text-[10px] font-semibold truncate">{t.name}</p>
-              </div>
-            </button>
-          ))}
+                <div className="px-2 py-1 bg-white">
+                  <p className="text-[10px] font-semibold truncate">{t.name}</p>
+                </div>
+              </button>
+            ))}
+          </div>
         </div>
+      )}
+
+      {galleryOpen && (
+        <TemplateGallery topic={topic} selectedId={templateId} onSelect={setTemplateId} onClose={() => setGalleryOpen(false)} />
       )}
     </div>
   );

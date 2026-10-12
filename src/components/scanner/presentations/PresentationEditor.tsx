@@ -59,8 +59,8 @@ export function PresentationEditor({
   const addBullet = (slideIdx: number) => {
     setOutline(o => ({
       ...o,
-      slides: o.slides.map((s, i) => i === slideIdx && s.bullets.length < 7
-        ? { ...s, bullets: [...s.bullets, "Новый тезис"] }
+      slides: o.slides.map((s, i) => i === slideIdx && s.bullets.length < (s.kind === "detailed" ? 3 : 7)
+        ? { ...s, bullets: [...s.bullets, s.kind === "detailed" ? "Название понятия — связный текст из 2–5 предложений." : "Новый тезис"] }
         : s),
     }));
   };
@@ -255,7 +255,12 @@ export function PresentationEditor({
                   </div>
 
                   <div>
-                    <label className="text-xs font-bold text-foreground block mb-1.5">Тезисы</label>
+                    <label className="text-xs font-bold text-foreground block mb-1.5">
+                      {activeSlide.kind === "detailed" ? "Понятия и описания" : "Тезисы"}
+                    </label>
+                    {activeSlide.kind === "detailed" && (
+                      <p className="text-[10px] text-muted-foreground mb-2">Формат: «Название — связный текст из 2–5 предложений». Без списков и маркеров.</p>
+                    )}
                     <div className="space-y-2">
                       {activeSlide.bullets.map((b, bi) => (
                         <div key={bi} className="flex items-start gap-2">
@@ -263,7 +268,7 @@ export function PresentationEditor({
                           <textarea
                             value={b}
                             onChange={e => updateBullet(activeIdx, bi, e.target.value)}
-                            rows={2}
+                            rows={activeSlide.kind === "detailed" ? 6 : 2}
                             className="flex-1 border border-border rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary/30"
                           />
                           <button
@@ -276,13 +281,13 @@ export function PresentationEditor({
                         </div>
                       ))}
                     </div>
-                    {activeSlide.bullets.length < 7 && (
+                    {activeSlide.bullets.length < (activeSlide.kind === "detailed" ? 3 : 7) && (
                       <button
                         onClick={() => addBullet(activeIdx)}
                         className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-primary hover:opacity-70 transition-opacity"
                       >
                         <Icon name="Plus" size={13} />
-                        Добавить тезис
+                        {activeSlide.kind === "detailed" ? "Добавить понятие" : "Добавить тезис"}
                       </button>
                     )}
                   </div>

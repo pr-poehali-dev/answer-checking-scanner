@@ -130,6 +130,7 @@ export function SlidePreview({ theme, slide, num, total, className = "" }: Slide
   const sidebar = theme.layout === "sidebar_dark";
   const topPct = headerHeightPct[theme.layout] ?? 19;
   const bodyFont = theme.font_body || "inherit";
+  const titleFontName = theme.font_title || "inherit";
   const marker = theme.bullet_marker || "▸";
 
   return (
@@ -148,7 +149,19 @@ export function SlidePreview({ theme, slide, num, total, className = "" }: Slide
           bottom: "6%",
         }}
       >
-        {(slide.bullets.length ? slide.bullets : ["Тезис появится здесь"]).slice(0, 5).map((b, i) => (
+        {slide.kind === "detailed" ? (
+          (slide.bullets.length ? slide.bullets : ["Понятие — описание появится здесь."]).slice(0, 3).map((b, i) => {
+            const m = b.match(/^(.{1,70}?)\s[—–]\s(.+)$/s);
+            return (
+              <div key={i}>
+                {m && <div className="font-bold" style={{ color: hex(theme.accent2), fontFamily: titleFontName, fontSize: "4.6%" }}>{m[1]}</div>}
+                <div className="leading-snug line-clamp-4" style={{ color: hex(theme.text), fontFamily: bodyFont, fontSize: "3.9%" }}>
+                  {m ? m[2].charAt(0).toUpperCase() + m[2].slice(1) : b}
+                </div>
+              </div>
+            );
+          })
+        ) : (slide.bullets.length ? slide.bullets : ["Тезис появится здесь"]).slice(0, 5).map((b, i) => (
           <div key={i} className="flex items-start gap-1.5">
             <span className="flex-shrink-0 font-bold" style={{ color: hex(theme.accent2), fontSize: "4.2%" }}>{marker}</span>
             <span className="leading-snug line-clamp-2" style={{ color: hex(theme.text), fontFamily: bodyFont, fontSize: "4.2%" }}>

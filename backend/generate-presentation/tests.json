@@ -42,6 +42,19 @@
         "error": "string"
       },
       "bodyMatcher": "partial"
+    },
+    {
+      "name": "POST outline без темы (режим смешанный)",
+      "method": "POST",
+      "path": "/?action=outline",
+      "body": {
+        "mode": "mixed"
+      },
+      "expectedStatus": 400,
+      "expectedBody": {
+        "error": "string"
+      },
+      "bodyMatcher": "partial"
     }
   ]
 }

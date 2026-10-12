@@ -718,43 +718,65 @@ _SLIDE_SCHEMA_THESIS = (
     '"bullets":["Развёрнутый тезис 1 — 15-25 слов с конкретным фактом","Тезис 2 — 15-25 слов","Тезис 3","Тезис 4","Тезис 5"],'
 )
 _SLIDE_SCHEMA_DETAILED = (
-    '"bullets":["Термин — чёткое определение 20-35 слов, раскрывающее суть понятия","Понятие 2 — определение 20-35 слов",'
-    '"Понятие 3 — определение","Понятие 4 — определение"],'
+    '"bullets":["Название понятия — связный текст из 2-5 полных предложений: определение, суть, пример",'
+    '"Название понятия 2 — связный текст из 2-5 предложений"],'
 )
 
 
 def _mode_instructions(mode: str, slides_count: int) -> tuple[str, str, int]:
     """Возвращает (описание формата слайда для JSON, строгие правила, токенов на слайд)."""
+    detailed_rules = (
+        "ПОДРОБНЫЙ слайд (kind=detailed): bullets содержит ровно 2 элемента, каждый — отдельное понятие в формате "
+        "«Название понятия — текст». Текст после тире — СВЯЗНЫЙ ПОВЕСТВОВАТЕЛЬНЫЙ АБЗАЦ из 2-5 полных предложений "
+        "(определение, суть, причины, пример), 40-90 слов. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО дробить текст на пункты, перечисления "
+        "через запятую-обрывки, нумерацию, маркеры («•», «-», «1)»), вложенные списки и короткие фразы-лозунги. "
+        "Каждое предложение — законченное, с подлежащим и сказуемым. Поле fact для подробного слайда оставь пустой строкой."
+    )
     if mode == "detailed":
-        schema = _SLIDE_SCHEMA_DETAILED
-        rules = (
-            "РЕЖИМ: ПОДРОБНАЯ презентация с определениями и понятиями. СТРОГО: "
-            "каждый пункт bullets — это «Термин — определение» (сначала ключевое понятие, затем тире и полное, "
-            "научно точное определение 20-35 слов). Ровно 4 пункта на слайд. "
-            "Нельзя писать обрывочные тезисы и лозунги — только раскрытые определения и пояснения. "
-            "В поле fact дай пример, формулу, дату или применение понятия."
-        )
-        return schema, rules, 420
+        return _SLIDE_SCHEMA_DETAILED, "РЕЖИМ: ПОДРОБНАЯ презентация с определениями и понятиями. СТРОГО: все слайды — kind=detailed. " + detailed_rules, 650
     if mode == "mixed":
         schema = (
             '"kind":"thesis или detailed",'
-            '"bullets":["для kind=thesis: 5 тезисов по 15-25 слов; для kind=detailed: 4 пункта «Термин — определение» по 20-35 слов"],'
+            '"bullets":["для kind=thesis: 5 тезисов по 15-25 слов; для kind=detailed: 2 понятия «Название — связный текст из 2-5 предложений»"],'
         )
         rules = (
             "РЕЖИМ: ТЕЗИСНАЯ + ПОДРОБНАЯ. СТРОГО: сам реши, какие слайды раскрыть подробно, а какие дать тезисно. "
-            "Подробно (kind=detailed) — слайды, где вводятся новые термины и понятия: ровно 4 пункта «Термин — определение», 20-35 слов. "
+            "Подробно (kind=detailed) — слайды, где вводятся новые термины и понятия. " + detailed_rules + " "
             "Тезисно (kind=thesis) — обзорные, исторические, итоговые слайды: ровно 5 коротких тезисов по 15-25 слов без определений. "
             f"Из {slides_count} слайдов минимум один должен быть detailed и минимум один thesis (если слайдов больше 2). "
             'Дополнительно верни поле "plan": массив из объектов {"slide":номер,"title":"заголовок","kind":"detailed|thesis","why":"почему именно так, 5-10 слов"} — '
             "по одному на каждый слайд, это письменное пояснение, что будет подробно, а что тезисно."
         )
-        return schema, rules, 380
-    schema = _SLIDE_SCHEMA_THESIS
+        return schema, rules, 480
     rules = (
         "РЕЖИМ: ТЕЗИСНАЯ презентация. СТРОГО: ровно 5 тезисов на слайд — ключевые мысли и аргументы в сжатой форме с конкретным фактом. "
         "Не пиши определений в формате «Термин — определение» и не расписывай понятия подробно."
     )
-    return schema, rules, 300
+    return _SLIDE_SCHEMA_THESIS, rules, 300
+
+
+_LEAD_MARKER_RE = re.compile(r"^\s*(?:[•●▪◆▸›*\-–—]+|\d{1,2}[.)])\s+")
+
+
+def _clean_marker(text: str) -> str:
+    """Убирает ведущие маркеры/нумерацию, которые ИИ мог добавить вопреки правилам."""
+    prev = None
+    text = text.strip()
+    while prev != text:
+        prev = text
+        text = _LEAD_MARKER_RE.sub("", text).strip()
+    return text
+
+
+def split_term(text: str) -> tuple[str, str]:
+    """«Термин — описание» → (термин, описание). Если термина нет — ("", весь текст)."""
+    for sep in (" — ", " – ", ": "):
+        if sep in text:
+            head, tail = text.split(sep, 1)
+            if 0 < len(head.strip()) <= 70 and tail.strip():
+                tail = tail.strip()
+                return head.strip(), tail[0].upper() + tail[1:]
+    return "", text.strip()
 
 
 def _norm_kind(kind, mode: str) -> str:
@@ -802,7 +824,7 @@ def generate_outline(topic: str, description: str, slides_count: int, audience: 
         "playful — для тем про детей/творчество/начальную школу, elegant — для искусства/литературы/истории."
     )
 
-    max_tok = min(per_slide_tokens * slides_count + 800 + (60 * slides_count if mode == "mixed" else 0), 7500)
+    max_tok = min(per_slide_tokens * slides_count + 800 + (60 * slides_count if mode == "mixed" else 0), 8000)
 
     raw, tokens_used = gigachat_with_fallback(
         [{"role": "system", "content": system}, {"role": "user", "content": user}],
@@ -824,9 +846,11 @@ def generate_outline(topic: str, description: str, slides_count: int, audience: 
         bullets = s.get("bullets") or []
         if not isinstance(bullets, list):
             bullets = []
-        bullets = [str(b).strip() for b in bullets if str(b).strip()][:7]
         kind = _norm_kind(s.get("kind"), mode)
-        fact = (s.get("fact") or "").strip()
+        bullets = [_clean_marker(str(b)) for b in bullets if str(b).strip()]
+        bullets = [b for b in bullets if b]
+        bullets = bullets[:3] if kind == "detailed" else bullets[:7]
+        fact = "" if kind == "detailed" else (s.get("fact") or "").strip()
         image_queries = s.get("image_queries") or []
         if not isinstance(image_queries, list) or not image_queries:
             single = (s.get("image_query") or title).strip()
@@ -1125,6 +1149,62 @@ def _add_bullets(slide, x, y, w, h, bullets: list, *, size: int = 17,
         run.font.color.rgb = color
 
 
+def _add_paragraphs(slide, x, y, w, h, items: list, *, size: int = 16,
+                    color: RGBColor = None, font: str = None,
+                    accent2: RGBColor = None, space_after: int = 10, marker: str = None):
+    """Связный текст без маркеров: название понятия жирным, ниже — абзац из 2-5 предложений."""
+    if color is None:
+        color = RGBColor(0x22, 0x2A, 0x35)
+    if accent2 is None:
+        accent2 = RGBColor(0xC2, 0x8B, 0x42)
+    if font is None:
+        font = _CUR_FONT_BODY
+    parsed = [split_term(str(it)) for it in items]
+    gap = 12
+    try:
+        w_pt = max(float(w) / 12700.0 - 6, 60)
+        h_pt = max(float(h) / 12700.0, 60)
+        while size > 10:
+            cpl = max(w_pt / (size * 0.5), 10)
+            need = 0.0
+            for term, body in parsed:
+                if term:
+                    need += (size + 2) * 1.25
+                need += -(-len(body) // int(cpl)) * size * 1.25 + gap
+            if need <= h_pt:
+                break
+            size -= 1
+    except Exception:
+        pass
+    box = slide.shapes.add_textbox(x, y, w, h)
+    tf = box.text_frame
+    tf.word_wrap = True
+    tf.margin_left = Emu(0)
+    tf.margin_right = Emu(0)
+    first = True
+    for term, body in parsed:
+        if term:
+            p = tf.paragraphs[0] if first else tf.add_paragraph()
+            first = False
+            p.alignment = PP_ALIGN.LEFT
+            p.space_after = Pt(2)
+            r = p.add_run()
+            r.text = term
+            r.font.name = _CUR_FONT_TITLE
+            r.font.size = Pt(size + 2)
+            r.font.bold = True
+            r.font.color.rgb = accent2
+        p = tf.paragraphs[0] if first else tf.add_paragraph()
+        first = False
+        p.alignment = PP_ALIGN.LEFT
+        p.space_after = Pt(gap)
+        r = p.add_run()
+        r.text = body
+        r.font.name = font
+        r.font.size = Pt(size)
+        r.font.color.rgb = color
+
+
 def _add_image_to_slide(slide, img_bytes: bytes, x, y, w, h):
     """Добавляет изображение на слайд из bytes."""
     try:
@@ -1365,7 +1445,7 @@ def _fact_card(slide, x, y, w, h, fact, theme, *, size=12, layout_style=None, rn
                   fact, size=size, color=theme["white"], italic=True, anchor=MSO_ANCHOR.MIDDLE)
 
 
-def place_slide_content(slide, theme, rnd, ct, cx, content_h, bullets, fact, imgs):
+def place_slide_content(slide, theme, rnd, ct, cx, content_h, bullets, fact, imgs, detailed=False):
     """
     Процедурно размещает контент слайда: расположение фото, текста и факта
     выбирается СЛУЧАЙНО для каждого слайда. Один и тот же слайд не повторяет
@@ -1373,6 +1453,27 @@ def place_slide_content(slide, theme, rnd, ct, cx, content_h, bullets, fact, img
     """
     right_edge = SLIDE_W - Inches(0.25)
     avail_w = right_edge - cx
+    if detailed:
+        # Подробный слайд: связный текст на всю ширину или рядом с одним фото, без факта и без маркеров
+        imgs = imgs[:1]
+        fact = ""
+        n = len(imgs)
+        if n == 0:
+            _add_paragraphs(slide, cx, ct, avail_w, content_h, bullets, size=18,
+                            color=theme["text"], accent2=theme["accent2"])
+            return
+        pw = Inches(rnd.uniform(4.0, 4.8))
+        ph = min(content_h - Inches(0.1), Inches(rnd.uniform(4.0, 4.8)))
+        if rnd.random() < 0.5:
+            px = right_edge - pw
+            tx, tw = cx, px - cx - Inches(0.3)
+        else:
+            px = cx
+            tx, tw = cx + pw + Inches(0.3), right_edge - (cx + pw + Inches(0.3))
+        _img_framed(slide, imgs[0], px, ct, pw, ph, theme, rnd)
+        _add_paragraphs(slide, tx, ct, max(tw, Inches(3.4)), content_h, bullets, size=17,
+                        color=theme["text"], accent2=theme["accent2"])
+        return
     n = len(imgs)
 
     if n == 0:
@@ -1796,7 +1897,8 @@ def build_pptx(topic: str, subtitle: str, contents: list, slides_data: list,
         # ── Процедурный per-slide макет: расположение фото, текста и факта
         #    выбирается СЛУЧАЙНО для каждого слайда — единого формата нет. ──
         slide_rnd = random.Random(f"{theme.get('name','')}|{s['title']}|{idx}|{random.random()}")
-        place_slide_content(slide, theme, slide_rnd, ct, cx, content_h, bullets, fact, slide_imgs)
+        place_slide_content(slide, theme, slide_rnd, ct, cx, content_h, bullets, fact, slide_imgs,
+                            detailed=(s.get("kind") == "detailed"))
 
         _footer(slide, teacher_name, teacher_school, theme)
 
@@ -2137,7 +2239,10 @@ def handler(event: dict, context) -> dict:
             if not isinstance(s, dict):
                 continue
             title = str(s.get("title") or "").strip()
+            is_detailed = str(s.get("kind") or "") == "detailed"
             bullets = [str(b).strip() for b in (s.get("bullets") or []) if str(b).strip()]
+            if is_detailed:
+                bullets = [b for b in (_clean_marker(b) for b in bullets) if b]
             if not title or not bullets:
                 continue
             image_queries = [str(q).strip() for q in (s.get("image_queries") or []) if str(q).strip()]
@@ -2145,8 +2250,8 @@ def handler(event: dict, context) -> dict:
                 image_queries = [title, topic, title]
             norm_build_slides.append({
                 "title": title,
-                "bullets": bullets[:7],
-                "kind": str(s.get("kind") or ""),
+                "bullets": bullets[:3] if is_detailed else bullets[:7],
+                "kind": "detailed" if is_detailed else str(s.get("kind") or ""),
                 "fact": str(s.get("fact") or "").strip(),
                 "image_queries": image_queries[:3],
             })

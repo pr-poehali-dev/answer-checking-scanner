@@ -34,30 +34,14 @@ CORS = {
 
 
 def _reg():
-    """Подбирает шрифт с кириллицей (Helvetica её не содержит)."""
-    pairs = [
-        ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
-        ("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-         "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"),
-        ("/usr/share/fonts/truetype/freefont/FreeSans.ttf",
-         "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf"),
-        ("/usr/share/fonts/dejavu/DejaVuSans.ttf",
-         "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf"),
-        ("/usr/share/fonts/opensans/OpenSans-Regular.ttf",
-         "/usr/share/fonts/opensans/OpenSans-Bold.ttf"),
-        ("/usr/share/fonts/noto/NotoSans-Regular.ttf",
-         "/usr/share/fonts/noto/NotoSans-Bold.ttf"),
-    ]
-    for rp, bp in pairs:
-        if os.path.exists(rp) and os.path.exists(bp):
-            try:
-                pdfmetrics.registerFont(TTFont("F", rp))
-                pdfmetrics.registerFont(TTFont("FB", bp))
-                return "F", "FB"
-            except Exception:
-                pass
-    return "Helvetica", "Helvetica-Bold"
+    """Регистрирует встроенный шрифт с кириллицей (Helvetica русских букв не содержит)."""
+    try:
+        import fonts_data
+        pdfmetrics.registerFont(TTFont("F", io.BytesIO(fonts_data.REGULAR)))
+        pdfmetrics.registerFont(TTFont("FB", io.BytesIO(fonts_data.BOLD)))
+        return "F", "FB"
+    except Exception:
+        return "Helvetica", "Helvetica-Bold"
 
 
 REG, BOLD = _reg()

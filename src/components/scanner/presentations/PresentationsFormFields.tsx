@@ -1,5 +1,9 @@
 import Icon from "@/components/ui/icon";
 import { SLIDE_OPTIONS, DESIGN_SWATCHES, AUDIENCE_PRESETS } from "./presentationUtils";
+import type { PresentationMode } from "@/lib/api";
+import type { DesignMode } from "./presentationTemplates";
+import { ModePicker } from "./ModePicker";
+import { TemplatePicker } from "./TemplatePicker";
 
 interface PresentationsFormFieldsProps {
   topic: string;
@@ -10,6 +14,12 @@ interface PresentationsFormFieldsProps {
   setAudience: (v: string) => void;
   slidesCount: number;
   setSlidesCount: (v: number) => void;
+  mode: PresentationMode;
+  setMode: (v: PresentationMode) => void;
+  designMode: DesignMode;
+  setDesignMode: (v: DesignMode) => void;
+  templateId: string;
+  setTemplateId: (v: string) => void;
   busy: boolean;
   generate: () => void;
   teacher: { name?: string; school?: string } | null;
@@ -25,6 +35,12 @@ export function PresentationsFormFields({
   setAudience,
   slidesCount,
   setSlidesCount,
+  mode,
+  setMode,
+  designMode,
+  setDesignMode,
+  templateId,
+  setTemplateId,
   busy,
   generate,
   teacher,
@@ -47,7 +63,7 @@ export function PresentationsFormFields({
           className="w-full border border-border rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary disabled:opacity-50 transition-all"
         />
         <p className="text-[10px] text-muted-foreground mt-1">
-          Тема определяет дизайн-тему — биология получит зелёную, история — золотую и т.д.
+          Чем точнее тема, тем лучше ИИ подберёт содержание слайдов.
         </p>
       </div>
 
@@ -99,29 +115,35 @@ export function PresentationsFormFields({
         </div>
       </div>
 
-      {/* Оформление подбирает ИИ — выбор вариантов будет доступен в редакторе после генерации */}
-      <div className="w-full rounded-xl border border-transparent p-4 shadow-sm"
-        style={{ background: "linear-gradient(135deg, #6D28D9, #DB2777 55%, #F59E0B)" }}>
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 bg-white/20">
-            <Icon name="Sparkles" size={18} className="text-white" fallback="Wand2" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-bold text-white">
-              Оформление подбирает ИИ
-            </p>
-            <p className="text-[11px] leading-snug text-white/85">
-              Цвета, шрифты и композиция каждый раз разные — под настроение темы. Готовые варианты можно сравнить и отредактировать в редакторе перед скачиванием
-            </p>
-            <div className="flex items-center gap-1.5 mt-2">
-              {DESIGN_SWATCHES.map((c, i) => (
-                <span key={i} className="w-4 h-4 rounded-full ring-1 ring-white/60" style={{ backgroundColor: c }} />
-              ))}
-              <span className="text-[10px] ml-1 text-white/70">пример палитры</span>
+      <ModePicker mode={mode} setMode={setMode} disabled={busy} />
+
+      <TemplatePicker designMode={designMode} setDesignMode={setDesignMode}
+        templateId={templateId} setTemplateId={setTemplateId} disabled={busy} />
+
+      {designMode === "custom" && (
+        <div className="w-full rounded-xl border border-transparent p-4 shadow-sm"
+          style={{ background: "linear-gradient(135deg, #6D28D9, #DB2777 55%, #F59E0B)" }}>
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 bg-white/20">
+              <Icon name="Sparkles" size={18} className="text-white" fallback="Wand2" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-white">
+                Оформление подбирает ИИ
+              </p>
+              <p className="text-[11px] leading-snug text-white/85">
+                Цвета, шрифты и композиция каждый раз разные — под настроение темы. Готовые варианты можно сравнить и отредактировать в редакторе перед скачиванием
+              </p>
+              <div className="flex items-center gap-1.5 mt-2">
+                {DESIGN_SWATCHES.map((c, i) => (
+                  <span key={i} className="w-4 h-4 rounded-full ring-1 ring-white/60" style={{ backgroundColor: c }} />
+                ))}
+                <span className="text-[10px] ml-1 text-white/70">пример палитры</span>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Подпись + Я.Диск */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

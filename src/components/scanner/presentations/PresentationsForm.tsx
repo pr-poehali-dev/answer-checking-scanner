@@ -3,7 +3,9 @@ import Icon from "@/components/ui/icon";
 import { usePersistedState, clearPersistedState } from "@/hooks/usePersistedState";
 import { taskRunner, useTaskState } from "@/lib/taskRunner";
 import { appStore, useAppStore, type PresentationItem } from "@/store/appStore";
-import { presentationApi, type PresentationOutlineFull, type PresentationThemePayload } from "@/lib/api";
+import { presentationApi, type PresentationOutlineFull, type PresentationThemePayload, type PresentationMode } from "@/lib/api";
+import type { DesignMode } from "./presentationTemplates";
+import { READY_TEMPLATES } from "./presentationTemplates";
 import { yadisk } from "@/lib/yadisk";
 import {
   PRESENTATIONS_FOLDER,
@@ -26,6 +28,9 @@ export function PresentationsForm() {
   const [description, setDescription] = usePersistedState("presentations:description", "");
   const [audience, setAudience]       = usePersistedState("presentations:audience", AUDIENCE_PRESETS[3]);
   const [slidesCount, setSlidesCount] = usePersistedState("presentations:slidesCount", 8);
+  const [mode, setMode]               = usePersistedState<PresentationMode>("presentations:mode", "thesis");
+  const [designMode, setDesignMode]   = usePersistedState<DesignMode>("presentations:designMode", "template");
+  const [templateId, setTemplateId]   = usePersistedState("presentations:templateId", READY_TEMPLATES[0].id);
   const task = useTaskState(TASK_KEY);
   const buildTask = useTaskState(BUILD_KEY);
   const busy = task.running;
@@ -67,7 +72,8 @@ export function PresentationsForm() {
 
     const params = {
       topic: topic.trim(), description: description.trim(),
-      audience, slidesCount,
+      audience, slidesCount, mode,
+      templateId: designMode === "template" ? templateId : "",
       teacherName: teacher.name, teacherSchool: teacher.school, login: teacher.login,
     };
 
@@ -84,6 +90,7 @@ export function PresentationsForm() {
         const result = await presentationApi.generateOutline({
           topic: params.topic, description: params.description,
           audience: params.audience, slidesCount: params.slidesCount, login: params.login,
+          mode: params.mode, templateId: params.templateId,
         });
 
         if (result.balance_rub !== undefined) {
@@ -173,6 +180,12 @@ export function PresentationsForm() {
           setAudience={setAudience}
           slidesCount={slidesCount}
           setSlidesCount={setSlidesCount}
+          mode={mode}
+          setMode={setMode}
+          designMode={designMode}
+          setDesignMode={setDesignMode}
+          templateId={templateId}
+          setTemplateId={setTemplateId}
           busy={busy}
           generate={generate}
           teacher={teacher}

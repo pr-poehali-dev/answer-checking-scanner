@@ -10,9 +10,13 @@
       "name": "POST без темы",
       "method": "POST",
       "path": "/",
-      "body": {"description": "тест"},
+      "body": {
+        "description": "тест"
+      },
       "expectedStatus": 400,
-      "expectedBody": {"error": "string"},
+      "expectedBody": {
+        "error": "string"
+      },
       "bodyMatcher": "partial"
     },
     {
@@ -20,7 +24,23 @@
       "method": "GET",
       "path": "/",
       "expectedStatus": 405,
-      "expectedBody": {"error": "string"},
+      "expectedBody": {
+        "error": "string"
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "POST outline без темы (режим подробный)",
+      "method": "POST",
+      "path": "/?action=outline",
+      "body": {
+        "mode": "detailed",
+        "templateId": "ocean"
+      },
+      "expectedStatus": 400,
+      "expectedBody": {
+        "error": "string"
+      },
       "bodyMatcher": "partial"
     }
   ]

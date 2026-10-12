@@ -325,6 +325,45 @@ MOOD_PROFILES = {
 _MOOD_NAMES = list(MOOD_PROFILES.keys())
 
 
+from templates import READY_TEMPLATES
+
+
+def build_template_theme(template_id: str) -> dict | None:
+    """Собирает тему из одного из 20 готовых шаблонов (цвета и вёрстка фиксированы)."""
+    tpl = next((t for t in READY_TEMPLATES if t["id"] == template_id), None)
+    if not tpl:
+        return None
+    rnd = random.Random(("tpl|" + tpl["id"]).encode("utf-8"))
+    profile = MOOD_PROFILES[tpl["mood"]]
+    fonts = _FONT_PAIRS[tpl["fonts"] % len(_FONT_PAIRS)]
+    title_bg = RGBColor.from_string(tpl["title_bg"])
+    accent2 = RGBColor.from_string(tpl["accent2"])
+    accent3 = RGBColor.from_string(tpl["accent3"])
+    bg = RGBColor.from_string(tpl["bg"])
+    white = RGBColor(0xFF, 0xFF, 0xFF)
+    return {
+        "name": "tpl_" + tpl["id"],
+        "mood": tpl["mood"],
+        "bg": bg,
+        "title_bg": title_bg,
+        "accent": title_bg,
+        "accent2": accent2,
+        "accent3": accent3,
+        "text": _mix(title_bg, RGBColor(0, 0, 0), 0.35),
+        "muted": _mix(title_bg, white, 0.45),
+        "white": white,
+        "title_sub": _mix(accent3, white, 0.45),
+        "stripe": accent2,
+        "card_bg": _mix(accent2, white, 0.88),
+        "label": "",
+        "layout": tpl["layout"],
+        "font_title": fonts["title"],
+        "font_body": fonts["body"],
+        "bullet_marker": tpl["bullet"],
+        "decor": generate_decor_recipe(rnd, prims_pool=profile["prims"]),
+    }
+
+
 def _hsl(h: float, s: float, l: float) -> "RGBColor":
     """h,s,l в диапазоне 0..1 → RGBColor."""
     r, g, b = colorsys.hls_to_rgb(h % 1.0, max(0.0, min(1.0, l)), max(0.0, min(1.0, s)))
@@ -673,37 +712,97 @@ def fetch_image_for_slide(slide_title: str, topic: str) -> bytes | None:
 
 # ─── ГЕНЕРАЦИЯ СТРУКТУРЫ ─────────────────────────────────────────────────────
 
-def generate_outline(topic: str, description: str, slides_count: int, audience: str) -> tuple[dict, int]:
-    """Генерирует развёрнутую структуру презентации строго по ФГОС."""
+PRESENTATION_MODES = ("thesis", "detailed", "mixed")
+
+_SLIDE_SCHEMA_THESIS = (
+    '"bullets":["Развёрнутый тезис 1 — 15-25 слов с конкретным фактом","Тезис 2 — 15-25 слов","Тезис 3","Тезис 4","Тезис 5"],'
+)
+_SLIDE_SCHEMA_DETAILED = (
+    '"bullets":["Термин — чёткое определение 20-35 слов, раскрывающее суть понятия","Понятие 2 — определение 20-35 слов",'
+    '"Понятие 3 — определение","Понятие 4 — определение"],'
+)
+
+
+def _mode_instructions(mode: str, slides_count: int) -> tuple[str, str, int]:
+    """Возвращает (описание формата слайда для JSON, строгие правила, токенов на слайд)."""
+    if mode == "detailed":
+        schema = _SLIDE_SCHEMA_DETAILED
+        rules = (
+            "РЕЖИМ: ПОДРОБНАЯ презентация с определениями и понятиями. СТРОГО: "
+            "каждый пункт bullets — это «Термин — определение» (сначала ключевое понятие, затем тире и полное, "
+            "научно точное определение 20-35 слов). Ровно 4 пункта на слайд. "
+            "Нельзя писать обрывочные тезисы и лозунги — только раскрытые определения и пояснения. "
+            "В поле fact дай пример, формулу, дату или применение понятия."
+        )
+        return schema, rules, 420
+    if mode == "mixed":
+        schema = (
+            '"kind":"thesis или detailed",'
+            '"bullets":["для kind=thesis: 5 тезисов по 15-25 слов; для kind=detailed: 4 пункта «Термин — определение» по 20-35 слов"],'
+        )
+        rules = (
+            "РЕЖИМ: ТЕЗИСНАЯ + ПОДРОБНАЯ. СТРОГО: сам реши, какие слайды раскрыть подробно, а какие дать тезисно. "
+            "Подробно (kind=detailed) — слайды, где вводятся новые термины и понятия: ровно 4 пункта «Термин — определение», 20-35 слов. "
+            "Тезисно (kind=thesis) — обзорные, исторические, итоговые слайды: ровно 5 коротких тезисов по 15-25 слов без определений. "
+            f"Из {slides_count} слайдов минимум один должен быть detailed и минимум один thesis (если слайдов больше 2). "
+            'Дополнительно верни поле "plan": массив из объектов {"slide":номер,"title":"заголовок","kind":"detailed|thesis","why":"почему именно так, 5-10 слов"} — '
+            "по одному на каждый слайд, это письменное пояснение, что будет подробно, а что тезисно."
+        )
+        return schema, rules, 380
+    schema = _SLIDE_SCHEMA_THESIS
+    rules = (
+        "РЕЖИМ: ТЕЗИСНАЯ презентация. СТРОГО: ровно 5 тезисов на слайд — ключевые мысли и аргументы в сжатой форме с конкретным фактом. "
+        "Не пиши определений в формате «Термин — определение» и не расписывай понятия подробно."
+    )
+    return schema, rules, 300
+
+
+def _norm_kind(kind, mode: str) -> str:
+    if mode == "detailed":
+        return "detailed"
+    if mode == "thesis":
+        return "thesis"
+    return "detailed" if str(kind or "").strip().lower() == "detailed" else "thesis"
+
+
+def generate_outline(topic: str, description: str, slides_count: int, audience: str,
+                     mode: str = "thesis") -> tuple[dict, int]:
+    """Генерирует структуру презентации строго по ФГОС в выбранном режиме (тезисная / подробная / смешанная)."""
     audience_str = audience or "школьники"
+    if mode not in PRESENTATION_MODES:
+        mode = "thesis"
+    schema, rules, per_slide_tokens = _mode_instructions(mode, slides_count)
 
     system = (
         "Ты опытный методист и дизайнер учебных презентаций по ФГОС. "
         "Создаёшь насыщенный, информативный контент с конкретными фактами, датами, именами. "
+        "Строго соблюдаешь выбранный формат презентации. "
         "Отвечаешь ТОЛЬКО валидным JSON без пояснений и markdown-блоков."
     )
 
+    plan_part = '"plan":[{"slide":1,"title":"...","kind":"detailed","why":"..."}],' if mode == "mixed" else ""
     user = (
         f"Тема: {topic}. Аудитория: {audience_str}. Слайдов: {slides_count}.\n"
         + (f"Контекст учителя: {description[:800]}\n" if description else "")
+        + f"{rules}\n"
         + 'Верни JSON строго в формате:\n'
         '{"subtitle":"развёрнутый подзаголовок 6-10 слов",'
         '"mood":"одно из strict|bright|minimal|playful|elegant — настроение оформления, подходящее теме",'
+        + plan_part +
         '"contents":["название раздела 1","название раздела 2","..."],'
         '"slides":[{'
         '"title":"заголовок слайда 4-7 слов",'
-        '"bullets":["Развёрнутый тезис 1 — 15-25 слов с конкретным фактом","Тезис 2 — 15-25 слов","Тезис 3","Тезис 4","Тезис 5"],'
+        + schema +
         '"fact":"Интересный факт или цитата эксперта — 15-25 слов",'
         '"image_queries":["конкретный запрос фото 1 на русском","конкретный запрос фото 2","конкретный запрос фото 3"]}],'
         '"conclusion":["Вывод 1 — 10-20 слов","Вывод 2","Вывод 3"]}\n'
-        f"Ровно {slides_count} слайдов. bullets — ровно 5 штук на каждый слайд. image_queries — 3 разных запроса.\n"
+        f"Ровно {slides_count} слайдов. image_queries — 3 разных запроса.\n"
         "Поле mood выбери осмысленно: strict — для точных/юридических/официальных тем, "
         "bright — для активных/событийных тем, minimal — для нейтральных и вдумчивых тем, "
         "playful — для тем про детей/творчество/начальную школу, elegant — для искусства/литературы/истории."
     )
 
-    # ~300 токенов на слайд (5 тезисов × ~25 слов + заголовок + fact + 3 queries + запас)
-    max_tok = min(300 * slides_count + 800, 7000)
+    max_tok = min(per_slide_tokens * slides_count + 800 + (60 * slides_count if mode == "mixed" else 0), 7500)
 
     raw, tokens_used = gigachat_with_fallback(
         [{"role": "system", "content": system}, {"role": "user", "content": user}],
@@ -726,8 +825,8 @@ def generate_outline(topic: str, description: str, slides_count: int, audience: 
         if not isinstance(bullets, list):
             bullets = []
         bullets = [str(b).strip() for b in bullets if str(b).strip()][:7]
+        kind = _norm_kind(s.get("kind"), mode)
         fact = (s.get("fact") or "").strip()
-        # Поддерживаем оба формата: новый image_queries (список) и старый image_query (строка)
         image_queries = s.get("image_queries") or []
         if not isinstance(image_queries, list) or not image_queries:
             single = (s.get("image_query") or title).strip()
@@ -739,12 +838,31 @@ def generate_outline(topic: str, description: str, slides_count: int, audience: 
             norm_slides.append({
                 "title": title,
                 "bullets": bullets,
+                "kind": kind,
                 "fact": fact,
                 "image_queries": image_queries,
             })
 
     if not norm_slides:
         raise RuntimeError("ИИ вернул пустые слайды")
+
+    # Строгость режима: в смешанном режиме должны быть оба вида слайдов
+    if mode == "mixed" and len(norm_slides) > 2:
+        kinds = {s["kind"] for s in norm_slides}
+        if "detailed" not in kinds:
+            norm_slides[1]["kind"] = "detailed"
+        if "thesis" not in kinds:
+            norm_slides[-1]["kind"] = "thesis"
+
+    plan = []
+    if mode == "mixed":
+        for i, s in enumerate(norm_slides, start=1):
+            why = ""
+            for pl in (data.get("plan") or []):
+                if isinstance(pl, dict) and str(pl.get("slide")) == str(i):
+                    why = str(pl.get("why") or "").strip()
+                    break
+            plan.append({"slide": i, "title": s["title"], "kind": s["kind"], "why": why})
 
     contents = data.get("contents") or [s["title"] for s in norm_slides]
     mood = str(data.get("mood") or "").strip().lower()
@@ -754,6 +872,8 @@ def generate_outline(topic: str, description: str, slides_count: int, audience: 
     return {
         "subtitle": (data.get("subtitle") or "").strip(),
         "mood": mood,
+        "mode": mode,
+        "plan": plan,
         "contents": [str(c).strip() for c in contents if str(c).strip()][:slides_count],
         "slides": norm_slides,
         "conclusion": [str(c).strip() for c in (data.get("conclusion") or []) if str(c).strip()][:5],
@@ -970,6 +1090,19 @@ def _add_bullets(slide, x, y, w, h, bullets: list, *, size: int = 17,
         font = _CUR_FONT_BODY
     if marker is None:
         marker = _CUR_BULLET_MARKER
+    # Автоподбор размера: длинные (подробные) пункты уменьшаем, чтобы текст не вышел за слайд
+    try:
+        w_pt = max(float(w) / 12700.0 - 20, 50)
+        h_pt = max(float(h) / 12700.0, 50)
+        while size > 10:
+            chars_per_line = max(w_pt / (size * 0.52), 8)
+            lines = sum(max(1, -(-len(str(it)) // int(chars_per_line))) for it in bullets)
+            need = lines * size * 1.22 + len(bullets) * space_after
+            if need <= h_pt:
+                break
+            size -= 1
+    except Exception:
+        pass
     box = slide.shapes.add_textbox(x, y, w, h)
     tf = box.text_frame
     tf.word_wrap = True
@@ -1879,6 +2012,10 @@ def handler(event: dict, context) -> dict:
         description = (body.get("description") or "").strip()
         audience = (body.get("audience") or "").strip()
         custom_design = bool(body.get("customDesign"))
+        mode = (body.get("mode") or "thesis").strip().lower()
+        if mode not in PRESENTATION_MODES:
+            mode = "thesis"
+        template_id = (body.get("templateId") or "").strip()
         try:
             design_variant = int(body.get("designVariant") or 0)
         except (TypeError, ValueError):
@@ -1919,7 +2056,7 @@ def handler(event: dict, context) -> dict:
             return _resp(pc_status, {"error": pc_err})
 
         try:
-            outline, tokens_used = generate_outline(topic, description, slides_count, audience)
+            outline, tokens_used = generate_outline(topic, description, slides_count, audience, mode)
         except Exception as e:
             msg = str(e)
             if "timed out" in msg.lower() or "timeout" in msg.lower():
@@ -1933,6 +2070,17 @@ def handler(event: dict, context) -> dict:
         # Каждая презентация — уникальный современный дизайн (генерируется на лету).
         # Если variant не задан явно — берём случайный, чтобы одна тема давала разный стиль.
         # mood определяет ИИ по теме — влияет на насыщенность палитры и декор.
+        tpl_theme = build_template_theme(template_id) if template_id else None
+        if tpl_theme:
+            return _resp(200, {
+                "outline": outline,
+                "theme_name": tpl_theme["name"],
+                "theme_payload": theme_to_payload(tpl_theme),
+                "theme_options": [theme_to_payload(tpl_theme)],
+                "topic": topic,
+                "spent_rub": spent_rub,
+                "balance_rub": balance_rub,
+            })
         variant = design_variant or random.randint(1, 10_000)
         mood = outline.get("mood") or ""
         theme = make_custom_theme(topic, variant, mood)
@@ -1998,6 +2146,7 @@ def handler(event: dict, context) -> dict:
             norm_build_slides.append({
                 "title": title,
                 "bullets": bullets[:7],
+                "kind": str(s.get("kind") or ""),
                 "fact": str(s.get("fact") or "").strip(),
                 "image_queries": image_queries[:3],
             })

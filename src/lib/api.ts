@@ -1402,9 +1402,19 @@ export interface PresentationOutline {
 }
 
 /** Полный слайд структуры (с фактом и запросами фото) — используется в редакторе. */
+export type PresentationMode = "thesis" | "detailed" | "mixed";
+
+export interface PresentationPlanItem {
+  slide: number;
+  title: string;
+  kind: "thesis" | "detailed";
+  why?: string;
+}
+
 export interface PresentationSlideFull {
   title: string;
   bullets: string[];
+  kind?: "thesis" | "detailed";
   fact?: string;
   image_queries?: string[];
 }
@@ -1413,6 +1423,8 @@ export interface PresentationSlideFull {
 export interface PresentationOutlineFull {
   subtitle: string;
   mood?: string;
+  mode?: PresentationMode;
+  plan?: PresentationPlanItem[];
   contents: string[];
   slides: PresentationSlideFull[];
   conclusion: string[];
@@ -1486,6 +1498,8 @@ export const presentationApi = {
     slidesCount?: number;
     audience?: string;
     login?: string;
+    mode?: PresentationMode;
+    templateId?: string;
   }): Promise<PresentationOutlineResult> => {
     const res = await fetchWithTimeout(
       `${PRESENTATION_URL}?action=outline`,
@@ -1496,6 +1510,8 @@ export const presentationApi = {
         slidesCount: params.slidesCount ?? 8,
         login: params.login ?? "",
         customDesign: true,
+        mode: params.mode ?? "thesis",
+        templateId: params.templateId ?? "",
       },
       580_000,
     );

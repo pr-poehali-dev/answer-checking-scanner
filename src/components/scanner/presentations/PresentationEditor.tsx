@@ -133,10 +133,30 @@ export function PresentationEditor({
           </div>
         </div>
 
+        {outline.mode === "mixed" && outline.plan && outline.plan.length > 0 && (
+          <div className="px-5 py-3 border-b border-border bg-amber-50/60 flex-shrink-0 max-h-40 overflow-y-auto styled-scrollbar">
+            <p className="text-xs font-bold mb-1.5 flex items-center gap-1.5">
+              <Icon name="ListTree" size={13} fallback="List" /> План: что подробно, а что тезисно
+            </p>
+            <ul className="space-y-1">
+              {outline.plan.map(pl => (
+                <li key={pl.slide} className="text-[11px] flex items-start gap-2">
+                  <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold flex-shrink-0 ${
+                    pl.kind === "detailed" ? "bg-blue-100 text-blue-700" : "bg-emerald-100 text-emerald-700"
+                  }`}>
+                    {pl.kind === "detailed" ? "ПОДРОБНО" : "ТЕЗИСНО"}
+                  </span>
+                  <span className="min-w-0"><b>{pl.slide}. {pl.title}</b>{pl.why ? ` — ${pl.why}` : ""}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         {/* Выбор дизайна */}
         {showThemes && (
           <div className="px-5 py-4 border-b border-border bg-muted/30 flex-shrink-0">
-            <p className="text-xs font-bold mb-2.5">Выберите оформление — 4 разных варианта под тему</p>
+            <p className="text-xs font-bold mb-2.5">{themeOptions.length > 1 ? "Выберите оформление — 4 разных варианта под тему" : "Оформление: готовый шаблон"}</p>
             <ThemePicker options={themeOptions} selectedIndex={themeIdx} onSelect={setThemeIdx} />
           </div>
         )}
@@ -216,6 +236,13 @@ export function PresentationEditor({
                       <Icon name="ChevronRight" size={13} />
                     </button>
                     <span className="text-[11px] text-muted-foreground">Слайд {activeIdx + 1} из {slides.length}</span>
+                    {outline.mode === "mixed" && activeSlide.kind && (
+                      <span className={`ml-2 px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                        activeSlide.kind === "detailed" ? "bg-blue-100 text-blue-700" : "bg-emerald-100 text-emerald-700"
+                      }`}>
+                        {activeSlide.kind === "detailed" ? "ПОДРОБНО" : "ТЕЗИСНО"}
+                      </span>
+                    )}
                   </div>
 
                   <div>

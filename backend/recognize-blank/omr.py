@@ -38,6 +38,8 @@ class BadImageError(OmrError):
 FILL_MIN = 0.14
 FILL_OK = 0.25
 REL_MARK = 0.5
+SOLID_MIN = 0.55
+SOLID_REL = 0.85
 MAX_B64 = 22_000_000
 
 
@@ -251,7 +253,7 @@ def read_blank(image_b64: str, n_q: int, n_opts: int) -> dict:
 
     opts = G.OPT_LABELS[:n_opts]
     answers, confs = [], []
-    empty, multi, weak = [], [], []
+    empty, multi, weak, fixed = [], [], [], []
     for q in range(n_q):
         row = fills[q]
         mx = float(row.max())
@@ -260,14 +262,20 @@ def read_blank(image_b64: str, n_q: int, n_opts: int) -> dict:
             confs.append(0.0)
             empty.append(q + 1)
             continue
-        marked = [j for j in range(n_opts) if row[j] >= max(FILL_MIN, REL_MARK * mx)]
+        if mx >= SOLID_MIN:
+            marked = [j for j in range(n_opts) if row[j] >= max(SOLID_MIN, SOLID_REL * mx)]
+            crossed = [j for j in range(n_opts) if j not in marked and row[j] >= FILL_MIN]
+            if len(marked) == 1 and crossed:
+                fixed.append(q + 1)
+        else:
+            marked = [j for j in range(n_opts) if row[j] >= max(FILL_MIN, REL_MARK * mx)]
         if len(marked) > 1:
             answers.append("*")
             confs.append(0.0)
             multi.append(q + 1)
             continue
         answers.append(opts[marked[0]])
-        confs.append(round(min(1.0, mx / 0.6), 2))
+        confs.append(round(min(1.0, mx / 0.45), 2))
         if mx < FILL_OK:
             weak.append(q + 1)
 
@@ -287,13 +295,14 @@ def read_blank(image_b64: str, n_q: int, n_opts: int) -> dict:
         warnings.append(f"Код ученика: не удалось прочитать цифру в строках {_join(bad_pos)}. "
                         "В каждой строке должен быть закрашен ровно один кружок.")
     if multi:
-        warnings.append(f"Вопросы {_join(multi)}: закрашено больше одного кружка, ответ не засчитан.")
+        warnings.append(f"Вопросы {_join(multi)}: отмечено больше одного кружка, ответ не засчитан.")
     if weak:
-        warnings.append(f"Вопросы {_join(weak)}: кружок закрашен слабо, проверьте ответ.")
+        warnings.append(f"Вопросы {_join(weak)}: отметка слабая, проверьте ответ.")
     if empty:
         warnings.append(f"Вопросы {_join(empty)}: ответ не отмечен.")
 
     return {
+        "fixed": fixed,
         "code": "".join(digits),
         "answers": answers,
         "confidences": confs,

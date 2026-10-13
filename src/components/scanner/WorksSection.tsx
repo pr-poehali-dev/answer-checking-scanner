@@ -50,7 +50,18 @@ function WorkForm({ onSave, onCancel }: WorkFormProps) {
   const [answerKey, setAnswerKey] = usePersistedState("works:answerKey", "");
   const [optionsCount, setOptionsCount] = usePersistedState("works:optionsCount", 4);
   const [scale, setScale] = usePersistedState<GradeScale>("works:scale", { ...DEFAULT_SCALE });
-  const id = appStore.generateWorkId();
+  const [autoId] = useState(() => appStore.generateWorkId());
+  const [customId, setCustomId] = useState("");
+  const { works: existingWorks } = useAppStore();
+  const idTrim = customId.trim();
+  const idError = idTrim
+    ? !/^[0-9A-Za-zА-Яа-я_-]{1,10}$/.test(idTrim)
+      ? "До 10 символов: цифры, буквы, дефис"
+      : existingWorks.some(w => w.id === idTrim)
+        ? "Работа с таким номером уже есть"
+        : ""
+    : "";
+  const id = idTrim && !idError ? idTrim : autoId;
   const total = part1Count + part2Count;
   const OPT_LABELS = ["А", "Б", "В", "Г", "Д"];
 
@@ -61,6 +72,7 @@ function WorkForm({ onSave, onCancel }: WorkFormProps) {
   };
 
   const handleSave = () => {
+    if (idError) return;
     clearDraft();
     onSave({
       id,
@@ -86,6 +98,20 @@ function WorkForm({ onSave, onCancel }: WorkFormProps) {
         <span className="mono text-xs text-muted-foreground">№ {id}</span>
       </div>
       <div className="p-5 space-y-5">
+
+        <div>
+          <label className="text-xs text-muted-foreground block mb-1">
+            Номер работы <span className="text-muted-foreground/70">(можно оставить пустым, тогда будет {autoId})</span>
+          </label>
+          <input
+            value={customId}
+            onChange={e => setCustomId(e.target.value)}
+            maxLength={10}
+            placeholder={autoId}
+            className={`w-48 border rounded-sm px-3 py-2 text-sm mono focus:outline-none focus:ring-1 ${idError ? "border-destructive focus:ring-destructive" : "border-border focus:ring-ring"}`}
+          />
+          {idError && <p className="text-xs text-destructive mt-1">{idError}</p>}
+        </div>
 
         {/* Основные данные */}
         <div className="grid grid-cols-2 gap-4">
@@ -211,8 +237,8 @@ function WorkForm({ onSave, onCancel }: WorkFormProps) {
         </div>
 
         <div className="flex gap-2 pt-1">
-          <button onClick={handleSave}
-            className="inline-flex items-center gap-1.5 px-4 py-2 bg-primary text-primary-foreground text-sm font-semibold rounded-sm hover:opacity-90 transition-opacity">
+          <button onClick={handleSave} disabled={!!idError}
+            className="disabled:opacity-50 inline-flex items-center gap-1.5 px-4 py-2 bg-primary text-primary-foreground text-sm font-semibold rounded-sm hover:opacity-90 transition-opacity">
             <Icon name="Check" size={14} />
             Создать работу
           </button>

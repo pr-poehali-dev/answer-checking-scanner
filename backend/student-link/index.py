@@ -108,9 +108,9 @@ def handler(event: dict, context) -> dict:
                 cur.execute(
                     f"""INSERT INTO {SCHEMA}.student_results
                         (teacher_login, student_code, work_id, work_title, subject, work_date,
-                         correct_count, total_count, score, grade, answers, scanned_at, updated_at)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, NOW()), NOW())
-                        ON CONFLICT (teacher_login, student_code, work_id) DO UPDATE
+                         correct_count, total_count, score, grade, answers, scanned_at, scan_no, updated_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, NOW()), %s, NOW())
+                        ON CONFLICT (teacher_login, student_code, work_id, scan_no) DO UPDATE
                         SET work_title = EXCLUDED.work_title,
                             subject = EXCLUDED.subject,
                             work_date = EXCLUDED.work_date,
@@ -132,6 +132,7 @@ def handler(event: dict, context) -> dict:
                         str(r.get("grade") or "")[:8] or None,
                         answers_json,
                         r.get("scannedAt") or None,
+                        max(1, int(r.get("scanNo") or 1)),
                     )
                 )
                 saved += 1
@@ -228,8 +229,12 @@ def handler(event: dict, context) -> dict:
             cur.execute(
                 f"""SELECT work_id, work_title, subject, work_date, correct_count, total_count,
                            score, grade, scanned_at
-                    FROM {SCHEMA}.student_results
+                    FROM {SCHEMA}.student_results r
                     WHERE teacher_login = %s AND student_code = %s
+                      AND scan_no = (SELECT MAX(scan_no) FROM {SCHEMA}.student_results x
+                                     WHERE x.teacher_login = r.teacher_login
+                                       AND x.student_code = r.student_code
+                                       AND x.work_id = r.work_id)
                     ORDER BY scanned_at DESC""",
                 (teacher_login, student_code)
             )

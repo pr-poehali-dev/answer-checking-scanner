@@ -39,6 +39,29 @@ def _s(v, limit=None):
     return s[:limit] if limit else s
 
 
+def _scale_dump(gs):
+    """Шкала оценок -> JSON-строка (или None, если шкала не передана)."""
+    if not isinstance(gs, dict):
+        return None
+    out = {}
+    for k in ("grade1", "grade2", "grade3", "grade4", "grade5"):
+        try:
+            out[k] = int(gs.get(k) or 0)
+        except (TypeError, ValueError):
+            out[k] = 0
+    return json.dumps(out)
+
+
+def _scale_load(raw):
+    if not raw:
+        return None
+    try:
+        v = json.loads(raw)
+        return v if isinstance(v, dict) else None
+    except Exception:
+        return None
+
+
 def handler(event: dict, context) -> dict:
     """Дублирование каталога работ, материалов и журнала действий учителя в БД."""
     method = event.get("httpMethod", "GET")
@@ -72,7 +95,7 @@ def handler(event: dict, context) -> dict:
             cur.execute(
                 f"""SELECT work_id, work_type, subject, class_label, work_date,
                            total_questions, part1_count, part2_count, answer_key,
-                           max_score, topic, generated_by_ai, options_count
+                           max_score, topic, generated_by_ai, options_count, grade_scale
                     FROM {SCHEMA}.teacher_works WHERE teacher_login = %s
                     ORDER BY created_at""",
                 (teacher_login,)
@@ -82,6 +105,7 @@ def handler(event: dict, context) -> dict:
                 "date": r[4], "totalQuestions": r[5], "part1Count": r[6],
                 "part2Count": r[7], "answerKey": r[8], "maxScore": r[9],
                 "topic": r[10], "generatedByAi": r[11], "optionsCount": r[12],
+                "gradeScale": _scale_load(r[13]),
             } for r in cur.fetchall()]
 
             # Материалы
@@ -121,7 +145,7 @@ def handler(event: dict, context) -> dict:
             # Результаты
             cur.execute(
                 f"""SELECT work_id, student_code, correct_count, total_count,
-                           score, grade, answers, scanned_at
+                           score, grade, answers, scanned_at, scan_no
                     FROM {SCHEMA}.student_results WHERE teacher_login = %s
                     ORDER BY scanned_at DESC""",
                 (teacher_login,)
@@ -137,6 +161,7 @@ def handler(event: dict, context) -> dict:
                     "totalCount": r[3], "score": r[4], "grade": r[5],
                     "answers": ans,
                     "scannedAt": r[7].isoformat() if r[7] else None,
+                    "scanNo": r[8] or 1,
                 })
 
             return _resp(200, {
@@ -166,8 +191,8 @@ def handler(event: dict, context) -> dict:
                     f"""INSERT INTO {SCHEMA}.teacher_works
                         (teacher_login, work_id, work_type, subject, class_label, work_date,
                          total_questions, part1_count, part2_count, answer_key, max_score,
-                         topic, generated_by_ai, options_count, updated_at)
-                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, now())
+                         topic, generated_by_ai, options_count, grade_scale, updated_at)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, now())
                         ON CONFLICT (teacher_login, work_id) DO UPDATE SET
                             work_type = EXCLUDED.work_type,
                             subject = EXCLUDED.subject,
@@ -181,6 +206,7 @@ def handler(event: dict, context) -> dict:
                             topic = EXCLUDED.topic,
                             generated_by_ai = EXCLUDED.generated_by_ai,
                             options_count = EXCLUDED.options_count,
+                            grade_scale = COALESCE(EXCLUDED.grade_scale, {SCHEMA}.teacher_works.grade_scale),
                             updated_at = now()""",
                     (
                         teacher_login, work_id,
@@ -191,6 +217,7 @@ def handler(event: dict, context) -> dict:
                         int(w.get("maxScore") or 0), _s(w.get("topic"), 512),
                         bool(w.get("generatedByAi")),
                         max(2, min(int(w.get("optionsCount") or 4), 6)),
+                        _scale_dump(w.get("gradeScale")),
                     ),
                 )
                 saved += 1

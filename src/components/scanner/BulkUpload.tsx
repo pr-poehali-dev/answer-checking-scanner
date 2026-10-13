@@ -2,7 +2,8 @@ import { useState } from "react";
 import Icon from "@/components/ui/icon";
 import { recognizeApi } from "@/lib/api";
 import { matchStudentByCode } from "./matchStudent";
-import { appStore, useAppStore, Work, GradeScale } from "@/store/appStore";
+import { appStore, useAppStore, Work } from "@/store/appStore";
+import { calcGrade } from "@/lib/grading";
 
 interface BulkItem {
   id: string;
@@ -13,16 +14,9 @@ interface BulkItem {
   correct?: number;
   total?: number;
   grade?: string;
+  rescanNo?: number;
   confidence?: number;
   error?: string;
-}
-
-function calcGrade(correct: number, gs: GradeScale): string {
-  if (correct >= gs.grade5) return "5";
-  if (correct >= gs.grade4) return "4";
-  if (correct >= gs.grade3) return "3";
-  if (correct >= gs.grade2) return "2";
-  return "1";
 }
 
 export function BulkUpload() {
@@ -79,11 +73,11 @@ export function BulkUpload() {
           login: teacher?.login,
         });
         const correct = resp.analysis.correct;
-        const grade = calcGrade(correct, work.gradeScale);
+        const grade = calcGrade(correct, work);
         // Код может быть прочитан не полностью — ищем ученика с подстраховкой
         const { student } = matchStudentByCode(students, resp.studentCode);
 
-        appStore.addResult({
+        const { scanNo, isRescan } = appStore.addResult({
           workId: work.id,
           studentCode: resp.studentCode,
           answers: resp.answers,
@@ -102,6 +96,7 @@ export function BulkUpload() {
           correct,
           total: resp.analysis.total,
           grade,
+          rescanNo: isRescan ? scanNo : undefined,
           confidence: resp.averageConfidence,
         } : i));
       } catch (e) {
@@ -226,6 +221,12 @@ export function BulkUpload() {
                           color: it.grade === "5" ? "#16a34a" : it.grade === "4" ? "#2563eb" : it.grade === "3" ? "#d97706" : "#dc2626",
                         }}
                       >{it.grade}</span>
+                      {it.rescanNo && (
+                        <span title="Эта работа этого ученика уже сканировалась ранее"
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm bg-amber-100 text-amber-800 font-semibold">
+                          <Icon name="RefreshCw" size={10} />повторно №{it.rescanNo}
+                        </span>
+                      )}
                     </>
                   )}
                   {it.status === "error" && (

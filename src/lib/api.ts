@@ -355,6 +355,7 @@ export interface TeacherWorkDto {
   topic?: string;
   generatedByAi?: boolean;
   optionsCount?: number;
+  gradeScale?: { grade1: number; grade2: number; grade3: number; grade4: number; grade5: number };
 }
 
 export interface TeacherMaterialDto {
@@ -376,6 +377,7 @@ export interface TeacherDataLoadResult {
     totalQuestions: number; part1Count: number; part2Count: number;
     answerKey: string; maxScore: number; topic: string | null; generatedByAi: boolean;
     optionsCount?: number;
+    gradeScale?: { grade1: number; grade2: number; grade3: number; grade4: number; grade5: number } | null;
   }[];
   materials: {
     id: string; type: string; title: string; subject: string | null;
@@ -386,7 +388,7 @@ export interface TeacherDataLoadResult {
   students: { code: string; bindCode: string | null; name: string; classLabel: string | null }[];
   results: {
     workId: string; studentCode: string; correctCount: number; totalCount: number;
-    score: number; grade: string | null; answers: string[]; scannedAt: string | null;
+    score: number; grade: string | null; answers: string[]; scannedAt: string | null; scanNo?: number;
   }[];
 }
 

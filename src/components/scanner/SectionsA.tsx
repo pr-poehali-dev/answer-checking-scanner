@@ -7,6 +7,7 @@ import { FlowStep, RecognitionResult } from "./upload-types";
 import { recognizeBlank } from "./ocrEngine";
 import { matchStudentByCode } from "./matchStudent";
 import { appStore, useAppStore } from "@/store/appStore";
+import { calcGrade } from "@/lib/grading";
 
 const OPT_LABELS = ["\u0410", "\u0411", "\u0412", "\u0413", "\u0414", "\u0415"];
 
@@ -21,6 +22,7 @@ export function UploadSection() {
   const [optionsCount, setOptionsCount] = useState(4);
   const [result, setResult] = useState<RecognitionResult | null>(null);
   const [savedStudent, setSavedStudent] = useState<string | null>(null);
+  const [rescanNo, setRescanNo] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [ocrStatus, setOcrStatus] = useState("");
@@ -57,6 +59,7 @@ export function UploadSection() {
     setStep("recognizing");
     setError(null);
     setSavedStudent(null);
+    setRescanNo(null);
     setOcrProgress(0);
     setOcrStatus("");
     try {
@@ -76,16 +79,8 @@ export function UploadSection() {
         const work = works.find(w => w.id === selectedWorkId);
         // Код может быть прочитан не полностью — ищем ученика с подстраховкой
         const { student } = matchStudentByCode(students, data.student_code);
-        let grade = "1";
-        if (work) {
-          const sc = data.analysis.correct;
-          const gs = work.gradeScale;
-          if (sc >= gs.grade5) grade = "5";
-          else if (sc >= gs.grade4) grade = "4";
-          else if (sc >= gs.grade3) grade = "3";
-          else if (sc >= gs.grade2) grade = "2";
-        }
-        appStore.addResult({
+        const grade = work ? calcGrade(data.analysis.correct, work) : "";
+        const { scanNo, isRescan } = appStore.addResult({
           workId: selectedWorkId,
           studentCode: data.student_code,
           answers: data.all_answers,
@@ -96,6 +91,7 @@ export function UploadSection() {
           scannedAt: new Date().toISOString(),
         });
         setSavedStudent(student?.name ?? `Код: ${data.student_code}`);
+        setRescanNo(isRescan ? scanNo : null);
       }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Ошибка распознавания");
@@ -110,6 +106,7 @@ export function UploadSection() {
     setResult(null);
     setError(null);
     setSavedStudent(null);
+    setRescanNo(null);
   };
 
   const opts = OPT_LABELS.slice(0, optionsCount);
@@ -159,6 +156,14 @@ export function UploadSection() {
             <div className="flex items-center gap-2 p-2.5 rounded-lg bg-green-50 border border-green-200">
               <Icon name="CheckCircle" size={14} className="text-green-600" />
               <p className="text-xs font-medium text-green-700">Результат сохранён: {savedStudent}</p>
+            </div>
+          )}
+          {savedStudent && rescanNo && (
+            <div className="flex items-center gap-2 p-2.5 rounded-lg bg-amber-50 border border-amber-200">
+              <Icon name="RefreshCw" size={14} className="text-amber-600" />
+              <p className="text-xs font-medium text-amber-800">
+                Повторное сканирование (№{rescanNo}): эта работа этого ученика уже проверялась. Предыдущие результаты сохранены в списке.
+              </p>
             </div>
           )}
         </div>

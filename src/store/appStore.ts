@@ -209,6 +209,7 @@ export interface StudentResult {
   score: number;
   grade: string;
   scannedAt: string;
+  scanNo?: number;
 }
 
 export interface PresentationItem {
@@ -779,16 +780,20 @@ export const appStore = {
     return id;
   },
 
-  addResult: (result: StudentResult) => {
-    // Заменяем если уже есть результат этого ученика для этой работы
-    const filtered = state.results.filter(
-      r => !(r.workId === result.workId && r.studentCode === result.studentCode)
+  addResult: (result: StudentResult): { scanNo: number; isRescan: boolean } => {
+    const prev = state.results.filter(
+      r => r.workId === result.workId && r.studentCode === result.studentCode
     );
-    state = { ...state, results: [...filtered, result] };
+    const scanNo = prev.reduce((m, r) => Math.max(m, r.scanNo || 1), 0) + 1;
+    const saved: StudentResult = { ...result, scanNo };
+    state = { ...state, results: [...state.results, saved] };
     notify();
     _scheduleAutoSave();
     appStore.syncResultsToDb();
+    return { scanNo, isRescan: scanNo > 1 };
   },
+
+  isWorkIdTaken: (id: string): boolean => state.works.some(w => w.id === id),
 
   addPresentation: (item: PresentationItem) => {
     state = { ...state, presentations: [item, ...state.presentations] };
@@ -1153,6 +1158,7 @@ export const appStore = {
         grade: r.grade,
         answers: r.answers,
         scannedAt: r.scannedAt,
+        scanNo: r.scanNo || 1,
       };
     });
     try {
@@ -1197,22 +1203,25 @@ export const appStore = {
             date: w.date || "", totalQuestions: w.totalQuestions || 0,
             part1Count: w.part1Count || 0, part2Count: w.part2Count || 0,
             answerKey: w.answerKey || "", maxScore: w.maxScore || 0,
-            gradeScale: { grade1: 0, grade2: 0, grade3: 0, grade4: 0, grade5: 0 },
+            gradeScale: w.gradeScale && typeof w.gradeScale === "object"
+              ? (w.gradeScale as GradeScale)
+              : { grade1: 0, grade2: 0, grade3: 0, grade4: 0, grade5: 0 },
             topic: w.topic || undefined, generatedByAi: !!w.generatedByAi,
             optionsCount: w.optionsCount || 4,
           };
         });
 
       // Результаты — мержим по (workId, studentCode)
-      const localResultKeys = new Set(state.results.map(r => `${r.workId}|${r.studentCode}`));
+      const localResultKeys = new Set(state.results.map(r => `${r.workId}|${r.studentCode}|${r.scanNo || 1}`));
       const dbResults: StudentResult[] = data.results
-        .filter(r => r.workId && r.studentCode && !localResultKeys.has(`${r.workId}|${r.studentCode}`))
+        .filter(r => r.workId && r.studentCode && !localResultKeys.has(`${r.workId}|${r.studentCode}|${r.scanNo || 1}`))
         .map(r => ({
           workId: r.workId, studentCode: r.studentCode,
           answers: Array.isArray(r.answers) ? r.answers : [],
           correctCount: r.correctCount || 0, totalCount: r.totalCount || 0,
           score: r.score || 0, grade: r.grade || "",
           scannedAt: r.scannedAt || new Date().toISOString(),
+          scanNo: r.scanNo || 1,
         }));
 
       // Материалы — восстанавливаем как элементы каталога (без файлов) по id
@@ -1347,6 +1356,7 @@ export const appStore = {
       topic: w.topic,
       generatedByAi: w.generatedByAi,
       optionsCount: w.optionsCount,
+      gradeScale: w.gradeScale,
     }));
     try {
       const { teacherDataApi } = await import("@/lib/api");

@@ -24,11 +24,18 @@ export function ResultsSection() {
     return matchSearch && matchWork;
   });
 
-  const avg = filtered.length > 0
-    ? Math.round(filtered.reduce((a, r) => a + r.score, 0) / filtered.length)
+  const key = (r: { workId: string; studentCode: string }) => `${r.workId}|${r.studentCode}`;
+  const lastScan = new Map<string, number>();
+  results.forEach(r => lastScan.set(key(r), Math.max(lastScan.get(key(r)) || 1, r.scanNo || 1)));
+  const isLatest = (r: { workId: string; studentCode: string; scanNo?: number }) =>
+    (r.scanNo || 1) === lastScan.get(key(r));
+  const current = filtered.filter(isLatest);
+
+  const avg = current.length > 0
+    ? Math.round(current.reduce((a, r) => a + r.score, 0) / current.length)
     : 0;
-  const maxScore = filtered.length > 0 ? Math.max(...filtered.map(r => r.score)) : 0;
-  const grade5 = filtered.filter(r => r.grade === "5").length;
+  const maxScore = current.length > 0 ? Math.max(...current.map(r => r.score)) : 0;
+  const grade5 = current.filter(r => r.grade === "5").length;
 
   if (results.length === 0) {
     return (
@@ -47,7 +54,7 @@ export function ResultsSection() {
       {/* Stats */}
       <div className="grid grid-cols-4 gap-4">
         {[
-          { label: "Всего результатов", value: results.length, icon: "Users" },
+          { label: "Проверено работ", value: results.filter(isLatest).length, icon: "Users" },
           { label: "Средний балл", value: avg, icon: "TrendingUp" },
           { label: "Максимальный балл", value: maxScore, icon: "Award" },
           { label: "Оценок «5»", value: grade5, icon: "Star" },
@@ -98,15 +105,25 @@ export function ResultsSection() {
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {filtered.map((r, i) => {
+            {[...filtered].sort((a, b) => b.scannedAt.localeCompare(a.scannedAt)).map((r, i) => {
               const student = students.find(s => s.code === r.studentCode);
               const work = works.find(w => w.id === r.workId);
+              const rescan = (r.scanNo || 1) > 1;
+              const outdated = !isLatest(r);
               return (
-                <tr key={`${r.workId}-${r.studentCode}`} className="table-row-hover bg-white">
+                <tr key={`${r.workId}-${r.studentCode}-${r.scanNo || 1}`}
+                  className={`table-row-hover ${outdated ? "bg-muted/30 opacity-70" : "bg-white"}`}>
                   <td className="px-4 py-3 text-xs text-muted-foreground mono">{String(i + 1).padStart(2, "0")}</td>
                   <td className="px-4 py-3 text-sm font-medium">
                     {student?.name ?? <span className="text-muted-foreground italic">Неизвестен</span>}
                     {student && <span className="text-xs text-muted-foreground ml-1">{student.classNum}{student.classLetter}</span>}
+                    {rescan && (
+                      <span title="Эта работа этого ученика сканировалась повторно"
+                        className="ml-2 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm bg-amber-100 text-amber-800 text-[10px] font-semibold align-middle">
+                        <Icon name="RefreshCw" size={10} />
+                        {outdated ? `повторно №${r.scanNo}, старый` : `повторно №${r.scanNo}`}
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-3 mono text-xs font-bold text-muted-foreground">{r.studentCode}</td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">
